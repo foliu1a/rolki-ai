@@ -1,0 +1,10 @@
+# Sekrety - NIGDY nie commitowac
+klucze.py
+
+# Dane robocze / prywatne
+modelki/
+__pycache__/
+*.pyc
+
+# Kopie zapasowe
+*.kopia*

@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rolki-ai</title>
+<style>
+  :root{
+    --tlo:#0d1017; --karta:#161b26; --karta2:#1d2433; --linia:#2a3347;
+    --tekst:#e8ecf4; --szary:#8b96ab; --akcent:#7c5cff; --akcent2:#b18cff;
+    --ok:#3ddc84; --uwaga:#ffb454; --zle:#ff5c7a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--tlo);color:var(--tekst);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+  a{color:var(--akcent2)}
+  header{position:sticky;top:0;z-index:10;background:linear-gradient(135deg,#151a28,#1a1530);
+    border-bottom:1px solid var(--linia);padding:14px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:20px;background:linear-gradient(90deg,var(--akcent),var(--akcent2));
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.5px}
+  .stat{font-size:12.5px;color:var(--szary)}
+  .stat b{color:var(--tekst)}
+  select,input,textarea,button{font:inherit;color:var(--tekst);background:var(--karta2);
+    border:1px solid var(--linia);border-radius:9px;padding:8px 11px;outline:none}
+  select:focus,input:focus,textarea:focus{border-color:var(--akcent)}
+  textarea{width:100%;resize:vertical;min-height:70px}
+  button{cursor:pointer;transition:.15s;border:none;background:var(--karta2)}
+  button:hover{filter:brightness(1.2)}
+  button.glowny{background:linear-gradient(90deg,var(--akcent),#9d6bff);font-weight:600}
+  button.maly{padding:4px 10px;font-size:12.5px;border-radius:7px}
+  button.zly{background:#3a1d29;color:var(--zle)}
+  main{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:18px;
+    grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  .karta{background:var(--karta);border:1px solid var(--linia);border-radius:14px;padding:18px;
+    display:flex;flex-direction:column;gap:12px}
+  .karta.szeroka{grid-column:1/-1}
+  .karta h2{font-size:15px;text-transform:uppercase;letter-spacing:1.2px;color:var(--akcent2)}
+  .rzad{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .rzad input{flex:1;min-width:120px}
+  .pomysl{background:var(--karta2);border:1px solid var(--linia);border-radius:10px;padding:10px 12px;
+    display:flex;flex-direction:column;gap:6px}
+  .pomysl .gora{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+  .pomysl .prompt{font-size:12px;color:var(--szary);word-break:break-word}
+  .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap}
+  .badge.nowy{background:#233052;color:#7aa5ff}
+  .badge.wygenerowany{background:#3a2f18;color:var(--uwaga)}
+  .badge.postprodukcja{background:#2f2347;color:var(--akcent2)}
+  .badge.gotowe{background:#173225;color:var(--ok)}
+  .szablon{background:var(--karta2);border:1px solid var(--linia);border-radius:10px;padding:10px 12px}
+  .szablon .tresc{font-size:12.5px;color:var(--szary);margin-top:4px;word-break:break-word}
+  .ph-pola{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .wynik-tekst{background:var(--karta2);border:1px dashed var(--akcent);border-radius:10px;
+    padding:14px;font-size:15px;white-space:pre-wrap;word-break:break-word}
+  .pasek{height:10px;background:var(--karta2);border-radius:6px;overflow:hidden}
+  .pasek>div{height:100%;background:linear-gradient(90deg,var(--akcent),var(--akcent2));
+    width:0;transition:width .4s}
+  .info{font-size:12.5px;color:var(--szary)}
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--karta2);border:1px solid var(--akcent);
+    border-radius:10px;padding:12px 18px;opacity:0;transition:.3s;pointer-events:none;max-width:340px}
+  .toast.pokaz{opacity:1}
+  .toast.blad{border-color:var(--zle);color:var(--zle)}
+  .pusto{color:var(--szary);font-size:13px;font-style:italic}
+  dialog{background:var(--karta);color:var(--tekst);border:1px solid var(--linia);border-radius:14px;
+    padding:22px;max-width:430px;width:92%}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+  dialog .rzad{margin-top:10px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>rolki-ai</h1>
+  <select id="wybor-modelki" onchange="zmienModelke(this.value)"></select>
+  <button class="maly" onclick="dlgModelka.showModal()">+ nowa modelka</button>
+  <span class="stat" id="stat-pomysly"></span>
+  <span class="stat" id="stat-teksty"></span>
+  <span class="stat" id="stat-ig"></span>
+</header>
+
+<main id="panel" style="display:none">
+
+  <section class="karta szeroka">
+    <h2>Pomysly na rolki</h2>
+    <div class="rzad">
+      <input id="pomysl-opis" placeholder="Opis pomyslu, np. spacer stare miasto golden hour">
+      <button class="glowny" onclick="dodajPomysl()">Dodaj</button>
+    </div>
+    <div class="rzad">
+      <select id="pomysl-szablon" onchange="wybranoSzablon()"><option value="">bez szablonu</option></select>
+      <input id="pomysl-prompt" placeholder="Prompt do Higgsfield (opcjonalny)">
+    </div>
+    <div class="ph-pola" id="ph-pola"></div>
+    <div id="lista-pomyslow" style="display:flex;flex-direction:column;gap:8px"></div>
+  </section>
+
+  <section class="karta">
+    <h2>Szablony promptow</h2>
+    <input id="szablon-nazwa" placeholder="Nazwa, np. spacer">
+    <textarea id="szablon-tresc" placeholder="noemi w {ubior}, {scena}, golden hour, cinematic, 9:16"></textarea>
+    <button class="glowny" onclick="dodajSzablon()">Zapisz szablon</button>
+    <div id="lista-szablonow" style="display:flex;flex-direction:column;gap:8px"></div>
+  </section>
+
+  <section class="karta">
+    <h2>Bank tekstow</h2>
+    <textarea id="teksty-pole" placeholder="Wklej podpisy z IG - jeden na linie (albo bloki oddzielone linia ---)"></textarea>
+    <div class="rzad">
+      <input id="teksty-zrodlo" placeholder="Zrodlo (np. @uroczanoemi)">
+      <button class="glowny" onclick="dodajTeksty()">Dodaj do banku</button>
+    </div>
+    <button onclick="losujTekst()">Losuj nieuzyty tekst</button>
+    <div id="wylosowany" class="wynik-tekst" style="display:none"></div>
+    <div class="info" id="teksty-info"></div>
+  </section>
+
+  <section class="karta">
+    <h2>Postprodukcja (VideoRemixer)</h2>
+    <input id="pp-plik" placeholder="Sciezka do pliku .mp4 (po faceswapie)">
+    <div class="rzad">
+      <input id="pp-liczba" type="number" value="10" min="1" max="500" style="max-width:90px">
+      <span class="info">wariantow</span>
+      <select id="pp-pomysl"><option value="">nie wiaz z pomyslem</option></select>
+    </div>
+    <button class="glowny" id="pp-start" onclick="startPostprodukcji()">Generuj warianty</button>
+    <div class="pasek" id="pp-pasek-tlo" style="display:none"><div id="pp-pasek"></div></div>
+    <div class="info" id="pp-status"></div>
+  </section>
+
+  <section class="karta">
+    <h2>Profil modelki</h2>
+    <input id="prof-ig" placeholder="Instagram, np. @uroczanoemi">
+    <input id="prof-styl" placeholder="Opis stylu, np. lifestyle, golden hour, elegancko">
+    <input id="prof-cechy" placeholder="Cechy po przecinku, np. blond, fitness">
+    <button class="glowny" onclick="zapiszProfil()">Zapisz profil</button>
+  </section>
+
+</main>
+
+<div style="text-align:center;padding:40px" id="brak-modelki">
+  <p class="pusto">Brak modelki - utworz pierwsza przyciskiem "+ nowa modelka" u gory.</p>
+</div>
+
+<dialog id="dlgModelka">
+  <h2 style="margin-bottom:6px">Nowa modelka</h2>
+  <div class="rzad"><input id="nm-nazwa" placeholder="Nazwa, np. noemi"></div>
+  <div class="rzad"><input id="nm-ig" placeholder="Instagram (opcjonalnie)"></div>
+  <div class="rzad">
+    <button class="glowny" onclick="nowaModelka()">Utworz</button>
+    <button onclick="dlgModelka.close()">Anuluj</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let szablony = [], pomysly = [];
+
+function toast(msg, blad=false){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast pokaz' + (blad ? ' blad' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=> t.className='toast', 3200);
+}
+
+async function api(url, metoda='GET', dane=null){
+  const opcje = {method: metoda, headers:{'Content-Type':'application/json'}};
+  if(dane) opcje.body = JSON.stringify(dane);
+  const odp = await fetch(url, opcje);
+  const json = await odp.json();
+  if(!json.ok) throw new Error(json.blad || 'Nieznany blad');
+  return json;
+}
+
+async function odswiez(){
+  try{
+    const s = await api('/api/stan');
+    const sel = $('wybor-modelki');
+    sel.innerHTML = s.modelki.map(m=>`<option ${m===s.aktywna?'selected':''}>${m}</option>`).join('');
+    const jest = !!s.aktywna;
+    $('panel').style.display = jest ? '' : 'none';
+    $('brak-modelki').style.display = jest ? 'none' : '';
+    if(!jest) return;
+    const st = s.statystyki_pomyslow;
+    $('stat-pomysly').innerHTML = `pomysly: <b>${st.nowy}</b> nowe, <b>${st.wygenerowany}</b> wygen., <b>${st.gotowe}</b> gotowe`;
+    $('stat-teksty').innerHTML = `teksty: <b>${s.teksty_nieuzyte}</b>/${s.teksty_wszystkie} nieuzyte`;
+    $('stat-ig').textContent = s.profil.instagram || '';
+    $('prof-ig').value = s.profil.instagram || '';
+    $('prof-styl').value = s.profil.opis_stylu || '';
+    $('prof-cechy').value = (s.profil.cechy||[]).join(', ');
+    await Promise.all([odswiezPomysly(), odswiezSzablony()]);
+  }catch(e){ toast(e.message, true); }
+}
+
+async function odswiezPomysly(){
+  const d = await api('/api/pomysly');
+  pomysly = d.pomysly;
+  $('lista-pomyslow').innerHTML = pomysly.length ? pomysly.map(p=>`
+    <div class="pomysl">
+      <div class="gora">
+        <span><b>#${p.id}</b> ${p.opis}</span>
+        <span class="badge ${p.status}">${p.status}</span>
+      </div>
+      ${p.prompt_higgsfield ? `<div class="prompt">${p.prompt_higgsfield}</div>` : ''}
+      ${p.plik_wynikowy ? `<div class="prompt">wyniki: ${p.plik_wynikowy}</div>` : ''}
+      <div class="rzad">
+        ${d.statusy.filter(x=>x!==p.status).map(x=>
+          `<button class="maly" onclick="zmienStatus(${p.id},'${x}')">${x}</button>`).join('')}
+        <button class="maly zly" onclick="usunPomysl(${p.id})">usun</button>
+      </div>
+    </div>`).join('') : '<p class="pusto">Brak pomyslow - dodaj pierwszy powyzej.</p>';
+  const sel = $('pp-pomysl');
+  const otwarte = pomysly.filter(p=>['wygenerowany','postprodukcja'].includes(p.status));
+  sel.innerHTML = '<option value="">nie wiaz z pomyslem</option>' +
+    otwarte.map(p=>`<option value="${p.id}">#${p.id} ${p.opis}</option>`).join('');
+}
+
+async function odswiezSzablony(){
+  const d = await api('/api/szablony');
+  szablony = d.szablony;
+  $('lista-szablonow').innerHTML = szablony.length ? szablony.map(s=>`
+    <div class="szablon">
+      <div class="gora" style="display:flex;justify-content:space-between;gap:8px">
+        <b>${s.nazwa}</b>
+        <button class="maly zly" onclick="usunSzablon('${s.nazwa}')">usun</button>
+      </div>
+      <div class="tresc">${s.tresc}</div>
+    </div>`).join('') : '<p class="pusto">Brak szablonow.</p>';
+  const sel = $('pomysl-szablon');
+  sel.innerHTML = '<option value="">bez szablonu</option>' +
+    szablony.map((s,i)=>`<option value="${i}">${s.nazwa}</option>`).join('');
+  $('ph-pola').innerHTML = '';
+}
+
+function wybranoSzablon(){
+  const i = $('pomysl-szablon').value;
+  const pola = $('ph-pola');
+  if(i === ''){ pola.innerHTML=''; $('pomysl-prompt').value=''; return; }
+  const s = szablony[+i];
+  pola.innerHTML = s.placeholdery.map(ph=>
+    `<input data-ph="${ph}" placeholder="${ph}" oninput="przeliczPrompt()">`).join('');
+  przeliczPrompt();
+}
+
+function przeliczPrompt(){
+  const i = $('pomysl-szablon').value;
+  if(i === '') return;
+  let tresc = szablony[+i].tresc;
+  document.querySelectorAll('#ph-pola input').forEach(inp=>{
+    if(inp.value.trim()) tresc = tresc.split('{'+inp.dataset.ph+'}').join(inp.value.trim());
+  });
+  $('pomysl-prompt').value = tresc;
+}
+
+async function nowaModelka(){
+  try{
+    await api('/api/modelki','POST',{nazwa:$('nm-nazwa').value, instagram:$('nm-ig').value});
+    dlgModelka.close(); $('nm-nazwa').value=''; $('nm-ig').value='';
+    toast('Utworzono modelke'); odswiez();
+  }catch(e){ toast(e.message, true); }
+}
+
+async function zmienModelke(slug){
+  try{ await api('/api/modelki/aktywna','POST',{slug}); odswiez(); }
+  catch(e){ toast(e.message, true); }
+}
+
+async function dodajPomysl(){
+  try{
+    await api('/api/pomysly','POST',{opis:$('pomysl-opis').value, prompt:$('pomysl-prompt').value});
+    $('pomysl-opis').value=''; $('pomysl-prompt').value='';
+    $('pomysl-szablon').value=''; $('ph-pola').innerHTML='';
+    toast('Dodano pomysl'); odswiez();
+  }catch(e){ toast(e.message, true); }
+}
+
+async function zmienStatus(id, status){
+  try{ await api('/api/pomysly/'+id,'PATCH',{status}); odswiez(); }
+  catch(e){ toast(e.message, true); }
+}
+
+async function usunPomysl(id){
+  if(!confirm('Usunac pomysl #'+id+'?')) return;
+  try{ await api('/api/pomysly/'+id,'DELETE'); toast('Usunieto'); odswiez(); }
+  catch(e){ toast(e.message, true); }
+}
+
+async function dodajSzablon(){
+  try{
+    await api('/api/szablony','POST',{nazwa:$('szablon-nazwa').value, tresc:$('szablon-tresc').value});
+    $('szablon-nazwa').value=''; $('szablon-tresc').value='';
+    toast('Zapisano szablon'); odswiezSzablony();
+  }catch(e){ toast(e.message, true); }
+}
+
+async function usunSzablon(nazwa){
+  if(!confirm("Usunac szablon '"+nazwa+"'?")) return;
+  try{ await api('/api/szablony/'+encodeURIComponent(nazwa),'DELETE'); odswiezSzablony(); }
+  catch(e){ toast(e.message, true); }
+}
+
+async function dodajTeksty(){
+  try{
+    const d = await api('/api/teksty','POST',{teksty:$('teksty-pole').value, zrodlo:$('teksty-zrodlo').value});
+    $('teksty-pole').value='';
+    toast('Dodano '+d.dodano+' tekstow (duplikaty pominiete)'); odswiez();
+  }catch(e){ toast(e.message, true); }
+}
+
+async function losujTekst(){
+  try{
+    const d = await api('/api/teksty/losuj','POST');
+    const w = $('wylosowany');
+    if(d.tekst){
+      w.style.display=''; w.textContent = d.tekst;
+      $('teksty-info').textContent = `zostalo ${d.nieuzyte} nieuzytych z ${d.wszystkie}`;
+      navigator.clipboard && navigator.clipboard.writeText(d.tekst).then(()=>toast('Skopiowano do schowka')).catch(()=>{});
+    }else{
+      w.style.display='none';
+      $('teksty-info').textContent = 'Brak nieuzytych tekstow.';
+    }
+    odswiez();
+  }catch(e){ toast(e.message, true); }
+}
+
+async function zapiszProfil(){
+  try{
+    await api('/api/profil','POST',{instagram:$('prof-ig').value, opis_stylu:$('prof-styl').value, cechy:$('prof-cechy').value});
+    toast('Zapisano profil'); odswiez();
+  }catch(e){ toast(e.message, true); }
+}
+
+let ppTimer = null;
+async function startPostprodukcji(){
+  try{
+    await api('/api/postprodukcja','POST',{
+      plik: $('pp-plik').value, liczba: $('pp-liczba').value, pomysl_id: $('pp-pomysl').value || null
+    });
+    $('pp-start').disabled = true;
+    $('pp-pasek-tlo').style.display='';
+    ppTimer = setInterval(sprawdzPostprodukcje, 1200);
+  }catch(e){ toast(e.message, true); }
+}
+
+async function sprawdzPostprodukcje(){
+  const d = await api('/api/postprodukcja/status');
+  $('pp-pasek').style.width = d.procent + '%';
+  $('pp-status').textContent = d.blad ? ('BLAD: '+d.blad) : (d.komunikat + ' ('+d.procent+'%)');
+  if(!d.trwa){
+    clearInterval(ppTimer);
+    $('pp-start').disabled = false;
+    if(d.wynik) toast('Gotowe: '+d.wynik.liczba+' plikow w '+d.wynik.folder);
+    if(d.blad) toast(d.blad, true);
+    odswiez();
+  }
+}
+
+odswiez();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# -*- coding: utf-8 -*-
+# Skopiuj ten plik jako klucze.py i uzupelnij. klucze.py jest w .gitignore.
+
+# Klucz API Higgsfield (z panelu konta / ustawien API na higgsfield.ai)
+HIGGSFIELD_API_KEY = ""
+
+# Adres bazowy API - uzupelnij zgodnie z dokumentacja Twojego konta/planu
+HIGGSFIELD_BASE_URL = ""
+
+# Sciezki endpointow (wzgledem BASE_URL) - rozne konta/plany moga miec inne.
+HIGGSFIELD_GENERATE_PATH = "/v1/generations"
+HIGGSFIELD_STATUS_PATH = "/v1/generations/{job_id}"
+
+# Naglowek autoryzacji - najczesciej "Authorization: Bearer <klucz>",
+# ale niektore API uzywaja wlasnego naglowka (np. "X-API-Key").
+HIGGSFIELD_AUTH_HEADER = "Authorization"
+HIGGSFIELD_AUTH_PREFIX = "Bearer "
