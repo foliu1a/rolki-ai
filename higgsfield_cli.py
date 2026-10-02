@@ -88,8 +88,8 @@ def _uruchom(args, timeout=TIMEOUT_KROTKI, json_out=True):
             )
         if re.search(r"no workspace selected", tekst, re.I):
             raise NieZalogowany(
-                "CLI Higgsfield nie ma wybranego workspace (zwykle = niezalogowane). "
-                "Odpal: higgsfield auth login, a przy kilku workspace'ach: higgsfield workspace list"
+                "CLI Higgsfield nie ma wybranego workspace. Po `auth login` odpal: "
+                "higgsfield workspace list, potem higgsfield workspace set <id>"
             )
         raise HiggsfieldBlad(tekst or f"CLI zwrocilo kod {proc.returncode}")
 
@@ -337,6 +337,16 @@ def pobierz(url, sciezka):
     with urllib.request.urlopen(req, timeout=600) as odp, open(sciezka, "wb") as f:
         shutil.copyfileobj(odp, f)
     return sciezka
+
+
+# ---------------- upload (zeby nie slac tych samych referencji przy kazdym jobie) ----------------
+
+def upload(plik):
+    """Wgrywa plik, zwraca {"id", "type", "url"}. UUID mozna podac zamiast sciezki w media flagach."""
+    dane = _uruchom(["upload", "create", os.path.abspath(plik)], timeout=TIMEOUT_UPLOAD)
+    if not isinstance(dane, dict) or not dane.get("id"):
+        raise HiggsfieldBlad(f"upload create nie zwrocil id: {dane}")
+    return dane
 
 
 # ---------------- Soul ID ----------------
