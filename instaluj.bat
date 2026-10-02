@@ -1,14 +1,19 @@
 @echo off
-echo [1/3] Biblioteki Pythona dla panelu...
-python -m pip install flask requests
+cd /d "%~dp0"
+echo [1/4] Biblioteki Pythona dla panelu...
+python -m pip install flask pytest
 echo.
-echo [2/3] CLI Higgsfield (wymaga Node.js / npm)...
+echo [2/4] CLI Higgsfield (wymaga Node.js / npm)...
 call npm install -g --allow-scripts=@higgsfield/cli @higgsfield/cli
 echo.
-echo [3/3] Skille Higgsfield dla Claude Code (opcjonalne)...
+echo [3/4] Skille Higgsfield dla Claude Code (opcjonalne)...
 call npx -y skills add higgsfield-ai/skills -g -a claude-code -s higgsfield-generate -s higgsfield-soul-id -y --copy
 echo.
-echo Gotowe. Teraz zaloguj CLI (otworzy sie przegladarka):
-echo     higgsfield auth login
-echo Panel odpalasz przez: panel.bat     Fabryka: python fabryka.py status
+echo [4/4] Szybki test kodu (bez kredytow)...
+python -m pytest -q
+echo.
+echo Gotowe. Teraz zaloguj CLI Higgsfield (otworzy sie przegladarka):
+echo     zaloguj-higgsfield.bat
+echo Klucze yapper.so / sync.so wpiszesz w panelu (zakladka Konta).
+echo Panel: panel.bat     Autopilot bez panelu: autopilot.bat     Widget: widget.bat
 pause

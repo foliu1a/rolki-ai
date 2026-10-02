@@ -9,3 +9,6 @@ __pycache__/
 # Kopie zapasowe
 *.kopia*
 .pytest_cache/
+klucze.json
+dziennik.jsonl*
+uploady_yapper.json

@@ -343,10 +343,13 @@ def test_completed_bez_url_nie_powtarza(bez_mediatool, cli, monkeypatch):
         cli.saldo -= 45
         return {"id": "jobX", "status": "completed", "result": {}}
     monkeypatch.setattr(higgsfield_cli, "generuj", completed_bez_url)
+    odpytania = []
+    monkeypatch.setattr(higgsfield_cli, "job", lambda jid: odpytania.append(jid) or {"id": jid, "status": "completed", "result_url": None})
     _wrzuc(bez_mediatool, "a.mp4")
     fabryka.main(["skanuj"])
     fabryka.main(["generuj", "--tak"])
-    assert len(cli.generacje) == 1
+    assert len(cli.generacje) == 1          # zadnej powtorki (spalilaby kredyty)
+    assert len(odpytania) == 5              # tylko darmowe `generate get`
     p = baza.pomysl(bez_mediatool, 1)
     assert p["status"] == "blad" and p["job_id"] == "jobX" and p["koszt"] == 45
     assert baza.wydano_dzis() == 45
@@ -373,3 +376,29 @@ def test_podpis(modelka):
     assert fabryka.main(["podpis", str(pid)]) == 0
     with open(os.path.join(baza.folder_wynikow(modelka), "001_podpis.txt"), encoding="utf-8") as f:
         assert f.read() == "hej ✨\n"
+
+
+def test_completed_bez_url_doczytuje_generate_get(bez_mediatool, cli, monkeypatch):
+    """Job completed z result_url=null: fabryka doczytuje `generate get` (0 kr) i konczy bez powtorki."""
+    def completed_bez_url(model, params=None, media=None, **k):
+        cli.generacje.append(model)
+        cli.saldo -= 45
+        return {"id": "jobX", "status": "completed", "result_url": None, "min_result_url": None}
+    monkeypatch.setattr(higgsfield_cli, "generuj", completed_bez_url)
+    monkeypatch.setattr(higgsfield_cli, "job", lambda jid: {"id": jid, "status": "completed", "result_url": "https://cdn/late.mp4"})
+    _wrzuc(bez_mediatool, "a.mp4")
+    fabryka.main(["skanuj"])
+    fabryka.main(["generuj", "--tak"])
+    assert len(cli.generacje) == 1
+    p = baza.pomysl(bez_mediatool, 1)
+    assert p["status"] == "gotowe" and p["wynik_url"] == "https://cdn/late.mp4" and p["koszt"] == 45
+
+
+def test_zdjecia_soul_zamiast_referencji(modelka, cli):
+    import zdjecia
+    baza.zapisz_ustawienia(modelka, zdjecia_model="text2image_soul_v2", soul_id="soul-123")
+    z = zdjecia.zlecenie(modelka, "portret")
+    assert z["images"] == [] and z["soul_id"] == "soul-123"
+    baza.zapisz_ustawienia(modelka, zdjecia_model="nano_banana_2")
+    z = zdjecia.zlecenie(modelka, "portret")
+    assert len(z["images"]) == 2 and z["soul_id"] == ""

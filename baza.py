@@ -38,11 +38,39 @@ USTAWIENIA_DOMYSLNE = {
     "mediatool": True,              # po generacji przepusc wideo przez Media Tool (iPhone meta, GPS, spoof)
     "warianty": 0,                  # ile wariantow VideoRemixer po generacji (0 = pomin)
     "dodatkowe_parametry": {},      # cokolwiek ekstra dla CLI, np. {"seed": 42}
+    # --- dostawca wideo ---
+    "dostawca": "higgsfield",       # kto generuje rolki: higgsfield (Seedance, CLI) | yapper (Wan, API)
+    "mode_bez_zrodla": "",          # tryb dla pomyslow BEZ filmiku (sam prompt + referencje), np. omni_reference; "" = pomijaj
+    "yapper": {"model": "", "resolution": "720p", "duration": 5, "prompt": "", "parametry": {},   # ustawienia yapper.so (model Wan itd.)
+               "min_kredyty": 0, "max_kredyty_na_rolke": 1000},   # bezpiecznik w kredytach yapper (inna skala niz Higgsfield!)
+    # --- autopilot (panel / autopilot.py) ---
+    "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
+    "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
+    "autopilot_max_rolek_dziennie": 10,   # bezpiecznik ilosciowy (oprocz limitu kredytow)
+    # --- zdjecia persony ---
+    "zdjecia_model": "",            # job_type modelu obrazu z `model list --image` (wybor w panelu), "" = wylaczone
+    "zdjecia_dziennie": 0,          # ile zdjec dziennie robi autopilot (0 = tylko recznie z panelu)
+    "zdjecia_prompty": "prompty/zdjecia.txt",   # jedna linia = jeden prompt; autopilot bierze po kolei (w kolko)
+    "zdjecia_parametry": {},        # parametry modelu obrazu, np. {"aspect_ratio": "3:4"}
+    "zdjecia_dir": "",              # gotowe zdjecia poza projektem ("" = modelki/<slug>/zdjecia)
+    # --- lipsync ---
+    "lipsync_dostawca": "sync",     # sync (sync.so API) | higgsfield (model lipsync z CLI)
+    "lipsync_model": "lipsync-2",   # model sync.so albo job_type modelu Higgsfield
+    "lipsync_auto": True,           # po generacji: jesli obok zrodla lezy <nazwa>.audio.mp3 -> zrob lipsync
+    "lipsync_parametry": {},        # np. {"sync_mode": "loop"}
+    "tts_model": "",                # job_type modelu text-to-speech Higgsfield (z `model list --audio`), "" = brak
+    "tts_glos": "",                 # voice id z `higgsfield voices list`
+    "tts_glos_typ": "preset",       # preset (wbudowany) | element (sklonowany)
 }
 
 # Budzet wspolny dla wszystkich modelek (kredyty sa jedne na konto): rolki-ai/budzet.json
+# `max_kredyty_dziennie` + `wydatki` = Higgsfield (kompatybilne wstecz); inni dostawcy w `dostawcy`.
 PLIK_BUDZETU = os.path.join(os.path.dirname(PLIK_STANU), "budzet.json")
-BUDZET_DOMYSLNY = {"max_kredyty_dziennie": 300, "wydatki": {}}
+BUDZET_DOMYSLNY = {"max_kredyty_dziennie": 300, "wydatki": {}, "dostawcy": {}}
+DOSTAWCA_GLOWNY = "higgsfield"
+
+# Dziennik zdarzen (panel pokazuje ostatnie wpisy): rolki-ai/dziennik.jsonl
+PLIK_DZIENNIKA = os.path.join(os.path.dirname(PLIK_STANU), "dziennik.jsonl")
 
 
 def _teraz():
@@ -90,6 +118,8 @@ def utworz_modelke(nazwa):
     os.makedirs(os.path.join(folder, "referencje"), exist_ok=True)
     os.makedirs(os.path.join(folder, "stroje"), exist_ok=True)
     os.makedirs(os.path.join(folder, "prompty"), exist_ok=True)
+    os.makedirs(os.path.join(folder, "audio"), exist_ok=True)
+    os.makedirs(os.path.join(folder, "zdjecia"), exist_ok=True)
     _zapisz_json(os.path.join(folder, "ustawienia.json"), copy.deepcopy(USTAWIENIA_DOMYSLNE))
     _zapisz_json(os.path.join(folder, "pomysly.json"), [])
     _zapisz_json(os.path.join(folder, "teksty.json"), [])
@@ -160,7 +190,12 @@ def zapisz_ustawienia(slug, **pola):
         raise ValueError(f"Nieznane ustawienia: {', '.join(nieznane)}. "
                          f"Dozwolone: {', '.join(USTAWIENIA_DOMYSLNE)}")
     dane = ustawienia_modelki(slug)
-    dane.update(pola)
+    for k, v in pola.items():
+        # slowniki (yapper, zdjecia_parametry...) scalamy, zeby panel mogl zmienic jedno pole
+        if isinstance(USTAWIENIA_DOMYSLNE[k], dict) and isinstance(v, dict) and isinstance(dane.get(k), dict):
+            dane[k] = {**dane[k], **v}
+        else:
+            dane[k] = v
     _zapisz_json(_plik_ustawien(slug), dane)
     return dane
 
@@ -243,6 +278,7 @@ def budzet():
     dane = copy.deepcopy(BUDZET_DOMYSLNY)   # gleboka kopia: inaczej dopisz_wydatek zmienialby domyslne "wydatki"
     dane.update(_wczytaj_json(PLIK_BUDZETU, {}))
     dane.setdefault("wydatki", {})
+    dane.setdefault("dostawcy", {})
     return dane
 
 
@@ -253,23 +289,90 @@ def zapisz_budzet(**pola):
     return dane
 
 
-def wydano_dzis():
-    return int(budzet()["wydatki"].get(datetime.now().strftime("%Y-%m-%d"), 0))
+def _dzis():
+    return datetime.now().strftime("%Y-%m-%d")
 
 
-def dopisz_wydatek(kredyty):
+def _konto_budzetu(dane, dostawca):
+    """Slownik {max_kredyty_dziennie, wydatki} dla dostawcy (Higgsfield = korzen pliku)."""
+    if dostawca in (None, "", DOSTAWCA_GLOWNY):
+        return dane
+    return dane["dostawcy"].setdefault(dostawca, {"max_kredyty_dziennie": 0, "wydatki": {}})
+
+
+def limit_dzienny(dostawca=DOSTAWCA_GLOWNY):
+    """Limit kredytow na dzien dla dostawcy (0 = bez limitu)."""
+    return int(_konto_budzetu(budzet(), dostawca).get("max_kredyty_dziennie") or 0)
+
+
+def zapisz_limit_dzienny(kredyty, dostawca=DOSTAWCA_GLOWNY):
+    dane = budzet()
+    _konto_budzetu(dane, dostawca)["max_kredyty_dziennie"] = int(kredyty)
+    _zapisz_json(PLIK_BUDZETU, dane)
+    return dane
+
+
+def wydano_dzis(dostawca=DOSTAWCA_GLOWNY):
+    konto = _konto_budzetu(budzet(), dostawca)
+    return int((konto.get("wydatki") or {}).get(_dzis(), 0))
+
+
+def dopisz_wydatek(kredyty, dostawca=DOSTAWCA_GLOWNY):
     """Dopisuje faktycznie zuzyte kredyty do dzisiejszego dnia (ujemne/zero ignorowane)."""
     kredyty = int(kredyty)
     if kredyty <= 0:
-        return wydano_dzis()
+        return wydano_dzis(dostawca)
     dane = budzet()
-    dzis = datetime.now().strftime("%Y-%m-%d")
-    dane["wydatki"][dzis] = int(dane["wydatki"].get(dzis, 0)) + kredyty
+    konto = _konto_budzetu(dane, dostawca)
+    wydatki = konto.setdefault("wydatki", {})
+    dzis = _dzis()
+    wydatki[dzis] = int(wydatki.get(dzis, 0)) + kredyty
     # trzymaj tylko ostatnie 60 dni
-    for k in sorted(dane["wydatki"])[:-60]:
-        dane["wydatki"].pop(k, None)
+    for k in sorted(wydatki)[:-60]:
+        wydatki.pop(k, None)
     _zapisz_json(PLIK_BUDZETU, dane)
-    return dane["wydatki"][dzis]
+    return wydatki[dzis]
+
+
+# ---------------- dziennik zdarzen ----------------
+
+def dziennik_zapisz(typ, tekst, modelka=None, **dane):
+    """Dopisuje wpis do dziennik.jsonl (typ: info|ok|uwaga|blad|kredyty). Zwraca wpis."""
+    wpis = {"czas": _teraz(), "typ": typ, "modelka": modelka, "tekst": str(tekst)}
+    if dane:
+        wpis["dane"] = dane
+    os.makedirs(os.path.dirname(PLIK_DZIENNIKA), exist_ok=True)
+    try:
+        if os.path.isfile(PLIK_DZIENNIKA) and os.path.getsize(PLIK_DZIENNIKA) > 5 * 1024 * 1024:
+            os.replace(PLIK_DZIENNIKA, PLIK_DZIENNIKA + ".1")
+    except OSError:
+        pass
+    with open(PLIK_DZIENNIKA, "a", encoding="utf-8") as f:
+        f.write(json.dumps(wpis, ensure_ascii=False) + "\n")
+    return wpis
+
+
+def dziennik_ostatnie(ile=200, modelka=None, typ=None):
+    """Ostatnie `ile` wpisow (najnowszy na koncu), opcjonalnie tylko dla modelki / typu."""
+    if not os.path.isfile(PLIK_DZIENNIKA):
+        return []
+    with open(PLIK_DZIENNIKA, encoding="utf-8") as f:
+        linie = f.readlines()[-max(ile * 4, ile):]
+    wynik = []
+    for linia in linie:
+        linia = linia.strip()
+        if not linia:
+            continue
+        try:
+            w = json.loads(linia)
+        except json.JSONDecodeError:
+            continue
+        if modelka and w.get("modelka") not in (None, modelka):
+            continue
+        if typ and w.get("typ") != typ:
+            continue
+        wynik.append(w)
+    return wynik[-ile:]
 
 
 def folder_referencji(slug):
@@ -283,6 +386,43 @@ def folder_wynikow(slug):
     folder = os.path.join(folder_modelki(slug), "wyniki")
     os.makedirs(folder, exist_ok=True)
     return folder
+
+
+def folder_zdjec(slug):
+    """Gotowe zdjecia persony: zdjecia_dir albo modelki/<slug>/zdjecia."""
+    folder = (ustawienia_modelki(slug).get("zdjecia_dir") or "").strip() or os.path.join(folder_modelki(slug), "zdjecia")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def folder_audio(slug):
+    """Pliki glosu do lipsyncu (mp3/wav) - user wrzuca tu albo obok filmiku jako <nazwa>.audio.mp3."""
+    folder = os.path.join(folder_modelki(slug), "audio")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+ROZSZERZENIA_AUDIO = (".mp3", ".wav", ".m4a", ".aac", ".ogg")
+ROZSZERZENIA_OBRAZU = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def pliki_audio(slug):
+    folder = folder_audio(slug)
+    return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.lower().endswith(ROZSZERZENIA_AUDIO)]
+
+
+def audio_dla_zrodla(zrodlo):
+    """Plik glosu sparowany z klipem: <nazwa>.audio.<ext> albo <nazwa>_audio.<ext> obok filmiku, albo None."""
+    if not zrodlo:
+        return None
+    folder, plik = os.path.split(zrodlo)
+    stem = os.path.splitext(plik)[0]
+    for wzor in (f"{stem}.audio", f"{stem}_audio"):
+        for ext in ROZSZERZENIA_AUDIO:
+            p = os.path.join(folder, wzor + ext)
+            if os.path.isfile(p):
+                return p
+    return None
 
 
 def _plik_uploadow(slug):
@@ -429,6 +569,9 @@ def dodaj_pomysl(slug, opis, prompt_higgsfield="", zrodlo=None, klatki=None, inf
         "wynik_url": None,
         "job_id": None,
         "koszt": None,
+        "dostawca": None,          # kto wygenerowal (higgsfield | yapper)
+        "audio": audio_dla_zrodla(zrodlo),   # glos do lipsyncu sparowany z klipem (albo None)
+        "lipsync_plik": None,      # wynik lipsyncu (jesli byl)
         "ocena": None,
         "notatki": "",
         "utworzono": _teraz(),
@@ -436,6 +579,13 @@ def dodaj_pomysl(slug, opis, prompt_higgsfield="", zrodlo=None, klatki=None, inf
     })
     _zapisz_json(plik, pomysly)
     return nowy_id
+
+
+def pomysly_z_dnia(slug, dzien=None):
+    """Pomysly wygenerowane danego dnia (domyslnie dzis) - do limitu autopilot_max_rolek_dziennie."""
+    dzien = dzien or _dzis()
+    return [p for p in _wczytaj_json(_plik_pomyslow(slug), [])
+            if p.get("wygenerowano", "").startswith(dzien)]
 
 
 def aktualizuj_pomysl(slug, pomysl_id, **pola):
@@ -447,6 +597,8 @@ def aktualizuj_pomysl(slug, pomysl_id, **pola):
         if p["id"] == pomysl_id:
             p.update(pola)
             p["zaktualizowano"] = _teraz()
+            if pola.get("status") in ("wygenerowany", "gotowe") and not p.get("wygenerowano"):
+                p["wygenerowano"] = _teraz()
             _zapisz_json(plik, pomysly)
             return p
     raise ValueError(f"Nie ma pomyslu #{pomysl_id}.")
@@ -468,6 +620,106 @@ def statystyki_pomyslow(slug):
     for p in pomysly:
         wynik[p["status"]] = wynik.get(p["status"], 0) + 1
     return wynik
+
+
+# ---------------- zdjecia persony ----------------
+
+def _plik_zdjec(slug):
+    return os.path.join(folder_modelki(slug), "zdjecia.json")
+
+
+def lista_zdjec(slug):
+    return _wczytaj_json(_plik_zdjec(slug), [])
+
+
+def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki=""):
+    plik_json = _plik_zdjec(slug)
+    zdjecia = _wczytaj_json(plik_json, [])
+    nowy_id = (max((z["id"] for z in zdjecia), default=0)) + 1
+    zdjecia.append({"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
+                    "status": status, "notatki": notatki, "utworzono": _teraz()})
+    _zapisz_json(plik_json, zdjecia)
+    return nowy_id
+
+
+def usun_zdjecie(slug, zid):
+    plik_json = _plik_zdjec(slug)
+    zdjecia = _wczytaj_json(plik_json, [])
+    nowe = [z for z in zdjecia if z["id"] != zid]
+    if len(nowe) == len(zdjecia):
+        raise ValueError(f"Nie ma zdjecia #{zid}.")
+    _zapisz_json(plik_json, nowe)
+
+
+def zdjecia_z_dnia(slug, dzien=None):
+    dzien = dzien or _dzis()
+    return [z for z in lista_zdjec(slug) if z["status"] == "gotowe" and z.get("utworzono", "").startswith(dzien)]
+
+
+def prompty_zdjec(slug):
+    """Lista promptow zdjec z pliku zdjecia_prompty (jedna linia = jeden prompt; '#' = komentarz)."""
+    wartosc = (ustawienia_modelki(slug).get("zdjecia_prompty") or "").strip()
+    if not wartosc:
+        return []
+    sciezka = _sciezka_w_modelce(slug, wartosc)
+    if not os.path.isfile(sciezka):
+        return []
+    with open(sciezka, encoding="utf-8-sig") as f:
+        return [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
+
+
+def nastepny_prompt_zdjecia(slug):
+    """Kolejny prompt zdjecia (w kolko). Zwraca (prompt, indeks) albo (None, 0)."""
+    prompty = prompty_zdjec(slug)
+    if not prompty:
+        return None, 0
+    plik = os.path.join(folder_modelki(slug), "zdjecia_stan.json")
+    stan = _wczytaj_json(plik, {"indeks": 0})
+    i = int(stan.get("indeks", 0)) % len(prompty)
+    _zapisz_json(plik, {"indeks": i + 1})
+    return prompty[i], i
+
+
+# ---------------- lipsync ----------------
+
+def _plik_lipsync(slug):
+    return os.path.join(folder_modelki(slug), "lipsync.json")
+
+
+def lista_lipsync(slug):
+    return _wczytaj_json(_plik_lipsync(slug), [])
+
+
+def dodaj_lipsync(slug, wideo, audio, dostawca, model, pomysl_id=None):
+    plik = _plik_lipsync(slug)
+    lista = _wczytaj_json(plik, [])
+    nowy_id = (max((l["id"] for l in lista), default=0)) + 1
+    lista.append({"id": nowy_id, "wideo": wideo, "audio": audio, "dostawca": dostawca, "model": model,
+                  "pomysl_id": pomysl_id, "job_id": None, "status": "nowy", "plik_wynikowy": None,
+                  "koszt": None, "notatki": "", "utworzono": _teraz(), "zaktualizowano": _teraz()})
+    _zapisz_json(plik, lista)
+    return nowy_id
+
+
+def aktualizuj_lipsync(slug, lid, **pola):
+    plik = _plik_lipsync(slug)
+    lista = _wczytaj_json(plik, [])
+    for l in lista:
+        if l["id"] == lid:
+            l.update(pola)
+            l["zaktualizowano"] = _teraz()
+            _zapisz_json(plik, lista)
+            return l
+    raise ValueError(f"Nie ma lipsyncu #{lid}.")
+
+
+def usun_lipsync(slug, lid):
+    plik = _plik_lipsync(slug)
+    lista = _wczytaj_json(plik, [])
+    nowe = [l for l in lista if l["id"] != lid]
+    if len(nowe) == len(lista):
+        raise ValueError(f"Nie ma lipsyncu #{lid}.")
+    _zapisz_json(plik, nowe)
 
 
 # ---------------- bank tekstow ----------------

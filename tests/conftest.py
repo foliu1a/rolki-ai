@@ -9,16 +9,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import baza  # noqa: E402
 import higgsfield_cli  # noqa: E402
+import sekrety  # noqa: E402
 
 
 @pytest.fixture
 def dane(tmp_path, monkeypatch):
-    """Przekierowuje baza.py na tmp_path (modelki/, stan.json, budzet.json)."""
+    """Przekierowuje baza.py na tmp_path (modelki/, stan.json, budzet.json, dziennik, klucze)."""
     modelki = tmp_path / "modelki"
     modelki.mkdir()
     monkeypatch.setattr(baza, "KATALOG_MODELEK", str(modelki))
     monkeypatch.setattr(baza, "PLIK_STANU", str(tmp_path / "stan.json"))
     monkeypatch.setattr(baza, "PLIK_BUDZETU", str(tmp_path / "budzet.json"))
+    monkeypatch.setattr(baza, "PLIK_DZIENNIKA", str(tmp_path / "dziennik.jsonl"))
+    monkeypatch.setattr(sekrety, "PLIK_KLUCZY", str(tmp_path / "klucze.json"))
+    for env in ("YAPPER_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+    import time
+    monkeypatch.setattr(time, "sleep", lambda s: None)
     return tmp_path
 
 
