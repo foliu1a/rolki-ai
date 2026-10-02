@@ -385,13 +385,14 @@ def kandydaci(slug, ids=None, limit=None, log=None):
         lista = []
         for pid in ids:
             p = baza.pomysl(slug, int(pid))
+            # ValueError (nie SystemExit): panel i autopilot lapia to jak zwykly blad, CLI drukuje [BLAD]
             if p["status"] not in ("nowy", "blad"):
-                raise SystemExit(f"#{p['id']} ma status {p['status']} - generuje tylko nowy/blad.")
+                raise ValueError(f"#{p['id']} ma status {p['status']} - generuje tylko nowy/blad.")
             if wymaga_wideo and not p.get("zrodlo"):
-                raise SystemExit(f"#{p['id']} nie ma filmiku zrodlowego, a tryb {ust['mode']} go wymaga "
-                                 f"(wrzuc plik do zrodla/ i zrob skanuj, zmien mode albo ustaw mode_bez_zrodla).")
+                raise ValueError(f"#{p['id']} nie ma filmiku zrodlowego, a tryb {ust['mode']} go wymaga "
+                                 f"(wrzuc plik do wrzutni i zrob skanuj, zmien mode albo ustaw mode_bez_zrodla w Persona -> Generowanie).")
             if not p.get("prompt_higgsfield"):
-                raise SystemExit(f"#{p['id']} nie ma promptu.")
+                raise ValueError(f"#{p['id']} nie ma promptu.")
             lista.append(p)
         return lista
     lista, pominiete = [], []

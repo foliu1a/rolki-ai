@@ -33,9 +33,9 @@ def _parsuj(dane_bajty, naglowki):
     return tekst
 
 
-def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None):
+def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None, powtorki=POWTORKI):
     """JSON in / JSON out. `dane` (dict/list) idzie jako JSON; `surowe_cialo` (bytes) jak jest.
-    Zwraca sparsowany JSON (albo tekst). Przy 4xx/5xx rzuca BladHTTP (5xx i bledy sieci powtarzane)."""
+    Zwraca sparsowany JSON (albo tekst). Przy 4xx/5xx rzuca BladHTTP (5xx i bledy sieci powtarzane `powtorki` razy)."""
     cialo = None
     naglowki_req = {"User-Agent": UA, "Accept": "application/json"}
     naglowki_req.update(naglowki or {})
@@ -47,7 +47,8 @@ def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=No
         cialo = json.dumps(dane).encode("utf-8")
         naglowki_req["Content-Type"] = "application/json"
     ostatni = None
-    for proba in range(1, POWTORKI + 1):
+    powtorki = max(1, int(powtorki or 1))
+    for proba in range(1, powtorki + 1):
         req = urllib.request.Request(url, data=cialo, method=metoda.upper(), headers=naglowki_req)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as odp:
@@ -59,7 +60,7 @@ def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=No
                 raise ostatni
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
             ostatni = BladHTTP(0, f"blad sieci: {e}", url)
-        if proba < POWTORKI:
+        if proba < powtorki:
             time.sleep(2 ** (proba - 1))
     raise ostatni
 

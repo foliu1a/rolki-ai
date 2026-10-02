@@ -256,13 +256,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--akcent); width
 .kv dd { font-variant-numeric: tabular-nums; }
 
 /* foldery */
-.folder-wiersz { display: grid; grid-template-columns: 80px 1fr auto; gap: 10px; align-items: center; }
+.folder-wiersz { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .sciezka {
   font-family: var(--mono); font-size: 12.5px; color: var(--tekst); background: var(--tlo);
-  border: 1px solid var(--linia); border-radius: 6px; padding: 4px 8px; word-break: break-all; display: inline-block; max-width: 100%;
+  border: 1px solid var(--linia); border-radius: 6px; padding: 4px 8px; display: block; min-width: 0; width: 100%;
+  overflow-wrap: anywhere; word-break: normal; line-height: 1.45;
 }
 .lista-sciezek { display: flex; flex-direction: column; gap: 8px; }
-.lista-sciezek .folder-wiersz { grid-template-columns: 90px 1fr auto; }
+.lista-sciezek .folder-wiersz { grid-template-columns: 90px minmax(0, 1fr) auto; }
 
 /* ---------- odznaki, kropki, tagi, chipy ---------- */
 .badge {

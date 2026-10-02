@@ -53,7 +53,7 @@ class UdawanyHTTP:
                 return lista.pop(0) if len(lista) > 1 else lista[0]
         raise http.BladHTTP(404, json.dumps({"error": {"code": "not_found", "message": url}}), url)
 
-    def zapytanie(self, metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None):
+    def zapytanie(self, metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None, powtorki=3):
         self.wywolania.append((metoda, url, dane, naglowki))
         odp = self._odp(metoda, url)
         if isinstance(odp, Exception):

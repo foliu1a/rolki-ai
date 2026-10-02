@@ -47,9 +47,10 @@ def _naglowki(idempotency=None):
     return n
 
 
-def _wywolaj(metoda, sciezka, dane=None, timeout=120, idempotency=None):
+def _wywolaj(metoda, sciezka, dane=None, timeout=120, idempotency=None, powtorki=http.POWTORKI):
     try:
-        return http.zapytanie(metoda, BAZA_URL + sciezka, dane=dane, naglowki=_naglowki(idempotency), timeout=timeout)
+        return http.zapytanie(metoda, BAZA_URL + sciezka, dane=dane, naglowki=_naglowki(idempotency), timeout=timeout,
+                              powtorki=powtorki)
     except http.BladHTTP as e:
         raise BladDostawcy(_opis_bledu(e))
 
@@ -91,7 +92,7 @@ def gotowy():
 
 
 def saldo():
-    dane = _wywolaj("GET", "/credits")
+    dane = _wywolaj("GET", "/credits", timeout=20, powtorki=1)
     if isinstance(dane, dict):
         for k in ("availableCredits", "available", "credits", "balance"):
             if isinstance(dane.get(k), (int, float)):
@@ -100,7 +101,7 @@ def saldo():
 
 
 def modele():
-    dane = _wywolaj("GET", "/models")
+    dane = _wywolaj("GET", "/models", timeout=20, powtorki=1)
     if isinstance(dane, dict):
         for k in ("models", "items", "data"):
             if isinstance(dane.get(k), list):

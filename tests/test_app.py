@@ -150,6 +150,18 @@ def test_akcja_409_gdy_zajete(klient):
     assert klient.post("/api/akcja", json={"typ": "lipsync", "id": 99}).status_code == 400
 
 
+def test_akcja_blad_zwalnia_konsole(klient, modelka, cli):
+    """Pomysl tekstowy bez mode_bez_zrodla: generuj konczy sie bledem, a konsola NIE zostaje zablokowana."""
+    pid = baza.dodaj_pomysl(modelka, "tekst", "prompt")
+    _json(klient.post("/api/akcja", json={"typ": "generuj", "ids": [pid]}))
+    z = _czekaj_na_zadanie()
+    assert z["blad"] and "mode_bez_zrodla" in z["blad"]
+    assert not panel.konsola.lock.locked()
+    d = _json(klient.post("/api/akcja", json={"typ": "skanuj"}))    # nie 409
+    assert d["zadanie"]["typ"] == "skanuj"
+    _czekaj_na_zadanie()
+
+
 def test_akcja_stop_i_blad(klient, modelka, cli, monkeypatch):
     for n in ("a.mp4", "b.mp4", "c.mp4"):
         _wrzuc(modelka, n)

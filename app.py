@@ -88,7 +88,7 @@ class Konsola:
         except fabryka.Przerwano as e:
             self._koniec(blad=f"zatrzymane: {e}")
             raise
-        except Exception as e:
+        except BaseException as e:
             self._koniec(blad=f"{type(e).__name__}: {e}")
             raise
         self._koniec(wynik=_serializowalne(wynik))
@@ -105,7 +105,7 @@ class Konsola:
             except fabryka.Przerwano as e:
                 self.dopisz(f"[STOP] {e}")
                 self._koniec(blad=f"zatrzymane: {e}")
-            except Exception as e:
+            except BaseException as e:   # takze SystemExit - inaczej blokada zostalaby na zawsze
                 traceback.print_exc()
                 self.dopisz(f"[BLAD] {type(e).__name__}: {e}")
                 self._koniec(blad=f"{type(e).__name__}: {e}")
@@ -173,15 +173,13 @@ def _stan_autopilota():
 
 _saldo = {}
 _saldo_lock = threading.Lock()
+_saldo_watki = {}
 _modele_cache = {}
 _konta_test = {}
+CZEKAJ_NA_SALDO_S = 3   # tyle /api/stan czeka na swieze saldo; dluzej = oddaje stare i dociaga w tle
 
 
-def _saldo_dostawcy(nazwa, wymus=False):
-    with _saldo_lock:
-        wpis = _saldo.get(nazwa)
-        if wpis and not wymus and time.time() - wpis["czas"] < CACHE_SALDA_S:
-            return wpis
+def _pobierz_saldo(nazwa):
     try:
         d = dostawcy.dostawca(nazwa)
         if nazwa == "yapper" and not sekrety.klucz("yapper"):
@@ -194,6 +192,24 @@ def _saldo_dostawcy(nazwa, wymus=False):
     with _saldo_lock:
         _saldo[nazwa] = wpis
     return wpis
+
+
+def _saldo_dostawcy(nazwa, wymus=False):
+    """Saldo z cache (60 s). Przeterminowane odswieza watek w tle; czekamy na niego max CZEKAJ_NA_SALDO_S,
+    potem oddajemy stare (CLI/API bywa wolne, a panel pyta co 5 s)."""
+    with _saldo_lock:
+        wpis = _saldo.get(nazwa)
+        swieze = wpis and not wymus and time.time() - wpis["czas"] < CACHE_SALDA_S
+        if swieze:
+            return wpis
+        w = _saldo_watki.get(nazwa)
+        if not (w and w.is_alive()):
+            w = threading.Thread(target=_pobierz_saldo, args=(nazwa,), daemon=True, name=f"saldo-{nazwa}")
+            _saldo_watki[nazwa] = w
+            w.start()
+    w.join(CZEKAJ_NA_SALDO_S)
+    with _saldo_lock:
+        return _saldo.get(nazwa) or {"kredyty": None, "blad": None, "czas": 0, "laduje": True}
 
 
 def _salda(wymus=False, dostawca_aktywnej=None):

@@ -58,9 +58,9 @@ def _opis_bledu(e):
     return f"sync.so {e.status}: {e.tekst[:300]}"
 
 
-def _wywolaj(metoda, sciezka, dane=None, timeout=120):
+def _wywolaj(metoda, sciezka, dane=None, timeout=120, powtorki=http.POWTORKI):
     try:
-        return http.zapytanie(metoda, BAZA_URL + sciezka, dane=dane, naglowki=_naglowki(), timeout=timeout)
+        return http.zapytanie(metoda, BAZA_URL + sciezka, dane=dane, naglowki=_naglowki(), timeout=timeout, powtorki=powtorki)
     except http.BladHTTP as e:
         raise BladDostawcy(_opis_bledu(e))
 
@@ -81,12 +81,12 @@ def saldo():
 
 
 def modele():
-    dane = _wywolaj("GET", "/models")
+    dane = _wywolaj("GET", "/models", timeout=20, powtorki=1)
     return dane if isinstance(dane, list) else (dane or {}).get("items") or []
 
 
 def glosy():
-    dane = _wywolaj("GET", "/voices")
+    dane = _wywolaj("GET", "/voices", timeout=20, powtorki=1)
     return dane if isinstance(dane, list) else (dane or {}).get("items") or []
 
 
