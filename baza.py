@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Warstwa danych: modelki (persony), kolejka pomyslow, bank tekstow."""
+import copy
 import json
 import os
 import re
@@ -89,7 +90,7 @@ def utworz_modelke(nazwa):
     os.makedirs(os.path.join(folder, "referencje"), exist_ok=True)
     os.makedirs(os.path.join(folder, "stroje"), exist_ok=True)
     os.makedirs(os.path.join(folder, "prompty"), exist_ok=True)
-    _zapisz_json(os.path.join(folder, "ustawienia.json"), dict(USTAWIENIA_DOMYSLNE))
+    _zapisz_json(os.path.join(folder, "ustawienia.json"), copy.deepcopy(USTAWIENIA_DOMYSLNE))
     _zapisz_json(os.path.join(folder, "pomysly.json"), [])
     _zapisz_json(os.path.join(folder, "teksty.json"), [])
     _zapisz_json(os.path.join(folder, "uzyte_tekstow.json"), [])
@@ -148,7 +149,7 @@ def _plik_ustawien(slug):
 
 def ustawienia_modelki(slug):
     """Ustawienia generacji z domyslnymi uzupelnionymi (stare modelki bez pliku tez dzialaja)."""
-    dane = dict(USTAWIENIA_DOMYSLNE)
+    dane = copy.deepcopy(USTAWIENIA_DOMYSLNE)
     dane.update(_wczytaj_json(_plik_ustawien(slug), {}))
     return dane
 
@@ -239,7 +240,7 @@ def folder_gotowych(slug):
 # ---------------- budzet dzienny (wspolny) ----------------
 
 def budzet():
-    dane = dict(BUDZET_DOMYSLNY)
+    dane = copy.deepcopy(BUDZET_DOMYSLNY)   # gleboka kopia: inaczej dopisz_wydatek zmienialby domyslne "wydatki"
     dane.update(_wczytaj_json(PLIK_BUDZETU, {}))
     dane.setdefault("wydatki", {})
     return dane

@@ -81,6 +81,15 @@ Edit liczy czas wejścia i wyjścia razem. `fabryka.py koszt` podaje dokładną 
 
 `..\VideoRemixer\glitch_cuts_generator.py` (ffmpeg w PATH). `ustawienia.json: warianty=N` robi je automatycznie po generacji.
 
+## Testy
+
+```
+python -m pip install pytest
+python -m pytest
+```
+
+Testy nie łączą się z Higgsfieldem i nie wydają kredytów (wszystko na udawanym CLI i plikach tymczasowych).
+
 ## Przenosiny na inny komputer
 
 Skopiuj `rolki-ai` (+ `VideoRemixer` obok), zainstaluj Pythona i Node.js, odpal `instaluj.bat`, potem `higgsfield auth login`.

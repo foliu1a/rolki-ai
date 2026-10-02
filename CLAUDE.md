@@ -59,6 +59,12 @@ modelki/<slug>/
 
 Zmienna `ROLKI_MODELKI` przenosi folder modelek gdzie indziej (testy, dysk D:).
 
+## Testy
+
+`python -m pytest` (raz: `python -m pip install pytest`). Testy w `tests/` dzialaja na katalogu tymczasowym
+i udawanym CLI Higgsfield (`tests/conftest.py`: `UdawaneCLI`) - nie wydaja kredytow, nie ruszaja `modelki/`,
+`budzet.json` ani Media Tool. Nowa logika w fabryka.py/baza.py = nowy test.
+
 ## Higgsfield CLI - fakty
 
 - Instalacja: `npm install -g --allow-scripts=@higgsfield/cli @higgsfield/cli` (bez `--allow-scripts` binarka sie nie pobierze).
