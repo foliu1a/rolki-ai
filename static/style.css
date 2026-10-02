@@ -262,8 +262,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--akcent); width
   border: 1px solid var(--linia); border-radius: 6px; padding: 4px 8px; display: block; min-width: 0; width: 100%;
   overflow-wrap: anywhere; word-break: normal; line-height: 1.45;
 }
+#karta-foldery { grid-column: 1 / -1; }   /* pulpit: pelna szerokosc, zeby sciezki miescily sie w jednej linii */
 .lista-sciezek { display: flex; flex-direction: column; gap: 8px; }
-.lista-sciezek .folder-wiersz { grid-template-columns: 90px minmax(0, 1fr) auto; }
+.lista-sciezek .folder-wiersz { grid-template-columns: minmax(0, 1fr) auto; }   /* waska karta: etykieta nad sciezka */
+.lista-sciezek .folder-wiersz > .etykieta { grid-column: 1 / -1; margin-bottom: -4px; }
 
 /* ---------- odznaki, kropki, tagi, chipy ---------- */
 .badge {
