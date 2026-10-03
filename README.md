@@ -37,6 +37,23 @@ Automatycznie - **Autopilot** (przełącznik w panelu albo `autopilot.bat`): co 
 skanuj → generuj → Media Tool → lipsync (gdy jest głos) → zdjęcia (`zdjecia_dziennie`) → podpisy, dla każdej modelki
 z włączonym `autopilot`. Pilnuje `autopilot_max_rolek_dziennie`, limitu dziennego i salda. Ty tylko wrzucasz filmiki.
 
+- **Hamulec**: po `autopilot_stop_po_bledach` (3) nieudanych rolkach z rzędu autopilot zatrzymuje personę, alarmuje
+  na telefon i czeka na „Wznów” w panelu (albo `/wznow` z Telegrama) - nie pali kredytów w kółko.
+- **Długie filmiki**: źródło dłuższe niż 30 s (limit Seedance) jest cięte na kawałki po 30 s (`dziel_dlugie`), każdy to osobna rolka.
+- **Podpisy**: z banku tekstów + hashtagi persony (Ustawienia → Persona).
+- **Autostart z Windows**: `autostart.bat` (raz) - panel z autopilotem startuje po zalogowaniu, w tle. `autostart-usun.bat` wyłącza.
+
+## Telefon jako pilot (Telegram)
+
+1. W Telegramie napisz do **@BotFather**: `/newbot`, nadaj nazwę → dostaniesz token.
+2. Panel → **Ustawienia → Konta → Telefon (Telegram)**: wklej token, „Zapisz”, „Testuj”.
+3. Na telefonie napisz do swojego bota `/start` - od tej chwili jest sparowany (tylko ten czat).
+
+Potem: wysyłasz botowi filmik (w podpisie możesz dać nazwę persony) → trafia do wrzutni → autopilot robi rolkę →
+bot odsyła gotową rolkę z podpisem. Nagranie głosu z podpisem = nazwa filmiku → lipsync po generacji.
+Komendy: `/status`, `/raport`, `/stop`, `/wznow`, `/pomoc`. Raport dnia przychodzi sam po 20:00.
+Limity Telegrama: bot pobiera pliki do 20 MB, wysyła do 50 MB.
+
 Konsola robi to samo: `python fabryka.py status | skanuj | koszt | generuj --tak | zdjecia | lipsync | autopilot --raz`.
 `python fabryka.py generuj --dry-run` pokazuje komendy bez wydawania kredytów.
 
@@ -56,13 +73,14 @@ Kredyty każdego dostawcy liczymy osobno (`budzet.json`). Uwaga: kredyty yapper 
 
 ```
 rolki-ai/
-  panel.bat / widget.bat / autopilot.bat / instaluj.bat / zaloguj-higgsfield.bat
+  panel.bat / widget.bat / autopilot.bat / instaluj.bat / aktualizuj.bat / zaloguj-higgsfield.bat
+  autostart.bat / autostart-usun.bat / start-cicho.vbs   autostart panelu z autopilotem (Harmonogram zadań Windows)
   app.py + templates/ + static/   panel Flask :5077 (API w API.md), /widget = małe okno z saldem i kolejką
   fabryka.py             logika: status / skanuj / koszt / generuj / pierz / zdjecia / lipsync / podpis / autopilot / ustaw / budzet
-  autopilot.py           pętla: skanuj -> generuj -> pranie -> lipsync -> zdjęcia -> podpisy
+  autopilot.py           pętla: telefon -> skanuj -> generuj (hamulec) -> pranie -> lipsync -> zdjęcia -> podpisy -> rolka na telefon
   zdjecia.py             zdjęcia persony (model obrazu + referencje albo Soul ID)
   lipsync.py             wideo + głos -> sync.so (albo model Higgsfield); TTS z tekstu
-  dostawcy/              higgsfield.py (CLI), yapper.py (API), sync_so.py (API), http.py (urllib)
+  dostawcy/              higgsfield.py (CLI), yapper.py (API), sync_so.py (API), telegram.py (bot), http.py (urllib)
   higgsfield_cli.py      wrapper na CLI @higgsfield/cli (logowanie OAuth, bez kluczy w plikach)
   mediatool.py           most do Media Tool (pranie wideo bez GUI)
   klatki.py              klatki + arkusz podglądu z wideo (ffmpeg)

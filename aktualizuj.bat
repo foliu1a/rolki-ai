@@ -1,6 +1,9 @@
 @echo off
 title rolki-ai - aktualizacja
 cd /d "%~dp0"
+echo Zatrzymuje panel (jesli dziala)...
+curl -s -m 3 -X POST http://127.0.0.1:5077/api/zamknij >nul 2>&1
+timeout /t 2 /nobreak >nul
 echo Pobieram najnowsza wersje programu...
 git pull origin main-mj7alw
 if errorlevel 1 (

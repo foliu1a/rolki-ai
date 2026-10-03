@@ -320,3 +320,13 @@ def test_autopilot_raz_z_panelu(klient, modelka, cli):
 def test_strony(klient):
     assert klient.get("/").status_code == 200
     assert klient.get("/widget").status_code == 200
+
+
+def test_zamknij_konczy_proces(klient, monkeypatch):
+    """POST /api/zamknij odpowiada ok i po chwili konczy proces (tu: os._exit podmieniony)."""
+    import threading
+    wywolane = threading.Event()
+    monkeypatch.setattr(panel.os, "_exit", lambda kod: wywolane.set())
+    d = _json(klient.post("/api/zamknij"))
+    assert d["zamykam"] is True
+    assert wywolane.wait(3)

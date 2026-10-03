@@ -402,3 +402,51 @@ def test_zdjecia_soul_zamiast_referencji(modelka, cli):
     baza.zapisz_ustawienia(modelka, zdjecia_model="nano_banana_2")
     z = zdjecia.zlecenie(modelka, "portret")
     assert len(z["images"]) == 2 and z["soul_id"] == ""
+
+
+def test_dlugi_filmik_ciety_na_kawalki(bez_mediatool, cli, monkeypatch):
+    """dziel_dlugie: zrodlo > 30 s -> kawalki po 30 s jako osobne pomysly, oryginal pomijany przy nastepnym skanie."""
+    slug = bez_mediatool
+    zr = baza.folder_zrodel(slug)
+    dlugi = _wrzuc(slug, "dlugi.mp4")
+    _wrzuc(slug, "dlugi.stroj.png")
+    _wrzuc(slug, "dlugi.audio.mp3")
+    czasy = {dlugi: 70.0}
+    monkeypatch.setattr(fabryka.klatki, "info", lambda p: {"czas": czasy.get(p, 30.0), "szer": 720, "wys": 1280, "fps": 30.0})
+
+    def potnij(plik, folder, max_s=30, min_s=4):
+        os.makedirs(folder, exist_ok=True)
+        out = []
+        for i in (1, 2, 3):
+            p = os.path.join(folder, f"dlugi_cz{i:02d}.mp4")
+            open(p, "wb").write(b"v")
+            out.append(p)
+        czasy[out[-1]] = 10.0
+        return out
+    monkeypatch.setattr(fabryka.klatki, "potnij", potnij)
+    w = fabryka.skanuj(slug)
+    assert w["nowe"] == [1, 2, 3]
+    p1, p3 = baza.pomysl(slug, 1), baza.pomysl(slug, 3)
+    assert p1["zrodlo"].endswith("dlugi_cz01.mp4") and p1["opis"].startswith("dlugi.mp4 cz. 1/3 (30.0s")
+    assert p1["stroj"].endswith("dlugi.stroj.png") and p1["prompt_higgsfield"].startswith("PROMPT B")
+    assert p1["audio"].endswith("dlugi.audio.mp3") and p3["audio"] is None
+    assert p3["info_zrodla"]["czas"] == 10.0
+    assert baza.jest_pociete(slug, dlugi) and fabryka.nowe_zrodla(slug) == []
+    assert fabryka.skanuj(slug)["nowe"] == []
+    # wylaczone ciecie: dlugi filmik idzie w calosci (Seedance utnie do 30 s)
+    baza.zapisz_ustawienia(slug, dziel_dlugie=False)
+    krotki = _wrzuc(slug, "krotki.mp4")
+    czasy[krotki] = 45.0
+    w = fabryka.skanuj(slug)
+    assert len(w["nowe"]) == 1 and baza.pomysl(slug, w["nowe"][0])["zrodlo"] == krotki
+
+
+def test_podpis_z_hashtagami(modelka):
+    pid = baza.dodaj_pomysl(modelka, "x")
+    baza.zapisz_profil(modelka, hashtagi="#ai #noemi")
+    baza.dodaj_teksty(modelka, ["Sunset"])
+    tekst, cel = fabryka.podpis(modelka, pid)
+    assert tekst == "Sunset\n\n#ai #noemi"
+    with open(cel, encoding="utf-8") as f:
+        assert f.read() == "Sunset\n\n#ai #noemi\n"
+    assert baza.pomysl(modelka, pid)["podpis"] == tekst

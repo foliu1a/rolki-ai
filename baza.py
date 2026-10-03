@@ -47,6 +47,9 @@ USTAWIENIA_DOMYSLNE = {
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
     "autopilot_max_rolek_dziennie": 10,   # bezpiecznik ilosciowy (oprocz limitu kredytow)
+    "autopilot_stop_po_bledach": 3,       # tyle nieudanych rolek z rzedu = autopilot sie zatrzymuje (hamulec), 0 = nigdy
+    "telegram_wysylaj": True,             # gotowe rolki (i zdjecia) leca na telefon przez bota Telegram
+    "dziel_dlugie": True,                 # filmik dluzszy niz 30 s (max Seedance) tnij na kawalki po 30 s
     # --- zdjecia persony ---
     "zdjecia_model": "",            # job_type modelu obrazu z `model list --image` (wybor w panelu), "" = wylaczone
     "zdjecia_dziennie": 0,          # ile zdjec dziennie robi autopilot (0 = tylko recznie z panelu)
@@ -130,6 +133,7 @@ def utworz_modelke(nazwa):
         "instagram": "",
         "opis_stylu": "",
         "cechy": [],
+        "hashtagi": "",     # doklejane do kazdego podpisu, np. "#ai #lifestyle"
     })
     return slug
 
@@ -159,9 +163,9 @@ def _plik_profilu(slug):
 
 
 def profil_modelki(slug):
-    return _wczytaj_json(_plik_profilu(slug), {
-        "nazwa": slug, "instagram": "", "opis_stylu": "", "cechy": [],
-    })
+    dane = {"nazwa": slug, "instagram": "", "opis_stylu": "", "cechy": [], "hashtagi": ""}
+    dane.update(_wczytaj_json(_plik_profilu(slug), {}))
+    return dane
 
 
 def zapisz_profil(slug, **pola):
@@ -542,6 +546,21 @@ def pomysl(slug, pomysl_id):
     raise ValueError(f"Nie ma pomyslu #{pomysl_id}.")
 
 
+def _plik_pocietych(slug):
+    return os.path.join(folder_modelki(slug), "pociete.json")
+
+
+def jest_pociete(slug, zrodlo):
+    """Dlugi filmik, ktory juz potnelismy na kawalki (skanuj go pomija)."""
+    return os.path.normcase(os.path.abspath(zrodlo)) in _wczytaj_json(_plik_pocietych(slug), {})
+
+
+def oznacz_pociete(slug, zrodlo, kawalki):
+    dane = _wczytaj_json(_plik_pocietych(slug), {})
+    dane[os.path.normcase(os.path.abspath(zrodlo))] = {"kawalki": list(kawalki), "kiedy": _teraz()}
+    _zapisz_json(_plik_pocietych(slug), dane)
+
+
 def pomysl_po_zrodle(slug, zrodlo):
     """Pomysl podpiety pod dany filmik zrodlowy (zeby skanowanie nie dublowalo)."""
     cel = os.path.normcase(os.path.abspath(zrodlo))
@@ -680,6 +699,33 @@ def nastepny_prompt_zdjecia(slug):
     i = int(stan.get("indeks", 0)) % len(prompty)
     _zapisz_json(plik, {"indeks": i + 1})
     return prompty[i], i
+
+
+# ---------------- stan autopilota (hamulec, wyslane na telefon) ----------------
+
+def _plik_autopilota(slug):
+    return os.path.join(folder_modelki(slug), "autopilot_stan.json")
+
+
+def autopilot_stan(slug):
+    dane = {"bledy_z_rzedu": 0, "pauza": None, "pauza_od": None}
+    dane.update(_wczytaj_json(_plik_autopilota(slug), {}))
+    return dane
+
+
+def zapisz_autopilot_stan(slug, **pola):
+    dane = autopilot_stan(slug)
+    dane.update(pola)
+    _zapisz_json(_plik_autopilota(slug), dane)
+    return dane
+
+
+def autopilot_pauza(slug, powod):
+    return zapisz_autopilot_stan(slug, pauza=str(powod), pauza_od=_teraz())
+
+
+def autopilot_wznow(slug):
+    return zapisz_autopilot_stan(slug, pauza=None, pauza_od=None, bledy_z_rzedu=0)
 
 
 # ---------------- lipsync ----------------

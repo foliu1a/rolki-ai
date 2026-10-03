@@ -43,15 +43,21 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 fabryka.py          logika + CLI (status, skanuj, prompt, koszt, generuj, pierz, zdjecia, lipsync, autopilot, ocen, warianty,
                     podpis, wgraj, ustaw, budzet, model, modele, glosy, konto). Funkcje skanuj()/koszt()/generuj()/pierz()/podpis()
                     przyjmuja (slug, ..., log=, stop=) - wola je CLI, panel i autopilot.
-autopilot.py        petla: skanuj -> generuj (max rolek/dzien) -> pranie -> lipsync -> zdjecia -> podpisy; STAN dla panelu
+autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
+                    -> lipsync -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na telefon -> raport dnia po 20:00.
+                    Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
+                    Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc.
 zdjecia.py          zdjecia persony: zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt w kolko
 lipsync.py          zrob(slug, wideo, audio) -> sync.so (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield; tts_z_tekstu
 dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobierz): higgsfield.py (CLI), yapper.py (REST),
-                    sync_so.py (REST lipsync/TTS), http.py (urllib: JSON, multipart, PUT, pobierz, 3 powtorki)
+                    sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz/pobierz_plik/wyslij_wideo, parowanie pierwszego
+                    czatu w telegram.json obok stan.json, limity 20 MB pobieranie / 50 MB wysylka), http.py (urllib: JSON,
+                    multipart, PUT, pobierz, powtorki)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
-sekrety.py          klucze API (yapper, sync, elevenlabs): env (YAPPER_API_KEY...) albo klucze.json (.gitignore, chmod 600)
+                    env (YAPPER_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
 mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
-klatki.py           ffprobe/ffmpeg: info, klatki PNG, arkusz.jpg (siatka do ogladania)
+klatki.py           ffprobe/ffmpeg: info, klatki PNG, arkusz.jpg (siatka do ogladania), potnij (dlugie zrodla na kawalki po 30 s)
+sekrety.py          klucze API (yapper, sync, elevenlabs, telegram = token bota)
 baza.py             warstwa danych (modelki/<slug>/*.json, budzet, dziennik.jsonl) - zawsze przez nia, nie edytuj JSON-ow recznie
 postprocess.py      most do ..\VideoRemixer (NIE modyfikowac VideoRemixera)
 app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle naraz (Konsola), autopilot jako watek,
@@ -68,12 +74,19 @@ modelki/<slug>/
   referencje/       zdjecia persony, 01_, 02_... = kolejnosc @[Image N] w prompcie (-> --image)
   stroje/ audio/    stroje do wariantu B; glosy do lipsyncu (panel: upload)
   wyniki/ zdjecia/  surowe rolki NNN_nazwa.raw.mp4, NNN_podpis.txt; zdjecia NNN_data.png
-  pomysly.json      kolejka; statusy: nowy -> wygenerowany -> postprodukcja -> gotowe (+ blad); pola dostawca, audio, lipsync_plik, podpis
+  pomysly.json      kolejka; statusy: nowy -> wygenerowany -> postprodukcja -> gotowe (+ blad); pola dostawca, audio, lipsync_plik,
+                    podpis, klatki_wyniku (siatka klatek GOTOWEJ rolki), telegram_wyslano
+  pociete.json      dlugie zrodla (>30 s) juz pociete na modelki/<slug>/zrodla_ciete/ (skanuj je pomija; dziel_dlugie)
+  autopilot_stan.json  hamulec: bledy_z_rzedu, pauza, pauza_od
   zdjecia.json / lipsync.json / uploady.json / uploady_yapper.json / profil.json / szablony.json / teksty.json / uzyte_tekstow.json
 ```
 
-Zmienna `ROLKI_MODELKI` przenosi folder modelek gdzie indziej (testy, dysk D:); stan.json, budzet.json, dziennik.jsonl i klucze.json
-leza wtedy obok tego folderu.
+Zmienna `ROLKI_MODELKI` przenosi folder modelek gdzie indziej (testy, dysk D:); stan.json, budzet.json, dziennik.jsonl, klucze.json
+i telegram.json leza wtedy obok tego folderu.
+
+Pliki .bat dla usera (nietechniczny - komunikuj sie z nim przez "kliknij dwa razy w X.bat"): panel.bat (panel), aktualizuj.bat
+(git pull z main-mj7alw + testy + panel), autostart.bat / autostart-usun.bat (Harmonogram zadan: start-cicho.vbs ->
+`python app.py --autopilot --bez-przegladarki` w tle), zaloguj-higgsfield.bat, instaluj.bat, widget.bat, autopilot.bat.
 
 ## Testy
 

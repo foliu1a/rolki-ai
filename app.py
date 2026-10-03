@@ -341,8 +341,29 @@ def api_stan():
     salda = _salda(wymus=request.args.get("saldo") == "1", dostawca_aktywnej=(stan or {}).get("dostawca"))
     ostatnie = baza.dziennik_ostatnie(1)
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
-               zadanie=konsola.opis(), konta=_konta_skrot(salda), dziennik_ostatni=ostatnie[-1] if ostatnie else None,
-               wersja=WERSJA)
+               autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
+               dzis=_dzis(aktywna), zadanie=konsola.opis(), konta=_konta_skrot(salda),
+               dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA)
+
+
+def _stan_telegramu():
+    try:
+        from dostawcy import telegram
+        s = telegram.stan()
+        return {"skonfigurowany": telegram.skonfigurowany(), "sparowany": telegram.sparowany(), "czat": s.get("czat") or ""}
+    except Exception as e:
+        return {"skonfigurowany": False, "sparowany": False, "czat": "", "blad": str(e)}
+
+
+def _dzis(aktywna):
+    """Podsumowanie dnia dla panelu: rolki, zdjecia, kredyty per dostawca, problemy."""
+    dzien = baza._dzis()
+    rolki = sum(len(baza.pomysly_z_dnia(s)) for s in baza.lista_modelek())
+    zdjecia = sum(len(baza.zdjecia_z_dnia(s)) for s in baza.lista_modelek())
+    bledy = len([w for w in baza.dziennik_ostatnie(500, typ="blad") if str(w.get("czas", "")).startswith(dzien)])
+    return {"rolki": rolki, "zdjecia": zdjecia, "bledy": bledy,
+            "kredyty": {d: baza.wydano_dzis(d) for d in ("higgsfield", "yapper", "sync")},
+            "rolki_persony": len(baza.pomysly_z_dnia(aktywna)) if aktywna else 0}
 
 
 # ---------------- modelki ----------------
@@ -382,7 +403,7 @@ def api_profil():
         return _blad(e)
     dane = request.json or {}
     zmiany = {}
-    for pole in ("instagram", "opis_stylu", "nazwa"):
+    for pole in ("instagram", "opis_stylu", "nazwa", "hashtagi"):
         if pole in dane:
             zmiany[pole] = str(dane[pole]).strip()
     if "cechy" in dane:
@@ -400,6 +421,7 @@ def _pomysl_dla_panelu(p):
     klatki = p.get("klatki")
     arkusz = os.path.join(klatki, "arkusz.jpg") if klatki else None
     p["miniatura_url"] = _url_pliku(arkusz)
+    p["wynik_miniatura_url"] = _url_pliku(p.get("klatki_wyniku"))
     p["wideo_url"] = _url_pliku(p.get("plik_wynikowy")) if p.get("plik_wynikowy") and os.path.isfile(p["plik_wynikowy"] or "") else None
     p["zrodlo_url"] = _url_pliku(p.get("zrodlo"))
     p["lipsync_url"] = _url_pliku(p.get("lipsync_plik"))
@@ -529,6 +551,21 @@ def _funkcja_akcji(typ, slug, dane):
         return lambda log, stop: lipsync.tts_z_tekstu(slug, tekst, voice_id=dane.get("voice_id"), nazwa=_bezpieczna(dane.get("nazwa") or ""), log=log)
     if typ == "autopilot_raz":
         return lambda log, stop: autopilot.przebieg(slug, log=log, stop=stop)
+    if typ == "telegram_wyslij":
+        from dostawcy import telegram
+        p = baza.pomysl(slug, int(dane["id"]))
+        plik = p.get("lipsync_plik") if p.get("lipsync_plik") and os.path.isfile(p["lipsync_plik"] or "") else p.get("plik_wynikowy")
+        if not plik or not os.path.isfile(plik):
+            raise ValueError("Ta rolka nie ma jeszcze gotowego pliku.")
+        if not telegram.sparowany():
+            raise ValueError("Telegram nie jest sparowany - napisz /start do bota na telefonie.")
+
+        def _wyslij(log, stop):
+            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (f"\n\n{p['podpis']}" if p.get("podpis") else ""))
+            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
+            log(f"wyslalem #{p['id']} na telefon")
+            return {"wyslano": p["id"]}
+        return _wyslij
     raise ValueError(f"Nieznana akcja '{typ}'.")
 
 
@@ -715,6 +752,8 @@ JAK_LOGOWAC = {
     "yapper": "yapper.so -> Account -> API -> Create key (zaznacz Read + Write). Klucz pokazuje sie tylko raz - skopiuj od razu. Wymaga platnego planu.",
     "sync": "https://sync.so/settings/api-keys -> New API key",
     "elevenlabs": "elevenlabs.io -> profil -> API keys (opcjonalnie; TTS idzie tez przez sync.so)",
+    "telegram": "W Telegramie napisz do @BotFather: /newbot, nadaj nazwe -> dostaniesz token. Wklej go tu. "
+                "Potem napisz do swojego bota /start - od tej chwili wysylasz mu filmiki, a on odsyla gotowe rolki.",
 }
 
 
@@ -728,6 +767,10 @@ def _konta_pelne():
         t = _konta_test.get(d) or {}
         konta[d] = {"nazwa": info["nazwa"], "typ": "klucz", "opis": info["opis"], "jest": info["jest"], "maska": info["maska"],
                     "z_env": info["z_env"], "ok": t.get("dziala"), "komunikat": t.get("komunikat", ""), "jak": JAK_LOGOWAC.get(d, "")}
+    tg = _stan_telegramu()
+    konta["telegram"].update(sparowany=tg["sparowany"], czat=tg["czat"])
+    if konta["telegram"]["jest"] and not konta["telegram"]["komunikat"]:
+        konta["telegram"]["komunikat"] = f"sparowany z {tg['czat']}" if tg["sparowany"] else "token jest - napisz /start do bota na telefonie"
     return konta
 
 
@@ -765,6 +808,12 @@ def api_test_konta():
             _saldo.pop("yapper", None)
         elif d == "elevenlabs":
             dziala, komunikat = bool(sekrety.klucz("elevenlabs")), "klucz zapisany (nie testuje polaczenia)"
+        elif d == "telegram":
+            from dostawcy import telegram
+            dziala, komunikat = telegram.gotowy()
+            if dziala and telegram.sparowany():
+                telegram.wyslij_tekst("rolki-ai: polaczenie z panelem dziala.")
+                komunikat += " - wyslalem testowa wiadomosc"
         else:
             return _blad("Nieznany dostawca.")
     except Exception as e:
@@ -900,6 +949,17 @@ def api_autopilot():
     return _ok(autopilot=_stan_autopilota())
 
 
+@app.route("/api/autopilot/wznow", methods=["POST"])
+def api_autopilot_wznow():
+    """Zdejmuje hamulec (pauze po nieudanych rolkach) z aktywnej modelki albo wskazanej w {"slug"}."""
+    slug = (request.json or {}).get("slug") or _aktywna()
+    if not slug or slug not in baza.lista_modelek():
+        return _blad("Brak aktywnej modelki.")
+    stan = baza.autopilot_wznow(slug)
+    baza.dziennik_zapisz("info", f"autopilot {slug}: wznowiony z panelu", modelka=slug)
+    return _ok(autopilot_stan=stan)
+
+
 # ---------------- szablony ----------------
 
 @app.route("/api/szablony")
@@ -985,7 +1045,29 @@ def api_losuj_tekst():
     return _ok(tekst=tekst, nieuzyte=nieuzyte, wszystkie=wszystkie)
 
 
-# ---------------- start ----------------
+# ---------------- zamykanie / start ----------------
+
+@app.route("/api/zamknij", methods=["POST"])
+def api_zamknij():
+    """Zamyka panel (aktualizuj.bat zatrzymuje nim stary panel w tle przed startem nowego). Tylko z tego komputera (bind 127.0.0.1)."""
+    autopilot_stop()
+    konsola.stop.set()
+    baza.dziennik_zapisz("info", "panel zamkniety (aktualizacja / zamknij)")
+
+    def _wyjdz():
+        time.sleep(0.5)
+        os._exit(0)
+    threading.Thread(target=_wyjdz, daemon=True).start()
+    return _ok(zamykam=True)
+
+
+def _port_zajety():
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", PORT)) == 0
+
+
 
 def _otworz_przegladarke():
     """Otwiera panel w przegladarce dopiero, gdy serwer odpowiada (panel.bat otwieral za wczesnie -> bialy blad)."""
@@ -1001,13 +1083,22 @@ def _otworz_przegladarke():
 
 
 def main():
+    if _port_zajety():
+        # panel juz dziala (np. w tle z autostartu) - nie wywalamy sie, tylko pokazujemy ten, ktory jest
+        print(f"Panel rolki-ai juz dziala: http://localhost:{PORT} (otwieram w przegladarce). "
+              f"Zeby go zrestartowac po aktualizacji, uzyj aktualizuj.bat.")
+        if "--bez-przegladarki" not in sys.argv:
+            import webbrowser
+            webbrowser.open(f"http://localhost:{PORT}")
+        return 0
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     if "--autopilot" in sys.argv:
         autopilot_start()
     if "--bez-przegladarki" not in sys.argv:
         threading.Thread(target=_otworz_przegladarke, daemon=True).start()
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

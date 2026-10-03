@@ -18,6 +18,7 @@ DOSTAWCY = {
     "yapper": {"env": "YAPPER_API_KEY", "nazwa": "yapper.so", "opis": "klucz API z panelu yapper.so"},
     "sync": {"env": "SYNC_API_KEY", "nazwa": "sync.so", "opis": "klucz API z sync.so (Dashboard -> API keys)"},
     "elevenlabs": {"env": "ELEVENLABS_API_KEY", "nazwa": "ElevenLabs", "opis": "opcjonalnie: glos z tekstu"},
+    "telegram": {"env": "TELEGRAM_BOT_TOKEN", "nazwa": "Telegram", "opis": "token bota od @BotFather - telefon jako pilot fabryki"},
 }
 
 

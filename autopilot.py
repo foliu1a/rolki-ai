@@ -1,19 +1,26 @@
 # -*- coding: utf-8 -*-
 """Autopilot: w petli, dla kazdej modelki z `autopilot: true`:
 
-    skanuj wrzutnie -> generuj (bezpiecznik kredytow + max rolek dziennie) -> Media Tool -> lipsync (jesli jest glos)
-    -> zdjecia (zdjecia_dziennie) -> podpisy z banku tekstow
+    telefon (Telegram) -> wrzutnia  |  skanuj -> generuj (bezpiecznik kredytow + max rolek dziennie + hamulec)
+    -> Media Tool -> lipsync (jesli jest glos) -> zdjecia (zdjecia_dziennie) -> podpisy -> gotowa rolka na telefon
+    + raport dnia na telefon
 
-Uzycie:  python autopilot.py            petla (co `autopilot_co_minut` z ustawien; Ctrl+C konczy)
+Uzycie:  python autopilot.py            petla (co `autopilot_co_minut` z ustawien; z Telegramem co minute; Ctrl+C konczy)
          python autopilot.py --raz      jeden przebieg i koniec (np. z Harmonogramu zadan Windows)
          python autopilot.py --modelka noemi --raz
-Panel (app.py) odpala to samo w watku - przycisk Autopilot ON/OFF.
+Panel (app.py) odpala to samo w watku - przycisk Autopilot ON/OFF; autostart.bat = start razem z Windows.
+
+Hamulec: `autopilot_stop_po_bledach` nieudanych rolek z rzedu -> pauza persony (modelki/<slug>/autopilot_stan.json),
+alarm na telefon; wznowienie w panelu (Wznow) albo /wznow z Telegrama.
 Nic nie robi, gdy modelka nie ma referencji/promptu - tylko loguje do dziennika.
 """
 import argparse
+import os
+import re
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 
 import baza
 import fabryka
@@ -21,7 +28,15 @@ import fabryka
 if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
 
-STAN = {"trwa": False, "ostatni": None, "nastepny": None, "modelka": None, "etap": "", "przebiegi": 0}
+STAN = {"trwa": False, "ostatni": None, "nastepny": None, "modelka": None, "etap": "", "przebiegi": 0,
+        "telegram_wiadomosci": 0}
+ODSTEP_TELEGRAM_S = 60          # z telefonem sprawdzamy wiadomosci co minute
+RAPORT_GODZINA = 20             # raport dnia na telefon po tej godzinie (lokalnie)
+POMOC = ("Jestem fabryka rolek.\n"
+         "- Wyslij mi filmik (mp4) - zrobie z niego rolke i odesle gotowa. W podpisie mozesz wpisac nazwe persony.\n"
+         "- Wyslij nagranie glosu z podpisem = nazwa filmiku - dopasuje usta.\n"
+         "- /status - co w kolejce i ile wydane\n- /raport - podsumowanie dnia\n"
+         "- /stop - zatrzymaj robienie rolek\n- /wznow - wznow\n- /pomoc - ta lista")
 
 
 def _log(msg):
@@ -34,11 +49,255 @@ def modelki_z_autopilotem(tylko=None):
     return [m for m in baza.lista_modelek() if baza.ustawienia_modelki(m).get("autopilot")]
 
 
+# ---------------- Telegram (telefon) ----------------
+
+def _telegram():
+    """Modul dostawcy telegram, gdy jest token; inaczej None."""
+    try:
+        from dostawcy import telegram
+    except ImportError:
+        return None
+    return telegram if telegram.skonfigurowany() else None
+
+
+def wyslij_na_telefon(tekst):
+    """Tekst na sparowany czat (po cichu, gdy Telegram nie jest skonfigurowany/sparowany). Zwraca bool."""
+    tg = _telegram()
+    if not tg or not tg.sparowany():
+        return False
+    try:
+        tg.wyslij_tekst(tekst)
+        return True
+    except Exception as e:
+        baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem wiadomosci ({e})")
+        return False
+
+
+def persona_z_tekstu(tekst):
+    """'noemi' / '@Noemi' / 'Noemi dance' w podpisie -> slug; bez trafienia: aktywna, potem pierwsza z autopilotem, potem pierwsza."""
+    modelki = baza.lista_modelek()
+    if not modelki:
+        return None
+    slowa = [w.strip("@#:,.!").lower() for w in (tekst or "").split()]
+    for slug in modelki:
+        nazwa = (baza.profil_modelki(slug).get("nazwa") or "").lower()
+        if slug.lower() in slowa or (nazwa and nazwa in slowa):
+            return slug
+    aktywna = baza.aktywna_modelka()
+    if aktywna in modelki:
+        return aktywna
+    z_autopilotem = modelki_z_autopilotem()
+    return z_autopilotem[0] if z_autopilotem else modelki[0]
+
+
+def _unikalna(sciezka):
+    if not os.path.exists(sciezka):
+        return sciezka
+    stem, ext = os.path.splitext(sciezka)
+    for i in range(2, 1000):
+        kandydat = f"{stem}_{i}{ext}"
+        if not os.path.exists(kandydat):
+            return kandydat
+    return sciezka
+
+
+def _nazwa_pliku(nazwa, domyslny_ext):
+    nazwa = re.sub(r"[^\w.\- ]+", "_", os.path.basename(nazwa or ""), flags=re.UNICODE).strip(" ._")
+    if not nazwa:
+        nazwa = f"telefon_{time.strftime('%Y%m%d_%H%M%S')}{domyslny_ext}"
+    if not os.path.splitext(nazwa)[1]:
+        nazwa += domyslny_ext
+    return nazwa
+
+
+def _status_tekst():
+    linie = []
+    for slug in baza.lista_modelek():
+        st = baza.statystyki_pomyslow(slug)
+        ust = baza.ustawienia_modelki(slug)
+        ap = baza.autopilot_stan(slug)
+        d = ust.get("dostawca") or "higgsfield"
+        linie.append(f"{slug}: czeka {st.get('nowy', 0)}, gotowe {st.get('gotowe', 0)}, nie wyszlo {st.get('blad', 0)}; "
+                     f"dzis {len(baza.pomysly_z_dnia(slug))} rolek, {baza.wydano_dzis(d)}/{baza.limit_dzienny(d) or '-'} kr"
+                     + (" | AUTOPILOT: " + ("PAUZA - " + ap["pauza"] if ap.get("pauza") else ("wlaczony" if ust.get("autopilot") else "wylaczony"))))
+    return "\n".join(linie) or "Brak person."
+
+
+def raport_dnia(wymus=False):
+    """Podsumowanie dnia na telefon (raz dziennie po RAPORT_GODZINA, albo na /raport). Zwraca tekst albo None."""
+    tg = _telegram()
+    if not tg or not tg.sparowany():
+        return None
+    dzis = datetime.now().strftime("%Y-%m-%d")
+    s = tg.stan()
+    if not wymus:
+        if s.get("ostatni_raport") == dzis or datetime.now().hour < int(s.get("raport_godzina") or RAPORT_GODZINA):
+            return None
+    linie = [f"Raport {dzis}:"]
+    for slug in baza.lista_modelek():
+        rolki = baza.pomysly_z_dnia(slug)
+        d = baza.ustawienia_modelki(slug).get("dostawca") or "higgsfield"
+        linie.append(f"- {slug}: {len(rolki)} rolek, {len(baza.zdjecia_z_dnia(slug))} zdjec, {baza.wydano_dzis(d)} kr ({d})")
+    bledy = [w for w in baza.dziennik_ostatnie(500, typ="blad") if str(w.get("czas", "")).startswith(dzis)]
+    if bledy:
+        linie.append(f"Problemy dzis: {len(bledy)} (szczegoly w panelu -> Historia)")
+    tekst = "\n".join(linie)
+    if wyslij_na_telefon(tekst):
+        tg.zapisz_stan(ostatni_raport=dzis)
+    return tekst
+
+
+def _obsluz_wiadomosc(tg, w, log):
+    typ, tekst = w["typ"], (w.get("tekst") or "").strip()
+    if typ == "tekst":
+        kom = tekst.split()[0].lower() if tekst else ""
+        if kom in ("/start", "/pomoc", "/help", "/menu"):
+            tg.wyslij_tekst("Sparowane - od teraz wysylam tu gotowe rolki.\n\n" + POMOC)
+        elif kom == "/status":
+            tg.wyslij_tekst(_status_tekst())
+        elif kom == "/raport":
+            tg.wyslij_tekst(raport_dnia(wymus=True) or "Brak danych.")
+        elif kom == "/stop":
+            for slug in baza.lista_modelek():
+                baza.autopilot_pauza(slug, "zatrzymane z telefonu (/stop)")
+            baza.dziennik_zapisz("uwaga", "autopilot zatrzymany z telefonu (/stop)")
+            tg.wyslij_tekst("Zatrzymane. Filmiki nadal zbieram, ale nie robie rolek. /wznow - zeby wznowic.")
+        elif kom in ("/wznow", "/dalej", "/go"):
+            for slug in baza.lista_modelek():
+                baza.autopilot_wznow(slug)
+            baza.dziennik_zapisz("info", "autopilot wznowiony z telefonu (/wznow)")
+            tg.wyslij_tekst("Wznowione. Robie dalej.")
+        else:
+            tg.wyslij_tekst("Nie rozumiem. Wyslij filmik albo /pomoc.")
+        return {"typ": "komenda", "tekst": kom}
+
+    if typ == "wideo":
+        slug = persona_z_tekstu(tekst)
+        if not slug:
+            tg.wyslij_tekst("Nie mam zadnej persony - dodaj ja w panelu.")
+            return {"typ": "wideo", "blad": "brak persony"}
+        if (w.get("rozmiar") or 0) > tg.LIMIT_POBIERANIA:
+            tg.wyslij_tekst("Ten filmik ma ponad 20 MB - Telegram nie pozwala botom go pobrac. Wrzuc go do folderu na komputerze.")
+            return {"typ": "wideo", "blad": "za duzy"}
+        nazwa = _nazwa_pliku(w.get("nazwa"), ".mp4")
+        cel = _unikalna(os.path.join(baza.folder_zrodel(slug), nazwa))
+        tg.pobierz_plik(w["file_id"], cel)
+        baza.dziennik_zapisz("info", f"z telefonu: {os.path.basename(cel)} -> wrzutnia {slug}", modelka=slug)
+        log(f"telegram: {os.path.basename(cel)} -> {slug}")
+        tg.wyslij_tekst(f"Mam: {os.path.basename(cel)} -> {slug}. Zrobie rolke i odesle, jak bedzie gotowa.")
+        return {"typ": "wideo", "plik": cel, "modelka": slug}
+
+    if typ == "audio":
+        slug = persona_z_tekstu(tekst)
+        if not slug:
+            tg.wyslij_tekst("Nie mam zadnej persony - dodaj ja w panelu.")
+            return {"typ": "audio", "blad": "brak persony"}
+        ext = os.path.splitext(w.get("nazwa") or "")[1].lower() or ".mp3"
+        if ext not in baza.ROZSZERZENIA_AUDIO:
+            ext = ".mp3"
+        # podpis = nazwa filmiku we wrzutni -> glos sparowany z tym klipem (<nazwa>.audio.<ext>) -> lipsync po generacji
+        wrzutnia = baza.folder_zrodel(slug)
+        cel, para = None, None
+        for slowo in [tekst] + tekst.split():
+            stem = os.path.splitext(slowo.strip())[0]
+            if stem and any(os.path.isfile(os.path.join(wrzutnia, stem + e)) for e in fabryka.ROZSZERZENIA_WIDEO):
+                para = stem
+                cel = os.path.join(wrzutnia, f"{stem}.audio{ext}")
+                break
+        if not cel:
+            cel = _unikalna(os.path.join(baza.folder_audio(slug), _nazwa_pliku(w.get("nazwa"), ext)))
+        tg.pobierz_plik(w["file_id"], cel)
+        if para:
+            p = baza.pomysl_po_zrodle(slug, next(os.path.join(wrzutnia, para + e) for e in fabryka.ROZSZERZENIA_WIDEO
+                                                   if os.path.isfile(os.path.join(wrzutnia, para + e))))
+            if p:
+                baza.aktualizuj_pomysl(slug, p["id"], audio=cel)
+            tg.wyslij_tekst(f"Mam glos do {para} - po zrobieniu rolki dopasuje usta.")
+        else:
+            tg.wyslij_tekst(f"Mam nagranie ({os.path.basename(cel)}). Zeby dopasowac usta do konkretnego filmiku, "
+                            f"wyslij je z podpisem = nazwa tego filmiku, albo zrob to w panelu -> Lipsync.")
+        baza.dziennik_zapisz("info", f"z telefonu: glos {os.path.basename(cel)} ({slug})", modelka=slug)
+        return {"typ": "audio", "plik": cel, "modelka": slug}
+
+    if typ == "zdjecie":
+        tg.wyslij_tekst("Zdjecia persony i strojow dodaje sie w panelu (Ustawienia -> Persona). Filmiki moge brac stad.")
+        return {"typ": "zdjecie"}
+    tg.wyslij_tekst("Nie wiem, co z tym zrobic. Wyslij filmik (mp4) albo /pomoc.")
+    return {"typ": typ}
+
+
+def obsluz_telegram(log=None):
+    """Odbiera wiadomosci z telefonu: filmiki -> wrzutnia, glos -> lipsync, komendy. Zwraca liste obsluzonych."""
+    log = log or _log
+    tg = _telegram()
+    if not tg:
+        return []
+    try:
+        wiadomosci = tg.odbierz()
+    except Exception as e:
+        log(f"telegram: nie moge odebrac ({e})")
+        return []
+    zrobione = []
+    for w in wiadomosci:
+        STAN["telegram_wiadomosci"] += 1
+        try:
+            zrobione.append(_obsluz_wiadomosc(tg, w, log))
+        except Exception as e:
+            log(f"telegram: {e}")
+            baza.dziennik_zapisz("blad", f"telegram: {e}")
+            try:
+                tg.wyslij_tekst(f"Nie udalo sie: {e}")
+            except Exception:
+                pass
+    return zrobione
+
+
+def _swiezy(p, godzin=24):
+    """Rolka wygenerowana w ciagu ostatnich `godzin` (zeby po sparowaniu nie wysylac calej historii)."""
+    try:
+        t = datetime.fromisoformat(p.get("wygenerowano") or "")
+    except ValueError:
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds() < godzin * 3600
+
+
+def wyslij_gotowe(slug, log=None):
+    """Nowe gotowe rolki (jeszcze nie wyslane) -> telefon, z podpisem. Zwraca liczbe wyslanych."""
+    log = log or _log
+    tg = _telegram()
+    ust = baza.ustawienia_modelki(slug)
+    if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
+        return 0
+    ile = 0
+    for p in baza.lista_pomyslow(slug):
+        if p["status"] not in ("gotowe", "wygenerowany") or p.get("telegram_wyslano") or not _swiezy(p):
+            continue
+        plik = p.get("lipsync_plik") if p.get("lipsync_plik") and os.path.isfile(p["lipsync_plik"]) else p.get("plik_wynikowy")
+        if not plik or not os.path.isfile(plik):
+            continue
+        podpis = (p.get("podpis") or "").strip()
+        tekst = f"{slug} · rolka #{p['id']} · {os.path.basename(plik)}" + (f"\n\n{podpis}" if podpis else "")
+        try:
+            tg.wyslij_wideo(plik, tekst)
+            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
+            ile += 1
+            log(f"telegram: wyslalem #{p['id']} ({os.path.basename(plik)})")
+        except Exception as e:
+            log(f"telegram: nie wyslalem #{p['id']}: {e}")
+            baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem rolki #{p['id']} ({e})", modelka=slug)
+            break
+    return ile
+
+
+# ---------------- przebieg ----------------
+
 def przebieg(slug, log=None, stop=None):
     """Jeden pelny przebieg dla modelki. Zwraca podsumowanie."""
     log = log or _log
     ust = baza.ustawienia_modelki(slug)
-    pods = {"modelka": slug, "nowe": 0, "wygenerowane": 0, "zdjecia": 0, "stop": None, "bledy": []}
+    pods = {"modelka": slug, "nowe": 0, "wygenerowane": 0, "zdjecia": 0, "wyslane": 0, "stop": None, "bledy": []}
     STAN["modelka"], STAN["etap"] = slug, "skanuj"
 
     try:
@@ -50,11 +309,15 @@ def przebieg(slug, log=None, stop=None):
         pods["bledy"].append(f"skanuj: {e}")
         log(f"skanuj nie wyszlo: {e}")
 
+    ap = baza.autopilot_stan(slug)
     STAN["etap"] = "generuj"
     max_dzis = int(ust.get("autopilot_max_rolek_dziennie") or 0)
     zrobione_dzis = len(baza.pomysly_z_dnia(slug))
     zostalo = (max_dzis - zrobione_dzis) if max_dzis else None
-    if zostalo is not None and zostalo <= 0:
+    if ap.get("pauza"):
+        log(f"{slug}: autopilot w pauzie ({ap['pauza']}) - nie robie rolek, tylko zbieram filmiki")
+        pods["stop"] = f"pauza: {ap['pauza']}"
+    elif zostalo is not None and zostalo <= 0:
         log(f"{slug}: limit rolek na dzis ({zrobione_dzis}/{max_dzis}) - generacja czeka do jutra")
         pods["stop"] = "max rolek dziennie"
     else:
@@ -63,6 +326,7 @@ def przebieg(slug, log=None, stop=None):
             pods["wygenerowane"] = w["wygenerowane"]
             pods["stop"] = w.get("stop")
             pods["bledy"] += [f"#{i}" for i in w.get("bledy", [])]
+            _hamulec(slug, ust, w, log, pods)
         except fabryka.Przerwano:
             raise
         except Exception as e:
@@ -80,7 +344,7 @@ def przebieg(slug, log=None, stop=None):
 
     STAN["etap"] = "zdjecia"
     ile_zdjec = int(ust.get("zdjecia_dziennie") or 0)
-    if ile_zdjec and ust.get("zdjecia_model"):
+    if ile_zdjec and ust.get("zdjecia_model") and not ap.get("pauza"):
         brakuje = ile_zdjec - len(baza.zdjecia_z_dnia(slug))
         if brakuje > 0:
             try:
@@ -92,21 +356,53 @@ def przebieg(slug, log=None, stop=None):
             except Exception as e:
                 pods["bledy"].append(f"zdjecia: {e}")
                 log(f"zdjecia nie wyszly: {e}")
+
+    STAN["etap"] = "telefon"
+    try:
+        pods["wyslane"] = wyslij_gotowe(slug, log=log)
+    except Exception as e:
+        log(f"telegram: {e}")
     STAN["etap"] = ""
     baza.dziennik_zapisz("info", f"autopilot {slug}: nowe {pods['nowe']}, wygenerowane {pods['wygenerowane']}, "
-                         f"zdjecia {pods['zdjecia']}" + (f", stop: {pods['stop']}" if pods["stop"] else "")
+                         f"zdjecia {pods['zdjecia']}" + (f", na telefon {pods['wyslane']}" if pods["wyslane"] else "")
+                         + (f", stop: {pods['stop']}" if pods["stop"] else "")
                          + (f", bledy: {', '.join(pods['bledy'])}" if pods["bledy"] else ""), modelka=slug)
     return pods
+
+
+def _hamulec(slug, ust, w, log, pods):
+    """Liczy nieudane rolki z rzedu; po `autopilot_stop_po_bledach` zatrzymuje persone i alarmuje na telefon."""
+    if w.get("wygenerowane"):
+        baza.zapisz_autopilot_stan(slug, bledy_z_rzedu=0)
+        return
+    if not w.get("bledy"):
+        return
+    n = int(baza.autopilot_stan(slug).get("bledy_z_rzedu") or 0) + len(w["bledy"])
+    baza.zapisz_autopilot_stan(slug, bledy_z_rzedu=n)
+    limit = int(ust.get("autopilot_stop_po_bledach") or 0)
+    if limit and n >= limit:
+        powod = f"{n} rolek z rzedu nie wyszlo"
+        baza.autopilot_pauza(slug, powod)
+        pods["stop"] = "hamulec"
+        baza.dziennik_zapisz("uwaga", f"HAMULEC: autopilot {slug} zatrzymany - {powod}. Sprawdz w panelu i kliknij Wznow.", modelka=slug)
+        log(f"HAMULEC: {slug} - {powod}")
+        wyslij_na_telefon(f"STOP {slug}: {powod}. Nie robie dalej, zeby nie palic kredytow. Sprawdz w panelu (Rolki) i kliknij Wznow, albo wyslij /wznow.")
 
 
 def przebieg_wszystkich(tylko=None, log=None, stop=None):
     wyniki = []
     STAN["trwa"] = True
     try:
+        STAN["etap"] = "telefon"
+        obsluz_telegram(log)
         for slug in modelki_z_autopilotem(tylko):
             if stop is not None and stop.is_set():
                 break
             wyniki.append(przebieg(slug, log=log, stop=stop))
+        try:
+            raport_dnia()
+        except Exception as e:
+            (log or _log)(f"raport dnia: {e}")
         STAN["przebiegi"] += 1
         STAN["ostatni"] = time.time()
     finally:
@@ -116,12 +412,16 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
 
 
 def odstep_sekund(modelki, co_minut=None):
-    """Ile czekac do nastepnego przebiegu: min z autopilot_co_minut modelek (albo co_minut)."""
+    """Ile czekac do nastepnego przebiegu: min z autopilot_co_minut modelek (albo co_minut); z Telegramem max 60 s."""
     if co_minut:
-        return max(1, int(co_minut)) * 60
-    if not modelki:
-        return 5 * 60
-    return max(1, min(int(baza.ustawienia_modelki(m).get("autopilot_co_minut") or 15) for m in modelki)) * 60
+        odstep = max(1, int(co_minut)) * 60
+    elif not modelki:
+        odstep = 5 * 60
+    else:
+        odstep = max(1, min(int(baza.ustawienia_modelki(m).get("autopilot_co_minut") or 15) for m in modelki)) * 60
+    if _telegram():
+        odstep = min(odstep, ODSTEP_TELEGRAM_S)
+    return odstep
 
 
 def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
@@ -132,7 +432,7 @@ def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
     przebieg_fn = przebieg_fn or (lambda log, stop: przebieg_wszystkich(tylko, log=log, stop=stop))
     while not stop.is_set():
         modelki = modelki_z_autopilotem(tylko)
-        if not modelki:
+        if not modelki and not _telegram():
             log("zadna modelka nie ma autopilot=true - czekam 5 min")
         else:
             try:

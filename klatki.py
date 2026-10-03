@@ -4,6 +4,7 @@
     info(plik)                       -> {"czas": s, "szer": px, "wys": px, "fps": float}
     wytnij(plik, folder, ile=4)      -> [sciezki PNG]
     arkusz(plik, sciezka_jpg, ile=6) -> jedna siatka JPG z `ile` klatkami (najwygodniejsza do ogladania)
+    potnij(plik, folder, max_s=30)   -> [kawalki mp4 po max_s sekund] (dlugie zrodla dla Seedance)
 """
 import json
 import os
@@ -92,6 +93,36 @@ def arkusz(plik, sciezka_jpg, ile=6, kolumny=3, szer_kafelka=360):
     if out.returncode != 0 or not os.path.isfile(sciezka_jpg):
         raise RuntimeError(f"ffmpeg tile: {out.stderr.strip()[:300]}")
     return sciezka_jpg
+
+
+def potnij(plik, folder, max_s=30, min_s=4):
+    """Tnie dlugi filmik na kawalki DOKLADNIE po `max_s` sekund (przekodowanie wideo z klatka kluczowa co max_s,
+    bo z -c copy kawalki wychodza o pare sekund za dlugie i Seedance je odrzuca). Zwraca liste sciezek
+    (kawalki krotsze niz `min_s` sa pomijane - Seedance nie przyjmuje ponizej 4 s)."""
+    os.makedirs(folder, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(plik))[0]
+    wzor = os.path.join(folder, f"{stem}_cz%02d.mp4")
+    out = subprocess.run(
+        [_exe("ffmpeg"), "-v", "error", "-y", "-i", plik, "-map", "0:v:0", "-map", "0:a?",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+         "-force_key_frames", f"expr:gte(t,n_forced*{max_s})", "-c:a", "aac", "-b:a", "160k",
+         "-f", "segment", "-segment_time", str(max_s), "-segment_start_number", "1", "-reset_timestamps", "1", wzor],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(f"ffmpeg segment: {out.stderr.strip()[:300]}")
+    czesci = sorted(p for p in os.listdir(folder) if p.startswith(stem + "_cz") and p.endswith(".mp4"))
+    wynik = []
+    for n in czesci:
+        p = os.path.join(folder, n)
+        try:
+            if info(p)["czas"] >= min_s:
+                wynik.append(p)
+            else:
+                os.remove(p)
+        except Exception:
+            wynik.append(p)
+    return wynik
 
 
 if __name__ == "__main__":

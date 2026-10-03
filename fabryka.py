@@ -198,14 +198,27 @@ def cmd_status(args):
 
 # ---------------- skanowanie wrzutni ----------------
 
+MAX_SEKUND_ZRODLA = 30   # Seedance 2.5 edit: do 30 s; dluzsze zrodla tniemy (dziel_dlugie)
+
+
 def nowe_zrodla(slug):
     folder = baza.folder_zrodel(slug)
     wynik = []
     for n in sorted(os.listdir(folder)):
         p = os.path.join(folder, n)
-        if os.path.isfile(p) and n.lower().endswith(ROZSZERZENIA_WIDEO) and not baza.pomysl_po_zrodle(slug, p):
+        if (os.path.isfile(p) and n.lower().endswith(ROZSZERZENIA_WIDEO) and not baza.pomysl_po_zrodle(slug, p)
+                and not baza.jest_pociete(slug, p)):
             wynik.append(p)
     return wynik
+
+
+def _potnij_dlugi(slug, zrodlo, inf, log):
+    """Filmik dluzszy niz MAX_SEKUND_ZRODLA -> kawalki w modelki/<slug>/zrodla_ciete/ (oryginal zostaje, skanuj go pomija)."""
+    folder = os.path.join(baza.folder_modelki(slug), "zrodla_ciete")
+    kawalki = klatki.potnij(zrodlo, folder, max_s=MAX_SEKUND_ZRODLA)
+    baza.oznacz_pociete(slug, zrodlo, kawalki)
+    _zdarzenie(log, slug, "info", f"{os.path.basename(zrodlo)} ma {inf['czas']} s (max {MAX_SEKUND_ZRODLA}) - pociety na {len(kawalki)} kawalkow")
+    return kawalki
 
 
 _nowe_zrodla = nowe_zrodla   # stara nazwa
@@ -250,6 +263,37 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
             log(f"[POMIJAM] {os.path.basename(zrodlo)}: {e}")
             wynik["pominiete"].append(os.path.basename(zrodlo))
             continue
+        if ust.get("dziel_dlugie") and inf["czas"] > MAX_SEKUND_ZRODLA + 0.5:
+            try:
+                kawalki = _potnij_dlugi(slug, zrodlo, inf, log)
+            except Exception as e:
+                log(f"[UWAGA] {nazwa}: nie udalo sie pociac ({e}) - robie z pierwszych {MAX_SEKUND_ZRODLA} s")
+                kawalki = []
+            if kawalki:
+                stroj_oryg = _stroj_dla(zrodlo)
+                audio_oryg = baza.audio_dla_zrodla(zrodlo)
+                for i, kawalek in enumerate(kawalki, 1):
+                    try:
+                        inf_k = klatki.info(kawalek)
+                    except Exception:
+                        inf_k = dict(inf, czas=MAX_SEKUND_ZRODLA)
+                    folder_k = os.path.join(folder_klatek, _bezpieczna_nazwa(f"{nazwa}_cz{i:02d}"))
+                    try:
+                        klatki.wytnij(kawalek, folder_k, ile=ile_klatek)
+                        klatki.arkusz(kawalek, os.path.join(folder_k, "arkusz.jpg"), ile=6)
+                    except Exception as e:
+                        log(f"[UWAGA] klatki dla {nazwa} cz.{i}: {e}")
+                    stroj_k = stroj_oryg or stroj_dom
+                    prompt_k = prompt_b if stroj_k else prompt_a
+                    opis = f"{os.path.basename(zrodlo)} cz. {i}/{len(kawalki)} ({inf_k['czas']}s, {inf_k['szer']}x{inf_k['wys']})"
+                    pid = baza.dodaj_pomysl(slug, opis, prompt_k, zrodlo=kawalek, klatki=folder_k, info_zrodla=inf_k, stroj=stroj_k)
+                    if audio_oryg and i == 1:
+                        baza.aktualizuj_pomysl(slug, pid, audio=audio_oryg)
+                    wynik["nowe"].append(pid)
+                    if not prompt_k:
+                        wynik["bez_promptu"].append(pid)
+                    _zdarzenie(log, slug, "info", f"#{pid}  {opis}", pomysl=pid)
+                continue
         folder = os.path.join(folder_klatek, _bezpieczna_nazwa(nazwa))
         try:
             klatki.wytnij(zrodlo, folder, ile=ile_klatek)
@@ -650,12 +694,25 @@ def _postprodukcja(slug, pid, surowy, nazwa, ust, log=None):
         import shutil
         shutil.copy2(surowy, cel)
         baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=cel)
+    _klatki_wyniku(slug, pid, cel, log)
     if ust.get("warianty"):
         try:
             _warianty(slug, pid, cel, int(ust["warianty"]))
         except Exception as e:
             log(f"#{pid}: warianty nie wyszly: {e}")
     return cel
+
+
+def _klatki_wyniku(slug, pid, plik, log=None):
+    """Siatka klatek GOTOWEJ rolki (modelki/<slug>/klatki/NNN_wynik.jpg) - podglad w panelu i na telefonie bez otwierania pliku."""
+    try:
+        cel = os.path.join(baza.folder_klatek(slug), f"{pid:03d}_wynik.jpg")
+        klatki.arkusz(plik, cel, ile=6)
+        baza.aktualizuj_pomysl(slug, pid, klatki_wyniku=cel)
+        return cel
+    except Exception as e:
+        (log or _log)(f"#{pid}: podglad klatek wyniku nie wyszedl: {e}")
+        return None
 
 
 # ---------------- ocena (Virality Predictor) ----------------
@@ -710,11 +767,14 @@ def cmd_gotowe(args):
 
 
 def podpis(slug, pid):
-    """Podpis z banku tekstow -> wyniki/NNN_podpis.txt. Zwraca (tekst, sciezka) albo (None, None)."""
+    """Podpis z banku tekstow (+ hashtagi persony z profilu) -> wyniki/NNN_podpis.txt. Zwraca (tekst, sciezka) albo (None, None)."""
     p = baza.pomysl(slug, pid)
     tekst = baza.losuj_tekst(slug)
     if not tekst:
         return None, None
+    hashtagi = (baza.profil_modelki(slug).get("hashtagi") or "").strip()
+    if hashtagi and hashtagi not in tekst:
+        tekst = f"{tekst}\n\n{hashtagi}"
     cel = os.path.join(baza.folder_wynikow(slug), f"{p['id']:03d}_podpis.txt")
     with open(cel, "w", encoding="utf-8") as f:
         f.write(tekst + "\n")

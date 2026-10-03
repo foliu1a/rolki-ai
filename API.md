@@ -33,8 +33,18 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
            "yapper": {"jest": false, "ok": null, "komunikat": ""},
            "sync": {"jest": true, "ok": null, "komunikat": ""}},
  "dziennik_ostatni": {"czas": "...", "typ": "ok", "modelka": "noemi", "tekst": "#5: GOTOWE -> ..."},
+ "autopilot_stan": {"bledy_z_rzedu": 0, "pauza": null, "pauza_od": null},   // hamulec aktywnej persony; pauza = powód (tekst) gdy zatrzymany
+ "telegram": {"skonfigurowany": true, "sparowany": false, "czat": ""},         // bot Telegram: token jest? czat sparowany (/start)?
+ "dzis": {"rolki": 3, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 135, "yapper": 0, "sync": 0}, "rolki_persony": 2},
  "wersja": "2.0"}
 ```
+- `POST /api/autopilot/wznow` `{"slug"?: "noemi"}` → zdejmuje hamulec (pauzę) z aktywnej/wskazanej persony → `{"autopilot_stan": {...}}`
+- Pomysł ma dodatkowo `wynik_miniatura_url` (siatka klatek GOTOWEJ rolki, albo null) i `telegram_wyslano` (bool).
+- Akcja `{"typ": "telegram_wyslij", "id": 5}` wysyła gotową rolkę na telefon (wymaga sparowanego bota).
+- Konta: `konta.telegram` = karta tokena bota (`jest`, `maska`, `jak`) + `sparowany`, `czat`; `POST /api/konta/test {"dostawca": "telegram"}`
+  sprawdza bota i, gdy sparowany, wysyła testową wiadomość.
+- Nowe ustawienia persony: `autopilot_stop_po_bledach` (int, 0 = nigdy), `telegram_wysylaj` (bool), `dziel_dlugie` (bool – filmik > 30 s tnij na kawałki).
+- Autostart (Windows): plik `autostart.bat` rejestruje start panelu z autopilotem przy logowaniu; `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
 
 ## Modelki (persony)
 - `POST /api/modelki` `{"nazwa": "Noemi", "instagram": "@uroczanoemi"}` → `{"slug": "noemi"}` (ustawia jako aktywną)
