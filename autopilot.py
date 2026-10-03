@@ -35,7 +35,7 @@ RAPORT_GODZINA = 20             # raport dnia na telefon po tej godzinie (lokaln
 POMOC = ("Jestem fabryka rolek.\n"
          "- Wyslij mi filmik (mp4) - zrobie z niego rolke i odesle gotowa. W podpisie mozesz wpisac nazwe persony.\n"
          "- Wyslij nagranie glosu z podpisem = nazwa filmiku - dopasuje usta.\n"
-         "- /status - co w kolejce i ile wydane\n- /raport - podsumowanie dnia\n"
+         "- /status - co w kolejce i ile wydane\n- /raport - podsumowanie dnia\n- /zdjecie [persona] - zrob jedno zdjecie teraz\n"
          "- /stop - zatrzymaj robienie rolek\n- /wznow - wznow\n- /pomoc - ta lista")
 
 
@@ -167,6 +167,20 @@ def _obsluz_wiadomosc(tg, w, log):
                 baza.autopilot_wznow(slug)
             baza.dziennik_zapisz("info", "autopilot wznowiony z telefonu (/wznow)")
             tg.wyslij_tekst("Wznowione. Robie dalej.")
+        elif kom in ("/zdjecie", "/foto"):
+            slug = persona_z_tekstu(" ".join(tekst.split()[1:]))
+            ust = baza.ustawienia_modelki(slug) if slug else {}
+            if not slug or not ust.get("zdjecia_model"):
+                tg.wyslij_tekst("Najpierw wybierz model zdjec w panelu (Ustawienia -> Zdjecia).")
+            else:
+                import zdjecia
+                tg.wyslij_tekst(f"Robie zdjecie ({slug})...")
+                w = zdjecia.generuj(slug, ile=1, log=log)
+                if w["zrobione"]:
+                    wyslij_zdjecia(slug, log=log)
+                else:
+                    tg.wyslij_tekst(f"Nie wyszlo: {w.get('stop') or 'blad generacji'}")
+            return {"typ": "komenda", "tekst": kom, "modelka": slug}
         else:
             tg.wyslij_tekst("Nie rozumiem. Wyslij filmik albo /pomoc.")
         return {"typ": "komenda", "tekst": kom}
@@ -461,8 +475,13 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
     STAN["trwa"] = True
     try:
         STAN["etap"] = "telefon"
-        obsluz_telegram(log)
-        for slug in modelki_z_autopilotem(tylko):
+        z_telefonu = obsluz_telegram(log)
+        do_zrobienia = list(modelki_z_autopilotem(tylko))
+        # filmik przyslany z telefonu = "zrob to", nawet gdy ta persona nie ma wlaczonego autopilota
+        for z in z_telefonu:
+            if z.get("typ") == "wideo" and z.get("modelka") and z["modelka"] not in do_zrobienia and (not tylko or tylko == z["modelka"]):
+                do_zrobienia.append(z["modelka"])
+        for slug in do_zrobienia:
             if stop is not None and stop.is_set():
                 break
             wyniki.append(przebieg(slug, log=log, stop=stop))

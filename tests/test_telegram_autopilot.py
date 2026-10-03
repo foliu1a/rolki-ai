@@ -288,3 +288,29 @@ def test_diagnoza(modelka, cli, monkeypatch):
 def test_api_diagnoza(klient):
     d = klient.get("/api/diagnoza").get_json()
     assert d["ok"] and any(w["co"] == "ffmpeg" for w in d["diagnoza"])
+
+
+def test_filmik_z_telefonu_robi_sie_bez_autopilota(tg, modelka, cli, bez_ffmpeg):
+    """Persona ma autopilot=false, ale filmik przyslany z telefonu i tak jest robiony (i odsylany)."""
+    baza.zapisz_ustawienia(modelka, mediatool=False, autopilot=False)
+    tg.wiadomosc(text="/start")
+    tg.wiadomosc(video={"file_id": "f1", "file_name": "z_fona.mp4", "file_size": 100})
+    wyniki = autopilot.przebieg_wszystkich()
+    assert [w["modelka"] for w in wyniki] == [modelka]
+    assert wyniki[0]["nowe"] == 1 and wyniki[0]["wygenerowane"] == 1 and wyniki[0]["wyslane"] == 1
+    assert tg.pliki[-1][0] == "sendVideo"
+    # bez nowych filmikow persona bez autopilota nie jest ruszana
+    assert autopilot.przebieg_wszystkich() == []
+
+
+def test_komenda_zdjecie(tg, modelka, cli, bez_ffmpeg):
+    tg.wiadomosc(text="/start")
+    tg.wiadomosc(text="/zdjecie")
+    autopilot.obsluz_telegram()
+    assert "wybierz model zdjec" in tg.wyslane[-1][1]["text"]
+    baza.zapisz_ustawienia(modelka, zdjecia_model="nano_banana_2")
+    baza.zapisz_prompt(modelka, "zdjecia.txt", "portret\n")
+    cli.cena = 2
+    tg.wiadomosc(text="/zdjecie noemi")
+    autopilot.obsluz_telegram()
+    assert tg.pliki[-1][0] == "sendPhoto" and len(baza.lista_zdjec(modelka)) == 1
