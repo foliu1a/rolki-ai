@@ -4,7 +4,9 @@ CLI Higgsfield samo otwiera DOMYSLNA przegladarke (przez rundll32). Odpalamy je 
 bez System32, wiec tego nie zrobi - wypisze tylko link do strony logowania, ktory
 wylapujemy i otwieramy w Firefoksie. CLI dalej czeka na zatwierdzenie jak zwykle.
 
-Uzycie: python zaloguj_firefox.py [--sucho]   (--sucho = tylko pokaz link, nic nie otwieraj)
+Uzycie: python zaloguj_firefox.py [--sucho] [--prywatne]
+  --sucho     tylko pokaz link, nic nie otwieraj
+  --prywatne  okno prywatne Firefoksa (bez zapamietanego konta - do przelogowania na inne konto)
 """
 import os
 import re
@@ -24,6 +26,7 @@ LINK = re.compile(r"(file:///\S+|https?://\S+)")
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sucho = "--sucho" in sys.argv
+    tryb = "-private-window" if "--prywatne" in sys.argv else "-new-tab"
     if not HF.is_file():
         print(f"Nie ma CLI Higgsfield w {HF}. Odpal instaluj.bat w rolki-ai.")
         return 1
@@ -50,7 +53,7 @@ def main():
             print(f"[sucho] otworzylbym w Firefoksie: {znalezione.group(1)[:60]}...")
             proces.terminate()
             return 0
-        subprocess.Popen([str(firefox), "-new-tab", znalezione.group(1)])
+        subprocess.Popen([str(firefox), tryb, znalezione.group(1)])
         print(">> Otworzylem logowanie w Firefoksie. Zatwierdz tam i wroc do tego okna.", flush=True)
         otwarte = True
     return proces.wait()
