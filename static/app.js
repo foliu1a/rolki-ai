@@ -2203,7 +2203,7 @@ function renderStanKontaTelegram(v) {
   const jest = czaty.some(c => kontoTelegram(c.nazwa).toLowerCase() === konto.toLowerCase());
   if (!t.skonfigurowany) { el.textContent = 'Bot Telegram nie jest jeszcze podłączony – wklej token w Ustawienia → Konta.'; el.className = 'pole-info zle'; }
   else if (jest) { el.textContent = `${konto} jest sparowane z botem ✓ – gotowe rolki tej persony polecą tam.`; el.className = 'pole-info ok'; }
-  else { el.textContent = `${konto} nie napisało jeszcze /start do bota – do tego czasu rolki polecą na Twój główny czat.`; el.className = 'pole-info zle'; }
+  else { el.textContent = `${konto} nie napisało jeszcze /start do bota – gotowe rolki poczekają (dostaniesz o tym wiadomość na główny czat) i polecą tam, gdy to konto napisze /start.`; el.className = 'pole-info zle'; }
 }
 
 async function zapiszProfil(f) {
