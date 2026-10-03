@@ -199,6 +199,22 @@ def diagnoza():
             braki.append("zdjecia_dziennie bez modelu zdjec")
         braki += [u for u in sprawdz_prompt(slug, ust) if not u.startswith("brak promptu A")]
         wynik.append({"co": f"persona {slug}", "ok": not braki, "info": ", ".join(braki) or "gotowa"})
+        # foldery usera (pulpit): gdzie wrzuca, gdzie wychodzi
+        try:
+            wrzutnia, gotowe = baza.folder_zrodel(slug), baza.folder_gotowych(slug)
+            wynik.append({"co": f"foldery {slug}", "ok": os.path.isdir(wrzutnia) and os.path.isdir(gotowe),
+                          "info": f"wrzucasz: {wrzutnia} | gotowe: {gotowe}", "wrzutnia": wrzutnia, "gotowe": gotowe})
+        except OSError as e:
+            wynik.append({"co": f"foldery {slug}", "ok": False, "info": f"nie moge utworzyc folderow: {e}"})
+        # osobne konto Telegram persony - musi napisac /start do bota
+        konto = (ust.get("telegram_czat") or "").strip()
+        if konto:
+            try:
+                from dostawcy import telegram
+                cid, opis = telegram.czat_dla(konto) if telegram.skonfigurowany() else (None, "bot Telegram nie jest podlaczony")
+                wynik.append({"co": f"telefon {slug}", "ok": bool(cid), "info": f"rolki {slug} -> {konto}" if cid else opis})
+            except Exception as e:
+                wynik.append({"co": f"telefon {slug}", "ok": False, "info": str(e)})
     return wynik
 
 
@@ -592,12 +608,73 @@ def bezpiecznik(ust, dostawca="higgsfield"):
     return int(ust["min_kredyty"]), int(ust["max_kredyty_na_rolke"])
 
 
+def powod_odrzucenia(status, blad=""):
+    """Klasa niepowodzenia generacji: 'nsfw' (filtr tresci Higgsfield/Seedance), 'ip' (znana postac/marka),
+    'inny' albo None (nic nie wiadomo)."""
+    s, b = (status or "").lower(), (blad or "").lower()
+    if s in ("nsfw", "moderated") or "nsfw" in b or "moderat" in b or "content policy" in b or "safety" in b or "visual restriction" in b:
+        return "nsfw"
+    if s == "ip_detected" or "ip_detected" in b or "copyright" in b or "not eligible" in b:
+        return "ip"
+    return "inny" if (s or b) else None
+
+
+PODPOWIEDZ_NSFW = ("Filtr tresci Higgsfield/Seedance sprawdza WSZYSTKO naraz: filmik zrodlowy, zdjecia persony, zdjecie stroju "
+                   "i prompt - niewinny filmik odpada, gdy np. zdjecie stroju ma przeswitujaca siatke/koronke, bielizne albo duzo skory. "
+                   "Panel -> Pomoc -> 'Filtr NSFW' pokazuje, co u Ciebie moze go uruchamiac.")
+
+# Slowa w promptach, ktore filtr tresci (Higgsfield + Seedance) blokuje najczesciej - nawet przy niewinnym filmiku.
+SLOWA_RYZYKOWNE = ("sexy", "seductive", "sensual", "erotic", "erotica", "lingerie", "underwear", "bikini", "swimsuit", "nude", "naked",
+                   "topless", "see-through", "see through", "sheer", "transparent", "mesh", "fishnet", "cleavage", "bra", "panties",
+                   "thong", "breast", "breasts", "boobs", "nipple", "nipples", "butt", "ass", "booty", "twerk", "twerking", "provocative",
+                   "wet t-shirt", "lace", "latex", "bodysuit", "strip", "stripper", "lick", "licking", "moan", "kiss", "bedroom",
+                   "shower", "bath", "lap dance", "pole dance", "hot girl", "curvy", "curves", "tight dress", "mini skirt", "skimpy")
+
+
+def wskazowki_nsfw(slug, dni=14):
+    """Czemu Higgsfield odrzuca rolki persony jako NSFW: ile odrzucen (w ogole / ostatnie `dni`), ryzykowne slowa w promptach
+    A/B/zdjec i proste wskazowki po polsku. Zwraca {"odrzucone", "odrzucone_ostatnio", "slowa": {A,B,zdjecia}, "wskazowki": [...]}."""
+    from datetime import datetime, timedelta
+    granica = (datetime.now() - timedelta(days=dni)).strftime("%Y-%m-%d")
+    odrzucone = [p for p in baza.lista_pomyslow(slug)
+                 if p.get("powod") == "nsfw" or (p.get("status") == "blad" and "nsfw" in (p.get("notatki") or "").lower())]
+    ostatnio = [p for p in odrzucone if (p.get("zaktualizowano") or p.get("utworzono") or "")[:10] >= granica]
+    ust = baza.ustawienia_modelki(slug)
+    teksty = {"A": baza.prompt_bazowy(slug), "B": baza.prompt_stroj(slug), "zdjecia": "\n".join(baza.prompty_zdjec(slug))}
+    slowa = {}
+    for nazwa, tekst in teksty.items():
+        t = f" {re.sub(r'[^a-z0-9 -]+', ' ', (tekst or '').lower())} "
+        slowa[nazwa] = [s for s in SLOWA_RYZYKOWNE if f" {s} " in t or f" {s}s " in t]
+    wskazowki = []
+    if ostatnio:
+        wskazowki.append(f"Filtr odrzucil {len(ostatnio)} rolek w ostatnich {dni} dniach (razem {len(odrzucone)}). Kredyty za odrzucone wracaja.")
+    for nazwa, lista in slowa.items():
+        if lista:
+            gdzie = {"A": "prompcie A (stroj z filmu)", "B": "prompcie B (stroj ze zdjecia)", "zdjecia": "promptach zdjec"}[nazwa]
+            wskazowki.append(f"W {gdzie} sa slowa, ktore filtr lubi blokowac: {', '.join(lista)}. Zamien je na neutralne opisy "
+                             f"(np. 'black top' zamiast 'mesh top', 'outfit from the image' zamiast opisu materialu).")
+    stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
+    if stroje or ust.get("stroj_domyslny"):
+        wskazowki.append("Zdjecia strojow lecą do modelu razem z filmikiem - siatka, koronka, przeswity, bielizna albo duzo skory na "
+                         "zdjeciu stroju odrzucaja CALA rolke. Do rolek dawaj stroje 'bezpieczne', a odwazniejsze zostaw na zdjecia.")
+    wskazowki.append("Zdjecia persony w referencje/: najlepiej twarz + sylwetka w zwyklym ubraniu, bez bielizny/kostiumu kapielowego "
+                     "- te same zdjecia ida do kazdej rolki, wiec jedno ryzykowne psuje wszystkie.")
+    wskazowki.append("Filmik zrodlowy: taniec z bliskim kontaktem, skapy stroj, prysznic/lozko, bron lub krew w kadrze - filtr nie patrzy "
+                     "na kontekst. Sprobuj innego fragmentu albo krotszego ujecia (potnij w panelu: dziel_dlugie).")
+    wskazowki.append("Gdy odrzuca tylko czasem: to filtr WYNIKU (losowy) - jedna powtorka ma sens, wiecej nie. Fabryka po dwoch "
+                     "odrzuceniach z rzedu przestaje probowac.")
+    wskazowki.append("Jesli masz pewnosc, ze to pomylka filtra: Higgsfield -> Help Center -> zglos false positive (oddaja kredyty, "
+                     "ale decyzji filtra nie cofaja).")
+    return {"odrzucone": len(odrzucone), "odrzucone_ostatnio": len(ostatnio), "dni": dni, "slowa": slowa, "wskazowki": wskazowki}
+
+
 def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_referencji=False,
-            timeout="30m", log=None, stop=None, max_rolek=None):
+            timeout="30m", log=None, stop=None, max_rolek=None, lipsync=None):
     """Generacja pozycji 'nowy' z promptem (albo wskazanych id).
 
     potwierdz(p, koszt, saldo_po, dzis_po, limit) -> bool; None = bez pytania.
     stop = threading.Event (panel: STOP). max_rolek = ile rolek max w tym przebiegu (autopilot).
+    lipsync: None = wg ustawienia lipsync_auto (reczne "Zrob rolke"); False = nigdy (autopilot - lipsync tylko recznie).
     Zwraca {"wygenerowane": n, "bledy": [id], "pominiete": [id], "stop": powod|None}.
     """
     log = log or _log
@@ -670,12 +747,13 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
             wynik["pominiete"].append(p["id"])
             continue
 
-        urls, jid, blad = [], None, None
+        urls, jid, blad, powod = [], None, None, None
         proby = 1 + max(0, int(ust.get("powtorki") or 0))
         saldo_przed = saldo
         for proba in range(1, proby + 1):
             _sprawdz_stop(stop)
             _zdarzenie(log, slug, "info", f"#{p['id']}: start ({nazwa_dostawcy} {z['model'] if nazwa_dostawcy == 'higgsfield' else z['yapper'].get('model')}, ~{k} kr, proba {proba}/{proby}) - {p['opis']}", pomysl=p["id"])
+            stan = ""
             try:
                 job = d.generuj(z, timeout=timeout, log=log)
                 jid = job.get("job_id")
@@ -698,6 +776,12 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
                 saldo = d.saldo() or saldo
             except dostawcy.BladDostawcy:
                 pass
+            nowy_powod = powod_odrzucenia(stan, blad)
+            if nowy_powod == "nsfw" and powod == "nsfw":
+                # filtr tresci dwa razy z rzedu na tych samych wejsciach = to nie przypadek; kolejna proba to tylko stracony czas
+                _zdarzenie(log, slug, "uwaga", f"#{p['id']}: filtr tresci (NSFW) drugi raz z rzedu - nie probuje dalej", pomysl=p["id"])
+                break
+            powod = nowy_powod
             if proba < proby:
                 time.sleep(10)
 
@@ -716,8 +800,15 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
             baza.dziennik_zapisz("kredyty", f"#{p['id']}: {zuzyte} kr ({nazwa_dostawcy}), dzis {wydano}/{limit_dnia}", modelka=slug, pomysl=p["id"], kredyty=zuzyte, dostawca=nazwa_dostawcy)
 
         if not urls:
-            baza.aktualizuj_pomysl(slug, p["id"], status="blad", job_id=jid, koszt=zuzyte, dostawca=nazwa_dostawcy, notatki=(blad or "")[:2000])
-            _zdarzenie(log, slug, "blad", f"#{p['id']}: BLAD po {proby} probach (zuzyte {zuzyte} kr) - status blad, zostaje w kolejce", pomysl=p["id"])
+            baza.aktualizuj_pomysl(slug, p["id"], status="blad", job_id=jid, koszt=zuzyte, dostawca=nazwa_dostawcy, notatki=(blad or "")[:2000],
+                                   powod=powod)
+            if powod == "nsfw":
+                _zdarzenie(log, slug, "blad", f"#{p['id']}: ODRZUCONE przez filtr tresci (NSFW), zuzyte {zuzyte} kr. {PODPOWIEDZ_NSFW}", pomysl=p["id"], powod="nsfw")
+            elif powod == "ip":
+                _zdarzenie(log, slug, "blad", f"#{p['id']}: ODRZUCONE - model wykryl znana postac/marke (ip_detected), zuzyte {zuzyte} kr. "
+                           f"Sprawdz, czy w filmiku/zdjeciach nie ma logo, celebryty albo postaci z filmu.", pomysl=p["id"], powod="ip")
+            else:
+                _zdarzenie(log, slug, "blad", f"#{p['id']}: BLAD po {proby} probach (zuzyte {zuzyte} kr) - status blad, zostaje w kolejce", pomysl=p["id"])
             wynik["bledy"].append(p["id"])
             continue
 
@@ -742,7 +833,8 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
         gotowy = _postprodukcja(slug, p["id"], surowy, nazwa, ust, log=log)
         if gotowy:
             _zdarzenie(log, slug, "ok", f"#{p['id']}: GOTOWE -> {gotowy}", pomysl=p["id"], plik=gotowy)
-        _lipsync_po_generacji(slug, p, gotowy or surowy, ust, log)
+        if lipsync is not False:
+            _lipsync_po_generacji(slug, p, gotowy or surowy, ust, log)
 
     log(f"koniec: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} kr")
     return wynik
@@ -970,8 +1062,30 @@ def cmd_pierz(args):
 def cmd_zdjecia(args):
     import zdjecia
     slug = _slug(args.modelka)
-    w = zdjecia.generuj(slug, ile=args.ile, prompt=args.prompt, dry_run=args.dry_run)
+    w = zdjecia.generuj(slug, ile=args.ile, prompt=args.prompt, dry_run=args.dry_run, stroj=args.stroj)
     return 0 if not w.get("stop") else 1
+
+
+def cmd_foldery(args):
+    """Tworzy foldery persony na pulpicie (tu wrzucasz rolki / tu rolki zrobione / tu zdjecia zrobione) i pokazuje sciezki."""
+    slugi = [_slug(args.modelka)] if args.modelka else baza.lista_modelek()
+    for slug in slugi:
+        w = baza.przygotuj_foldery_pulpitu(slug)
+        print(f"{slug}:")
+        for klucz, opis in (("zrodla_dir", "wrzucasz tu"), ("wyniki_dir", "gotowe rolki"), ("zdjecia_dir", "gotowe zdjecia")):
+            print(f"  {opis:14} {w['foldery'].get(klucz, '?')}" + ("   (nowe)" if klucz in w["zmienione"] else ""))
+    return 0
+
+
+def cmd_nsfw(args):
+    w = wskazowki_nsfw(_slug(args.modelka))
+    print(f"odrzucone przez filtr: {w['odrzucone']} (ostatnie {w['dni']} dni: {w['odrzucone_ostatnio']})")
+    for k, v in w["slowa"].items():
+        if v:
+            print(f"ryzykowne slowa w prompcie {k}: {', '.join(v)}")
+    for linia in w["wskazowki"]:
+        print(f"- {linia}")
+    return 0
 
 
 def cmd_lipsync(args):
@@ -1071,9 +1185,11 @@ def main(argv=None):
     s = sub.add_parser("podpis", help="podpis z banku tekstow -> wyniki/<id>_podpis.txt"); s.add_argument("id", type=int); s.set_defaults(f=cmd_podpis)
     s = sub.add_parser("wgraj", help="wgraj referencje/stroje raz (UUID w cache, szybsze koszt/generuj)"); s.add_argument("--od-nowa", action="store_true"); s.set_defaults(f=cmd_wgraj)
     s = sub.add_parser("pierz", help="Media Tool na wyniku pomyslu (albo --plik dowolny.mp4)"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--plik"); s.set_defaults(f=cmd_pierz)
-    s = sub.add_parser("zdjecia", help="zdjecia persony (model obrazu z referencjami)"); s.add_argument("--ile", type=int, default=1); s.add_argument("--prompt"); s.add_argument("--dry-run", action="store_true"); s.set_defaults(f=cmd_zdjecia)
-    s = sub.add_parser("lipsync", help="wideo + glos -> lipsync (sync.so)"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--wideo"); s.add_argument("--audio"); s.set_defaults(f=cmd_lipsync)
-    s = sub.add_parser("autopilot", help="petla: skanuj -> generuj -> pranie -> lipsync -> zdjecia (--raz = jeden przebieg)"); s.add_argument("--raz", action="store_true"); s.set_defaults(f=cmd_autopilot)
+    s = sub.add_parser("zdjecia", help="zdjecia persony (model obrazu z referencjami; --stroj auto|bez|plik = strój ze stroje/)"); s.add_argument("--ile", type=int, default=1); s.add_argument("--prompt"); s.add_argument("--stroj"); s.add_argument("--dry-run", action="store_true"); s.set_defaults(f=cmd_zdjecia)
+    s = sub.add_parser("lipsync", help="wideo + glos -> lipsync (sync.so) - tylko recznie, autopilot tego nie robi"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--wideo"); s.add_argument("--audio"); s.set_defaults(f=cmd_lipsync)
+    s = sub.add_parser("autopilot", help="petla: telefon -> skanuj -> generuj -> pranie -> zdjecia -> podpisy (--raz = jeden przebieg; bez lipsyncu)"); s.add_argument("--raz", action="store_true"); s.set_defaults(f=cmd_autopilot)
+    s = sub.add_parser("foldery", help="foldery na pulpicie: tu wrzucasz rolki / tu rolki zrobione / tu zdjecia zrobione (per persona)"); s.set_defaults(f=cmd_foldery)
+    s = sub.add_parser("nsfw", help="czemu filtr tresci odrzuca rolki tej persony (slowa w promptach, liczba odrzucen, wskazowki)"); s.set_defaults(f=cmd_nsfw)
     s = sub.add_parser("budzet", help="limit dzienny kredytow: max_kredyty_dziennie=300 [--dostawca yapper]"); s.add_argument("pary", nargs="*"); s.add_argument("--dostawca", default="higgsfield", choices=dostawcy.NAZWY); s.set_defaults(f=cmd_budzet)
     s = sub.add_parser("ustaw", help="pokaz/zmien ustawienia: klucz=wartosc ..."); s.add_argument("pary", nargs="*"); s.set_defaults(f=cmd_ustaw)
 

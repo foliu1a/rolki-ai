@@ -49,6 +49,8 @@ USTAWIENIA_DOMYSLNE = {
     "autopilot_max_rolek_dziennie": 10,   # bezpiecznik ilosciowy (oprocz limitu kredytow)
     "autopilot_stop_po_bledach": 3,       # tyle nieudanych rolek z rzedu = autopilot sie zatrzymuje (hamulec), 0 = nigdy
     "telegram_wysylaj": True,             # gotowe rolki (i zdjecia) leca na telefon przez bota Telegram
+    "telegram_czat": "",                  # konto Telegram tej persony, np. "@huy7128" - tam leca jej gotowe rolki ("" = czat glowny);
+                                          # to konto musi raz napisac /start do bota (inaczej Telegram nie pozwala botowi pisac)
     "dziel_dlugie": True,                 # filmik dluzszy niz 30 s (max Seedance) tnij na kawalki po 30 s
     "sprzataj_po_dniach": 14,             # autopilot kasuje surowe wyniki (.raw.mp4) starsze niz tyle dni, gdy gotowy plik istnieje (0 = nigdy)
     # --- zdjecia persony ---
@@ -57,10 +59,13 @@ USTAWIENIA_DOMYSLNE = {
     "zdjecia_prompty": "prompty/zdjecia.txt",   # jedna linia = jeden prompt; autopilot bierze po kolei (w kolko)
     "zdjecia_parametry": {},        # parametry modelu obrazu, np. {"aspect_ratio": "3:4"}
     "zdjecia_dir": "",              # gotowe zdjecia poza projektem ("" = modelki/<slug>/zdjecia)
-    # --- lipsync ---
+    "zdjecia_stroje": True,         # co drugie zdjecie: persona w stroju ze stroje/ (character elements; po kolei), gdy stroje sa
+    "zdjecia_prompt_stroj": "She is wearing exactly the outfit from the last reference image - same garment, cut, colors and material.",
+                                    # dopisek do promptu zdjecia, gdy dolaczamy zdjecie stroju (ostatni obraz)
+    # --- lipsync (tylko recznie z panelu; autopilot NIGDY nie robi lipsyncu) ---
     "lipsync_dostawca": "sync",     # sync (sync.so API) | higgsfield (model lipsync z CLI)
     "lipsync_model": "lipsync-2",   # model sync.so albo job_type modelu Higgsfield
-    "lipsync_auto": True,           # po generacji: jesli obok zrodla lezy <nazwa>.audio.mp3 -> zrob lipsync
+    "lipsync_auto": False,          # przy RECZNYM "Zrob rolke": jesli obok zrodla lezy <nazwa>.audio.mp3 -> od razu lipsync (autopilot pomija)
     "lipsync_parametry": {},        # np. {"sync_mode": "loop"}
     "tts_model": "",                # job_type modelu text-to-speech Higgsfield (z `model list --audio`), "" = brak
     "tts_glos": "",                 # voice id z `higgsfield voices list`
@@ -277,6 +282,131 @@ def folder_gotowych(slug):
     folder = (ustawienia_modelki(slug).get("wyniki_dir") or "").strip() or os.path.join(folder_modelki(slug), "wyniki")
     os.makedirs(folder, exist_ok=True)
     return folder
+
+
+# ---------------- foldery usera na pulpicie ----------------
+# Pulpit\ROLKI AI\tu wrzucasz rolki\<persona>   -> zrodla_dir   (wrzutnia)
+# Pulpit\ROLKI AI\tu rolki zrobione\<persona>   -> wyniki_dir   (gotowe, po Media Tool)
+# Pulpit\ROLKI AI\tu zdjecia zrobione\<persona> -> zdjecia_dir
+# Stare foldery "przed"/"po" (ROLKI AI\przed\<persona>) sa przenoszone pod nowe nazwy razem ze sciezkami w kolejce.
+
+NAZWA_FOLDERU_PULPITU = "ROLKI AI"
+FOLDERY_PULPITU = {"zrodla_dir": "tu wrzucasz rolki", "wyniki_dir": "tu rolki zrobione", "zdjecia_dir": "tu zdjecia zrobione"}
+STARE_FOLDERY_PULPITU = {"zrodla_dir": "przed", "wyniki_dir": "po"}
+
+
+def _pulpit_systemu():
+    """Folder Pulpit uzytkownika (Windows: z shell32, dziala tez z OneDrive); poza Windows ~/Desktop albo ~."""
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0010, None, 0, buf) == 0 and buf.value:   # CSIDL_DESKTOPDIRECTORY
+                return buf.value
+        except Exception:
+            pass
+    for kandydat in (os.path.join(home, "Desktop"), os.path.join(home, "Pulpit")):
+        if os.path.isdir(kandydat):
+            return kandydat
+    return home
+
+
+def pulpit():
+    """Folder 'ROLKI AI' na pulpicie (ROLKI_PULPIT w env nadpisuje - testy, inny dysk)."""
+    return os.environ.get("ROLKI_PULPIT") or os.path.join(_pulpit_systemu(), NAZWA_FOLDERU_PULPITU)
+
+
+def _nazwa_folderu_persony(slug):
+    nazwa = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", (profil_modelki(slug).get("nazwa") or slug).strip()).strip(" .")
+    return nazwa or slug
+
+
+def foldery_pulpitu(slug):
+    """Docelowe foldery persony na pulpicie: {"zrodla_dir": ..., "wyniki_dir": ..., "zdjecia_dir": ...} (bez tworzenia)."""
+    nazwa = _nazwa_folderu_persony(slug)
+    return {k: os.path.join(pulpit(), v, nazwa) for k, v in FOLDERY_PULPITU.items()}
+
+
+def _ta_sama_sciezka(a, b):
+    return os.path.normcase(os.path.normpath(os.path.abspath(a))) == os.path.normcase(os.path.normpath(os.path.abspath(b)))
+
+
+def _przepisz_sciezki(slug, stary, nowy):
+    """Po przeniesieniu folderu: sciezki w pomysly.json / zdjecia.json / lipsync.json dostaja nowy prefiks."""
+    stary_n = os.path.normcase(os.path.normpath(os.path.abspath(stary))) + os.sep
+
+    def _zamien(v):
+        if isinstance(v, str) and os.path.normcase(os.path.normpath(v)).startswith(stary_n):
+            return os.path.join(nowy, os.path.normpath(v)[len(stary_n):])
+        return v
+
+    for plik in (_plik_pomyslow(slug), _plik_zdjec(slug), _plik_lipsync(slug)):
+        lista = _wczytaj_json(plik, None)
+        if not isinstance(lista, list):
+            continue
+        zmienione = False
+        for w in lista:
+            if isinstance(w, dict):
+                for k, v in list(w.items()):
+                    nv = _zamien(v)
+                    if nv != v:
+                        w[k], zmienione = nv, True
+        if zmienione:
+            _zapisz_json(plik, lista)
+
+
+def przygotuj_foldery_pulpitu(slug):
+    """Tworzy foldery persony na pulpicie i wpisuje je w ustawienia (zrodla_dir / wyniki_dir / zdjecia_dir), gdy ustawienie
+    jest puste albo wskazuje stary folder ROLKI AI\\przed|po\\... (ten jest przenoszony pod nowa nazwe, sciezki w kolejce
+    tez). Wlasny folder usera (inny) zostaje bez zmian. Zwraca {"foldery": {klucz: sciezka}, "zmienione": {...}}."""
+    ust = ustawienia_modelki(slug)
+    docelowe = foldery_pulpitu(slug)
+    zmiany, foldery = {}, {}
+    for klucz, cel in docelowe.items():
+        obecny = (ust.get(klucz) or "").strip()
+        if obecny and _ta_sama_sciezka(obecny, cel):
+            os.makedirs(cel, exist_ok=True)
+            foldery[klucz] = cel
+            continue
+        if obecny:
+            stary = STARE_FOLDERY_PULPITU.get(klucz)
+            jest_stary = bool(stary) and _ta_sama_sciezka(os.path.dirname(obecny), os.path.join(pulpit(), stary))
+            if not jest_stary:
+                foldery[klucz] = obecny      # user ma wlasny folder - nie ruszamy
+                continue
+            if os.path.isdir(obecny) and os.path.exists(cel):
+                foldery[klucz] = obecny      # oba istnieja - nic nie przenosimy, zeby nic nie zginelo
+                continue
+            if os.path.isdir(obecny):
+                os.makedirs(os.path.dirname(cel), exist_ok=True)
+                try:
+                    os.rename(obecny, cel)
+                    _przepisz_sciezki(slug, obecny, cel)
+                except OSError:
+                    foldery[klucz] = obecny
+                    continue
+                try:
+                    os.rmdir(os.path.dirname(obecny))    # puste "przed"/"po" won
+                except OSError:
+                    pass
+        os.makedirs(cel, exist_ok=True)
+        zmiany[klucz] = cel
+        foldery[klucz] = cel
+    if zmiany:
+        zapisz_ustawienia(slug, **zmiany)
+    return {"foldery": foldery, "zmienione": zmiany}
+
+
+def przygotuj_foldery_pulpitu_wszystkich():
+    """Dla kazdej persony (panel przy starcie). Zwraca {slug: wynik}; bledy (np. brak praw) nie wywalaja."""
+    wynik = {}
+    for slug in lista_modelek():
+        try:
+            wynik[slug] = przygotuj_foldery_pulpitu(slug)
+        except OSError as e:
+            wynik[slug] = {"foldery": {}, "zmienione": {}, "blad": str(e)}
+    return wynik
 
 
 # ---------------- budzet dzienny (wspolny) ----------------
@@ -654,12 +784,12 @@ def lista_zdjec(slug):
     return _wczytaj_json(_plik_zdjec(slug), [])
 
 
-def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki=""):
+def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki="", stroj=None):
     plik_json = _plik_zdjec(slug)
     zdjecia = _wczytaj_json(plik_json, [])
     nowy_id = (max((z["id"] for z in zdjecia), default=0)) + 1
     zdjecia.append({"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
-                    "status": status, "notatki": notatki, "utworzono": _teraz()})
+                    "status": status, "notatki": notatki, "stroj": stroj, "utworzono": _teraz()})
     _zapisz_json(plik_json, zdjecia)
     return nowy_id
 
@@ -698,7 +828,8 @@ def nastepny_prompt_zdjecia(slug):
     plik = os.path.join(folder_modelki(slug), "zdjecia_stan.json")
     stan = _wczytaj_json(plik, {"indeks": 0})
     i = int(stan.get("indeks", 0)) % len(prompty)
-    _zapisz_json(plik, {"indeks": i + 1})
+    stan["indeks"] = i + 1          # w tym samym pliku siedzi tez licznik strojow (zdjecia._nastepny_stroj) - nie nadpisuj
+    _zapisz_json(plik, stan)
     return prompty[i], i
 
 

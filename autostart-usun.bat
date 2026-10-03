@@ -1,5 +1,7 @@
 @echo off
 title rolki-ai - wylacz autostart
+cd /d "%~dp0"
+wscript.exe //nologo "%~dp0skroty.vbs" autostart-usun
 schtasks /Delete /TN "rolki-ai" /F >nul 2>&1
-echo Autostart wylaczony. Panel w tle (jesli dziala) zatrzymaj: zamknij procesy python w Menedzerze zadan albo uruchom ponownie komputer.
+echo Autostart wylaczony. Panel w tle (jesli dziala) zatrzymaj: aktualizuj.bat go zamyka, albo uruchom ponownie komputer.
 pause

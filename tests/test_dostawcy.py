@@ -271,11 +271,14 @@ def test_lipsync_blad_zapisany(bez_mediatool_modelka, monkeypatch):
 
 
 def test_lipsync_auto_po_generacji(bez_mediatool_modelka, cli, monkeypatch):
-    """<nazwa>.audio.mp3 obok zrodla -> po generacji automatyczny lipsync."""
+    """<nazwa>.audio.mp3 obok zrodla + lipsync_auto=true -> po RECZNEJ generacji automatyczny lipsync.
+    Domyslnie lipsync_auto jest wylaczone, a autopilot (generuj(lipsync=False)) nigdy go nie robi."""
     slug = bez_mediatool_modelka
     monkeypatch.setattr(fabryka.klatki, "info", lambda p: {"czas": 5.0, "szer": 720, "wys": 1280, "fps": 30})
     monkeypatch.setattr(fabryka.klatki, "wytnij", lambda *a, **k: [])
     monkeypatch.setattr(fabryka.klatki, "arkusz", lambda *a, **k: None)
+    assert baza.USTAWIENIA_DOMYSLNE["lipsync_auto"] is False
+    baza.zapisz_ustawienia(slug, lipsync_auto=True)
     zr = baza.folder_zrodel(slug)
     open(os.path.join(zr, "mowa.mp4"), "wb").write(b"v")
     open(os.path.join(zr, "mowa.audio.mp3"), "wb").write(b"a")
@@ -285,8 +288,16 @@ def test_lipsync_auto_po_generacji(bez_mediatool_modelka, cli, monkeypatch):
     assert baza.pomysl(slug, 1)["audio"].endswith("mowa.audio.mp3")
     fabryka.generuj(slug)
     assert len(wywolania) == 1 and wywolania[0][0].endswith("001_mowa.mp4") and wywolania[0][1].endswith("mowa.audio.mp3")
-    baza.zapisz_ustawienia(slug, lipsync_auto=False)
+    # autopilot: lipsync_auto wlaczone, glos jest - i tak bez lipsyncu
     open(os.path.join(zr, "mowa2.mp4"), "wb").write(b"v"); open(os.path.join(zr, "mowa2.audio.mp3"), "wb").write(b"a")
+    fabryka.skanuj(slug); fabryka.generuj(slug, lipsync=False)
+    assert len(wywolania) == 1 and baza.pomysl(slug, 2)["status"] == "gotowe"
+    import autopilot
+    monkeypatch.setattr(fabryka, "_plik_sie_zmienia", lambda p, odstep=0: False)
+    open(os.path.join(zr, "mowa3.mp4"), "wb").write(b"v"); open(os.path.join(zr, "mowa3.audio.mp3"), "wb").write(b"a")
+    assert autopilot.przebieg(slug)["wygenerowane"] == 1 and len(wywolania) == 1
+    baza.zapisz_ustawienia(slug, lipsync_auto=False)
+    open(os.path.join(zr, "mowa4.mp4"), "wb").write(b"v"); open(os.path.join(zr, "mowa4.audio.mp3"), "wb").write(b"a")
     fabryka.skanuj(slug); fabryka.generuj(slug)
     assert len(wywolania) == 1
 

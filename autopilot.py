@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """Autopilot: w petli, dla kazdej modelki z `autopilot: true`:
 
-    telefon (Telegram) -> wrzutnia  |  skanuj -> generuj (bezpiecznik kredytow + max rolek dziennie + hamulec)
-    -> Media Tool -> lipsync (jesli jest glos) -> zdjecia (zdjecia_dziennie) -> podpisy -> gotowa rolka na telefon
-    + raport dnia na telefon
+    telefon (Telegram) -> wrzutnia  |  skanuj -> generuj (Higgsfield albo yapper; bezpiecznik kredytow + max rolek
+    dziennie + hamulec) -> Media Tool -> zdjecia (zdjecia_dziennie) -> podpisy -> gotowa rolka na telefon (konto persony
+    z `telegram_czat` albo czat glowny) + raport dnia na telefon.
+    Autopilot NIE robi lipsyncu (dopasowanie ust jest tylko recznie: panel -> Lipsync).
 
 Uzycie:  python autopilot.py            petla (co `autopilot_co_minut` z ustawien; z Telegramem co minute; Ctrl+C konczy)
          python autopilot.py --raz      jeden przebieg i koniec (np. z Harmonogramu zadan Windows)
@@ -30,11 +31,12 @@ if sys.platform == "win32":
 
 STAN = {"trwa": False, "ostatni": None, "nastepny": None, "modelka": None, "etap": "", "przebiegi": 0,
         "telegram_wiadomosci": 0}
+_OSTRZEZENIA = set()            # ostrzezenia wyslane raz na uruchomienie (np. konto persony bez /start)
 ODSTEP_TELEGRAM_S = 60          # z telefonem sprawdzamy wiadomosci co minute
 RAPORT_GODZINA = 20             # raport dnia na telefon po tej godzinie (lokalnie)
 POMOC = ("Jestem fabryka rolek.\n"
          "- Wyslij mi filmik (mp4) - zrobie z niego rolke i odesle gotowa. W podpisie mozesz wpisac nazwe persony.\n"
-         "- Wyslij nagranie glosu z podpisem = nazwa filmiku - dopasuje usta.\n"
+         "- Nagranie glosu z podpisem = nazwa filmiku zapisze przy tej rolce (usta dopasujesz w panelu -> Lipsync).\n"
          "- /status - co w kolejce i ile wydane\n- /raport - podsumowanie dnia\n- /zdjecie [persona] - zrob jedno zdjecie teraz\n"
          "- /stop - zatrzymaj robienie rolek\n- /wznow - wznow\n- /pomoc - ta lista")
 
@@ -73,8 +75,19 @@ def wyslij_na_telefon(tekst):
         return False
 
 
-def persona_z_tekstu(tekst):
-    """'noemi' / '@Noemi' / 'Noemi dance' w podpisie -> slug; bez trafienia: aktywna, potem pierwsza z autopilotem, potem pierwsza."""
+def _dozwolone_czaty():
+    """Konta Telegram person z ustawien telegram_czat -> {"huy7128": "noemi"} (bot paruje tylko te i czat glowny)."""
+    wynik = {}
+    for slug in baza.lista_modelek():
+        konto = (baza.ustawienia_modelki(slug).get("telegram_czat") or "").strip().lstrip("@").lower()
+        if konto:
+            wynik[konto] = slug
+    return wynik
+
+
+def persona_z_tekstu(tekst, domyslna=None):
+    """'noemi' / '@Noemi' / 'Noemi dance' w podpisie -> slug; bez trafienia: `domyslna` (persona czatu, z ktorego
+    przyszla wiadomosc), potem aktywna, potem pierwsza z autopilotem, potem pierwsza."""
     modelki = baza.lista_modelek()
     if not modelki:
         return None
@@ -83,6 +96,8 @@ def persona_z_tekstu(tekst):
         nazwa = (baza.profil_modelki(slug).get("nazwa") or "").lower()
         if slug.lower() in slowa or (nazwa and nazwa in slowa):
             return slug
+    if domyslna in modelki:
+        return domyslna
     aktywna = baza.aktywna_modelka()
     if aktywna in modelki:
         return aktywna
@@ -149,67 +164,86 @@ def raport_dnia(wymus=False):
 
 def _obsluz_wiadomosc(tg, w, log):
     typ, tekst = w["typ"], (w.get("tekst") or "").strip()
+    cid = w.get("chat_id")
+    glowny = w.get("glowny", True)
+    persona_czatu = w.get("persona")
+
+    def odp(t):
+        tg.wyslij_tekst(t, chat_id=cid)     # odpowiadamy tam, skad przyszla wiadomosc (czat glowny albo konto persony)
+
     if typ == "tekst":
         kom = tekst.split()[0].lower() if tekst else ""
         if kom in ("/start", "/pomoc", "/help", "/menu"):
-            tg.wyslij_tekst("Sparowane - od teraz wysylam tu gotowe rolki.\n\n" + POMOC)
+            if glowny:
+                odp("Sparowane - od teraz wysylam tu gotowe rolki.\n\n" + POMOC)
+            else:
+                odp(f"Sparowane - tu beda przychodzic gotowe rolki persony {persona_czatu or '?'}.\n\n" + POMOC)
+                if w.get("nowy"):
+                    wyslij_na_telefon(f"Konto @{w.get('od') or cid} sparowane - bedzie dostawac rolki persony {persona_czatu or '?'}.")
         elif kom == "/status":
-            tg.wyslij_tekst(_status_tekst())
+            odp(_status_tekst())
         elif kom == "/raport":
-            tg.wyslij_tekst(raport_dnia(wymus=True) or "Brak danych.")
+            odp(raport_dnia(wymus=True) or "Brak danych.")
         elif kom == "/stop":
+            if not glowny:
+                odp("Zatrzymac moze tylko czat glowny (telefon wlasciciela).")
+                return {"typ": "komenda", "tekst": kom, "odmowa": True}
             for slug in baza.lista_modelek():
                 baza.autopilot_pauza(slug, "zatrzymane z telefonu (/stop)")
             baza.dziennik_zapisz("uwaga", "autopilot zatrzymany z telefonu (/stop)")
-            tg.wyslij_tekst("Zatrzymane. Filmiki nadal zbieram, ale nie robie rolek. /wznow - zeby wznowic.")
+            odp("Zatrzymane. Filmiki nadal zbieram, ale nie robie rolek. /wznow - zeby wznowic.")
         elif kom in ("/wznow", "/dalej", "/go"):
+            if not glowny:
+                odp("Wznowic moze tylko czat glowny (telefon wlasciciela).")
+                return {"typ": "komenda", "tekst": kom, "odmowa": True}
             for slug in baza.lista_modelek():
                 baza.autopilot_wznow(slug)
             baza.dziennik_zapisz("info", "autopilot wznowiony z telefonu (/wznow)")
-            tg.wyslij_tekst("Wznowione. Robie dalej.")
+            odp("Wznowione. Robie dalej.")
         elif kom in ("/zdjecie", "/foto"):
-            slug = persona_z_tekstu(" ".join(tekst.split()[1:]))
+            slug = persona_z_tekstu(" ".join(tekst.split()[1:]), domyslna=persona_czatu)
             ust = baza.ustawienia_modelki(slug) if slug else {}
             if not slug or not ust.get("zdjecia_model"):
-                tg.wyslij_tekst("Najpierw wybierz model zdjec w panelu (Ustawienia -> Zdjecia).")
+                odp("Najpierw wybierz model zdjec w panelu (Ustawienia -> Zdjecia).")
             else:
                 import zdjecia
-                tg.wyslij_tekst(f"Robie zdjecie ({slug})...")
+                odp(f"Robie zdjecie ({slug})...")
                 w = zdjecia.generuj(slug, ile=1, log=log)
                 if w["zrobione"]:
                     wyslij_zdjecia(slug, log=log)
                 else:
-                    tg.wyslij_tekst(f"Nie wyszlo: {w.get('stop') or 'blad generacji'}")
+                    odp(f"Nie wyszlo: {w.get('stop') or 'blad generacji'}")
             return {"typ": "komenda", "tekst": kom, "modelka": slug}
         else:
-            tg.wyslij_tekst("Nie rozumiem. Wyslij filmik albo /pomoc.")
+            odp("Nie rozumiem. Wyslij filmik albo /pomoc.")
         return {"typ": "komenda", "tekst": kom}
 
     if typ == "wideo":
-        slug = persona_z_tekstu(tekst)
+        slug = persona_z_tekstu(tekst, domyslna=persona_czatu)
         if not slug:
-            tg.wyslij_tekst("Nie mam zadnej persony - dodaj ja w panelu.")
+            odp("Nie mam zadnej persony - dodaj ja w panelu.")
             return {"typ": "wideo", "blad": "brak persony"}
         if (w.get("rozmiar") or 0) > tg.LIMIT_POBIERANIA:
-            tg.wyslij_tekst("Ten filmik ma ponad 20 MB - Telegram nie pozwala botom go pobrac. Wrzuc go do folderu na komputerze.")
+            odp("Ten filmik ma ponad 20 MB - Telegram nie pozwala botom go pobrac. Wrzuc go do folderu na komputerze.")
             return {"typ": "wideo", "blad": "za duzy"}
         nazwa = _nazwa_pliku(w.get("nazwa"), ".mp4")
         cel = _unikalna(os.path.join(baza.folder_zrodel(slug), nazwa))
         tg.pobierz_plik(w["file_id"], cel)
         baza.dziennik_zapisz("info", f"z telefonu: {os.path.basename(cel)} -> wrzutnia {slug}", modelka=slug)
         log(f"telegram: {os.path.basename(cel)} -> {slug}")
-        tg.wyslij_tekst(f"Mam: {os.path.basename(cel)} -> {slug}. Zrobie rolke i odesle, jak bedzie gotowa.")
+        odp(f"Mam: {os.path.basename(cel)} -> {slug}. Zrobie rolke i odesle, jak bedzie gotowa.")
         return {"typ": "wideo", "plik": cel, "modelka": slug}
 
     if typ == "audio":
-        slug = persona_z_tekstu(tekst)
+        slug = persona_z_tekstu(tekst, domyslna=persona_czatu)
         if not slug:
-            tg.wyslij_tekst("Nie mam zadnej persony - dodaj ja w panelu.")
+            odp("Nie mam zadnej persony - dodaj ja w panelu.")
             return {"typ": "audio", "blad": "brak persony"}
         ext = os.path.splitext(w.get("nazwa") or "")[1].lower() or ".mp3"
         if ext not in baza.ROZSZERZENIA_AUDIO:
             ext = ".mp3"
-        # podpis = nazwa filmiku we wrzutni -> glos sparowany z tym klipem (<nazwa>.audio.<ext>) -> lipsync po generacji
+        # podpis = nazwa filmiku we wrzutni -> glos zapisany obok klipu (<nazwa>.audio.<ext>) i przy rolce (pole audio);
+        # usta dopasowuje user recznie w panelu -> Lipsync (autopilot nie robi lipsyncu)
         wrzutnia = baza.folder_zrodel(slug)
         cel, para = None, None
         for slowo in [tekst] + tekst.split():
@@ -226,17 +260,17 @@ def _obsluz_wiadomosc(tg, w, log):
                                                    if os.path.isfile(os.path.join(wrzutnia, para + e))))
             if p:
                 baza.aktualizuj_pomysl(slug, p["id"], audio=cel)
-            tg.wyslij_tekst(f"Mam glos do {para} - po zrobieniu rolki dopasuje usta.")
+            odp(f"Mam glos do {para} - zapisany przy tej rolce. Usta dopasujesz w panelu -> Lipsync (jednym kliknieciem).")
         else:
-            tg.wyslij_tekst(f"Mam nagranie ({os.path.basename(cel)}). Zeby dopasowac usta do konkretnego filmiku, "
-                            f"wyslij je z podpisem = nazwa tego filmiku, albo zrob to w panelu -> Lipsync.")
+            odp(f"Mam nagranie ({os.path.basename(cel)}) - lezy w folderze audio persony. Usta dopasujesz w panelu -> Lipsync; "
+                f"jesli to glos do konkretnego filmiku, wyslij je z podpisem = nazwa tego filmiku.")
         baza.dziennik_zapisz("info", f"z telefonu: glos {os.path.basename(cel)} ({slug})", modelka=slug)
         return {"typ": "audio", "plik": cel, "modelka": slug}
 
     if typ == "zdjecie":
-        tg.wyslij_tekst("Zdjecia persony i strojow dodaje sie w panelu (Ustawienia -> Persona). Filmiki moge brac stad.")
+        odp("Zdjecia persony i strojow dodaje sie w panelu (Ustawienia -> Persona). Filmiki moge brac stad.")
         return {"typ": "zdjecie"}
-    tg.wyslij_tekst("Nie wiem, co z tym zrobic. Wyslij filmik (mp4) albo /pomoc.")
+    odp("Nie wiem, co z tym zrobic. Wyslij filmik (mp4) albo /pomoc.")
     return {"typ": typ}
 
 
@@ -247,7 +281,7 @@ def obsluz_telegram(log=None):
     if not tg:
         return []
     try:
-        wiadomosci = tg.odbierz()
+        wiadomosci = tg.odbierz(dozwolone=_dozwolone_czaty())
     except Exception as e:
         log(f"telegram: nie moge odebrac ({e})")
         return []
@@ -260,10 +294,27 @@ def obsluz_telegram(log=None):
             log(f"telegram: {e}")
             baza.dziennik_zapisz("blad", f"telegram: {e}")
             try:
-                tg.wyslij_tekst(f"Nie udalo sie: {e}")
+                tg.wyslij_tekst(f"Nie udalo sie: {e}", chat_id=w.get("chat_id"))
             except Exception:
                 pass
     return zrobione
+
+
+def czat_persony(tg, slug, ust=None, log=None):
+    """Czat, na ktory leca gotowe rolki/zdjecia persony: konto z `telegram_czat` albo czat glowny.
+    Zwraca chat_id albo None (konto persony nie napisalo jeszcze /start - ostrzezenie raz na uruchomienie)."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    cid, opis = tg.czat_dla(ust.get("telegram_czat"))
+    if cid:
+        return cid
+    klucz = f"czat:{slug}:{(ust.get('telegram_czat') or '').strip().lower()}"
+    if klucz not in _OSTRZEZENIA:
+        _OSTRZEZENIA.add(klucz)
+        tekst = f"{slug}: rolki czekaja - {opis}. Z tego konta napisz /start do bota, wtedy wysle."
+        baza.dziennik_zapisz("uwaga", "telegram: " + tekst, modelka=slug)
+        (log or _log)("telegram: " + tekst)
+        wyslij_na_telefon(tekst)
+    return None
 
 
 def _swiezy(p, godzin=24):
@@ -284,17 +335,22 @@ def wyslij_gotowe(slug, log=None):
     ust = baza.ustawienia_modelki(slug)
     if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
         return 0
+    do_wyslania = [p for p in baza.lista_pomyslow(slug)
+                   if p["status"] in ("gotowe", "wygenerowany") and not p.get("telegram_wyslano") and _swiezy(p)]
+    if not do_wyslania:
+        return 0
+    cid = czat_persony(tg, slug, ust, log)
+    if not cid:
+        return 0
     ile = 0
-    for p in baza.lista_pomyslow(slug):
-        if p["status"] not in ("gotowe", "wygenerowany") or p.get("telegram_wyslano") or not _swiezy(p):
-            continue
+    for p in do_wyslania:
         plik = p.get("lipsync_plik") if p.get("lipsync_plik") and os.path.isfile(p["lipsync_plik"]) else p.get("plik_wynikowy")
         if not plik or not os.path.isfile(plik):
             continue
         podpis = (p.get("podpis") or "").strip()
         tekst = f"{slug} · rolka #{p['id']} · {os.path.basename(plik)}" + (f"\n\n{podpis}" if podpis else "")
         try:
-            tg.wyslij_wideo(plik, tekst)
+            tg.wyslij_wideo(plik, tekst, chat_id=cid)
             baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
             ile += 1
             log(f"telegram: wyslalem #{p['id']} ({os.path.basename(plik)})")
@@ -355,14 +411,20 @@ def wyslij_zdjecia(slug, log=None):
     """Nowe gotowe zdjecia (dzisiejsze, nie wyslane) -> telefon. Zwraca liczbe wyslanych."""
     log = log or _log
     tg = _telegram()
-    if not tg or not tg.sparowany() or not baza.ustawienia_modelki(slug).get("telegram_wysylaj"):
+    ust = baza.ustawienia_modelki(slug)
+    if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
+        return 0
+    do_wyslania = [z for z in baza.zdjecia_z_dnia(slug) if not z.get("telegram_wyslano") and z.get("plik") and os.path.isfile(z["plik"])]
+    if not do_wyslania:
+        return 0
+    cid = czat_persony(tg, slug, ust, log)
+    if not cid:
         return 0
     ile = 0
-    for z in baza.zdjecia_z_dnia(slug):
-        if z.get("telegram_wyslano") or not z.get("plik") or not os.path.isfile(z["plik"]):
-            continue
+    for z in do_wyslania:
         try:
-            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}\n{z.get('prompt') or ''}".strip())
+            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}" + (" · strój" if z.get("stroj") else "") + f"\n{z.get('prompt') or ''}".rstrip(),
+                              chat_id=cid)
             import zdjecia as _zdj
             _zdj._ustaw(slug, z["id"], telegram_wyslano=True)
             ile += 1
@@ -403,7 +465,8 @@ def przebieg(slug, log=None, stop=None):
         pods["stop"] = "max rolek dziennie"
     else:
         try:
-            w = fabryka.generuj(slug, potwierdz=None, log=log, stop=stop, max_rolek=zostalo)
+            # lipsync=False: autopilot nigdy nie dopasowuje ust (to tylko recznie w panelu -> Lipsync)
+            w = fabryka.generuj(slug, potwierdz=None, log=log, stop=stop, max_rolek=zostalo, lipsync=False)
             pods["wygenerowane"] = w["wygenerowane"]
             pods["stop"] = w.get("stop")
             pods["bledy"] += [f"#{i}" for i in w.get("bledy", [])]

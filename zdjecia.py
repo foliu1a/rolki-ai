@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """Zdjecia persony: model obrazu (Higgsfield, np. nano_banana_2 / seedream) + referencje -> plik w folderze zdjec.
 
-    generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None) -> {"zrobione": n, "stop": powod|None}
+    generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None, stroj=None) -> {"zrobione": n, "stop": powod|None, "pliki": [...]}
 
 Prompty: modelki/<slug>/prompty/zdjecia.txt (jedna linia = jeden prompt, '#' = komentarz) - autopilot bierze po kolei.
 Model: ustawienie `zdjecia_model` (job_type z `python fabryka.py modele --typ image`), parametry `zdjecia_parametry`.
+Stroje (character elements): zdjecia w modelki/<slug>/stroje/ - `stroj`:
+    None  = wg ustawienia zdjecia_stroje (co drugie zdjecie w kolejnym stroju, gdy stroje sa),
+    "bez" = bez stroju, "auto" = kolejny stroj po kolei, albo nazwa pliku / sciezka.
+  Zdjecie stroju idzie jako OSTATNI obraz, a do promptu doklejany jest `zdjecia_prompt_stroj`.
 Bezpiecznik: ten sam min_kredyty / limit dzienny Higgsfield co rolki; `zdjecia_dziennie` dla autopilota.
 Zdjecia NIE przechodza przez Media Tool (user ma do tego osobna apke).
 """
@@ -27,7 +31,48 @@ def _zdarzenie(log, slug, typ, tekst, **dane):
         pass
 
 
-def zlecenie(slug, prompt, ust=None):
+def stroje(slug):
+    """Zdjecia strojow persony (modelki/<slug>/stroje/), posortowane."""
+    folder = baza.folder_strojow(slug)
+    return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
+
+
+def _nastepny_stroj(slug):
+    """Kolejny stroj po kolei (w kolko); licznik w zdjecia_stan.json obok licznika promptow."""
+    lista = stroje(slug)
+    if not lista:
+        return None
+    plik = os.path.join(baza.folder_modelki(slug), "zdjecia_stan.json")
+    stan = baza._wczytaj_json(plik, {})
+    i = int(stan.get("stroj", 0)) % len(lista)
+    stan["stroj"] = i + 1
+    baza._zapisz_json(plik, stan)
+    return lista[i]
+
+
+def wybierz_stroj(slug, stroj=None, ust=None):
+    """Sciezka do zdjecia stroju dla tego zdjecia albo None. Patrz docstring modulu."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    if stroj is None:
+        if not ust.get("zdjecia_stroje") or "soul" in (ust.get("zdjecia_model") or ""):
+            return None
+        # co drugie zdjecie w stroju (liczac wszystkie zdjecia persony), zeby autopilot robil na przemian
+        return _nastepny_stroj(slug) if len(baza.lista_zdjec(slug)) % 2 == 1 else None
+    s = str(stroj).strip()
+    if not s or s.lower() in ("bez", "none", "0", "false", "brak"):
+        return None
+    if s.lower() in ("auto", "kolejny", "next", "1", "true"):
+        return _nastepny_stroj(slug)
+    kandydat = s if os.path.isabs(s) else os.path.join(baza.folder_strojow(slug), s)
+    if os.path.isfile(kandydat):
+        return kandydat
+    for p in stroje(slug):
+        if os.path.basename(p).lower() == os.path.basename(s).lower():
+            return p
+    raise ValueError(f"Nie ma takiego stroju: {s} (folder stroje/ persony).")
+
+
+def zlecenie(slug, prompt, ust=None, stroj=None):
     ust = ust or baza.ustawienia_modelki(slug)
     model = (ust.get("zdjecia_model") or "").strip()
     if not model:
@@ -36,16 +81,22 @@ def zlecenie(slug, prompt, ust=None):
     soul = (ust.get("soul_id") or "").strip()
     # Soul (text2image_soul_v2 / soul_cinematic) = wytrenowana postac: wtedy --soul-id ZAMIAST zdjec referencyjnych
     uzyj_soul = bool(soul) and ("soul" in model)
+    obrazy = [] if uzyj_soul else list(baza.sciezki_referencji(slug))
+    if stroj:
+        obrazy.append(stroj)      # stroj jako OSTATNI obraz - prompt odwoluje sie do "the last reference image"
+        dopisek = (ust.get("zdjecia_prompt_stroj") or "").strip()
+        if dopisek:
+            prompt = f"{(prompt or '').strip()}\n{dopisek}".strip()
     return {
         "slug": slug, "prompt": prompt, "video": None,
-        "images": [] if uzyj_soul else list(baza.sciezki_referencji(slug)),
+        "images": obrazy,
         "duration": None, "aspect_ratio": params.pop("aspect_ratio", None), "resolution": params.pop("resolution", None),
         "model": model, "mode": params.pop("mode", None), "generate_audio": None, "soul_id": soul if uzyj_soul else "",
         "parametry": params, "dostawca": "higgsfield",
     }
 
 
-def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None):
+def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None, stroj=None):
     log = log or _log
     wynik = {"zrobione": 0, "stop": None, "pliki": []}
     ust = baza.ustawienia_modelki(slug)
@@ -75,7 +126,8 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None):
                 wynik["stop"] = "brak promptow"
                 break
         try:
-            z = zlecenie(slug, tekst, ust)
+            plik_stroju = wybierz_stroj(slug, stroj, ust)
+            z = zlecenie(slug, tekst, ust, stroj=plik_stroju)
         except ValueError as e:
             log(f"[BLAD] {e}")
             wynik["stop"] = str(e)
@@ -99,12 +151,13 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None):
             _zdarzenie(log, slug, "uwaga", f"zdjecie: limit dzienny ({wydano}+{k} > {limit_dnia}) - STOP")
             wynik["stop"] = "limit dzienny"
             break
-        _zdarzenie(log, slug, "info", f"zdjecie: start ({z['model']}, ~{k} kr) - {tekst[:80]}")
+        opis_stroju = f", strój {os.path.basename(plik_stroju)}" if plik_stroju else ""
+        _zdarzenie(log, slug, "info", f"zdjecie: start ({z['model']}, ~{k} kr{opis_stroju}) - {tekst[:80]}")
         try:
             job = d.generuj(z, timeout="15m", log=log)
         except dostawcy.BladDostawcy as e:
             _zdarzenie(log, slug, "blad", f"zdjecie: nie wyszlo ({e})")
-            baza.dodaj_zdjecie(slug, tekst, status="blad", notatki=str(e)[:500])
+            baza.dodaj_zdjecie(slug, tekst, status="blad", notatki=str(e)[:500], stroj=plik_stroju)
             continue
         try:
             nowe_saldo = d.saldo()
@@ -117,9 +170,10 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None):
         urls = job.get("urls") or []
         if not urls:
             _zdarzenie(log, slug, "blad", f"zdjecie: job {job.get('job_id')} bez URL ({job.get('status')}; {job.get('blad')})")
-            baza.dodaj_zdjecie(slug, tekst, job_id=job.get("job_id"), koszt=zuzyte, status="blad", notatki=(job.get("blad") or "")[:500])
+            baza.dodaj_zdjecie(slug, tekst, job_id=job.get("job_id"), koszt=zuzyte, status="blad", notatki=(job.get("blad") or "")[:500],
+                               stroj=plik_stroju)
             continue
-        zid = baza.dodaj_zdjecie(slug, tekst, job_id=job.get("job_id"), koszt=zuzyte, status="pobieranie")
+        zid = baza.dodaj_zdjecie(slug, tekst, job_id=job.get("job_id"), koszt=zuzyte, status="pobieranie", stroj=plik_stroju)
         rozsz = os.path.splitext(urls[0].split("?")[0])[1].lower() or ".png"
         if rozsz not in baza.ROZSZERZENIA_OBRAZU:
             rozsz = ".png"
@@ -133,7 +187,7 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None):
         _ustaw(slug, zid, status="gotowe", plik=cel)
         wynik["zrobione"] += 1
         wynik["pliki"].append(cel)
-        _zdarzenie(log, slug, "ok", f"zdjecie #{zid}: GOTOWE ({zuzyte} kr) -> {cel}", plik=cel)
+        _zdarzenie(log, slug, "ok", f"zdjecie #{zid}: GOTOWE ({zuzyte} kr{opis_stroju}) -> {cel}", plik=cel)
     return wynik
 
 

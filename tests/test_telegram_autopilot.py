@@ -124,7 +124,7 @@ def test_telegram_glos_paruje_z_filmikiem(tg, modelka, bez_ffmpeg):
     assert z[1]["plik"] == os.path.join(zr, "mowa.audio.mp3")
     assert baza.pomysl(modelka, 1)["audio"] == z[1]["plik"]
     assert os.path.dirname(z[2]["plik"]) == baza.folder_audio(modelka)
-    assert "dopasuje usta" in tg.wyslane[1][1]["text"]
+    assert "Lipsync" in tg.wyslane[1][1]["text"] and "po zrobieniu rolki dopasuje" not in tg.wyslane[1][1]["text"]   # autopilot nie robi lipsyncu
 
 
 def test_telegram_stop_wznow(tg, modelka):
@@ -224,7 +224,8 @@ def test_api_stan_nowe_pola_i_wznow(klient, modelka, tg):
     baza.autopilot_pauza(modelka, "3 rolek z rzedu nie wyszlo")
     d = klient.get("/api/stan").get_json()
     assert d["autopilot_stan"]["pauza"] == "3 rolek z rzedu nie wyszlo"
-    assert d["telegram"] == {"skonfigurowany": True, "sparowany": False, "czat": ""}
+    assert d["telegram"] == {"skonfigurowany": True, "sparowany": False, "czat": "", "czaty": []}
+    assert d["foldery"]["wrzutnia"] == baza.folder_zrodel(modelka) and d["pulpit"].endswith("ROLKI AI")
     assert d["dzis"]["rolki"] == 0 and d["dzis"]["kredyty"]["higgsfield"] == 0
     d = klient.post("/api/autopilot/wznow", json={}).get_json()
     assert d["ok"] and d["autopilot_stan"]["pauza"] is None

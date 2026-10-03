@@ -22,7 +22,8 @@ def dane(tmp_path, monkeypatch):
     monkeypatch.setattr(baza, "PLIK_BUDZETU", str(tmp_path / "budzet.json"))
     monkeypatch.setattr(baza, "PLIK_DZIENNIKA", str(tmp_path / "dziennik.jsonl"))
     monkeypatch.setattr(sekrety, "PLIK_KLUCZY", str(tmp_path / "klucze.json"))
-    for env in ("YAPPER_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY"):
+    monkeypatch.setenv("ROLKI_PULPIT", str(tmp_path / "pulpit" / "ROLKI AI"))   # foldery "na pulpicie" tez w tmp
+    for env in ("YAPPER_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN"):
         monkeypatch.delenv(env, raising=False)
     import time
     monkeypatch.setattr(time, "sleep", lambda s: None)

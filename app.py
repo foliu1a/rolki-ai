@@ -28,9 +28,10 @@ if sys.platform == "win32":
 KATALOG = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=os.path.join(KATALOG, "templates"), static_folder=os.path.join(KATALOG, "static"))
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (filmiki zrodlowe)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.0"
+WERSJA = "2.1"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -297,12 +298,17 @@ def api_plik():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", wersja=WERSJA)
 
 
 @app.route("/widget")
 def widget():
-    return render_template("widget.html")
+    return render_template("widget.html", wersja=WERSJA)
+
+
+@app.route("/static/rolki.ico")
+def ikona():
+    return send_file(os.path.join(KATALOG, "static", "rolki.ico"), mimetype="image/x-icon")
 
 
 # ---------------- stan ogolny ----------------
@@ -338,14 +344,49 @@ def api_stan():
                         "autopilot": bool(ust.get("autopilot")), "dostawca": ust.get("dostawca") or "higgsfield",
                         "statystyki": baza.statystyki_pomyslow(slug), "autopilot_stan": baza.autopilot_stan(slug),
                         "rolki_dzis": len(baza.pomysly_z_dnia(slug)),
-                        "avatar_url": _avatar(slug)})
+                        "avatar_url": _avatar(slug), "telegram_czat": ust.get("telegram_czat") or "",
+                        "foldery": _foldery(slug)})
     stan = fabryka.stan_modelki(aktywna) if aktywna else None
     salda = _salda(wymus=request.args.get("saldo") == "1", dostawca_aktywnej=(stan or {}).get("dostawca"))
     ostatnie = baza.dziennik_ostatnie(1)
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
                dzis=_dzis(aktywna), zadanie=konsola.opis(), konta=_konta_skrot(salda),
+               foldery=_foldery(aktywna) if aktywna else None, pulpit=baza.pulpit(),
                dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA)
+
+
+def _foldery(slug):
+    """Foldery persony dla panelu (gdzie wrzucasz, gdzie wychodzi) - tworzy je, gdy ich nie ma."""
+    try:
+        return {"wrzutnia": baza.folder_zrodel(slug), "gotowe": baza.folder_gotowych(slug), "zdjecia": baza.folder_zdjec(slug)}
+    except OSError as e:
+        return {"wrzutnia": "", "gotowe": "", "zdjecia": "", "blad": str(e)}
+
+
+@app.route("/api/folder/otworz", methods=["POST"])
+def api_otworz_folder():
+    """Otwiera folder persony w Eksploratorze Windows (co: wrzutnia | gotowe | zdjecia | pulpit | modelka | referencje | stroje | audio)."""
+    dane = request.json or {}
+    co = (dane.get("co") or "wrzutnia").strip()
+    try:
+        if co == "pulpit":
+            sciezka = baza.pulpit()
+            os.makedirs(sciezka, exist_ok=True)
+        else:
+            slug = _wymaga_modelki()
+            sciezka = {"wrzutnia": baza.folder_zrodel, "gotowe": baza.folder_gotowych, "zdjecia": baza.folder_zdjec,
+                       "modelka": baza.folder_modelki, "referencje": baza.folder_referencji, "stroje": baza.folder_strojow,
+                       "audio": baza.folder_audio}[co](slug)
+    except (ValueError, KeyError) as e:
+        return _blad(e if isinstance(e, ValueError) else f"Nieznany folder '{co}'.")
+    if not hasattr(os, "startfile"):
+        return _blad(f"Otwieranie folderu dziala tylko na Windows. Folder: {sciezka}")
+    try:
+        os.startfile(sciezka)   # noqa: S606 - lokalny panel, sciezka z naszych ustawien
+    except OSError as e:
+        return _blad(f"Nie moge otworzyc {sciezka}: {e}")
+    return _ok(sciezka=sciezka)
 
 
 def _avatar(slug):
@@ -361,9 +402,10 @@ def _stan_telegramu():
     try:
         from dostawcy import telegram
         s = telegram.stan()
-        return {"skonfigurowany": telegram.skonfigurowany(), "sparowany": telegram.sparowany(), "czat": s.get("czat") or ""}
+        return {"skonfigurowany": telegram.skonfigurowany(), "sparowany": telegram.sparowany(), "czat": s.get("czat") or "",
+                "czaty": [{"nazwa": i.get("nazwa") or c, "glowny": bool(i.get("glowny"))} for c, i in telegram.czaty().items()]}
     except Exception as e:
-        return {"skonfigurowany": False, "sparowany": False, "czat": "", "blad": str(e)}
+        return {"skonfigurowany": False, "sparowany": False, "czat": "", "czaty": [], "blad": str(e)}
 
 
 def _dzis(aktywna):
@@ -393,8 +435,12 @@ def api_nowa_modelka():
     ig = (dane.get("instagram") or "").strip()
     if ig:
         baza.zapisz_profil(slug, instagram=ig)
+    try:
+        foldery = baza.przygotuj_foldery_pulpitu(slug)["foldery"]      # od razu: Pulpit\ROLKI AI\tu wrzucasz rolki\<nazwa> itd.
+    except OSError as e:
+        foldery = {"blad": str(e)}
     baza.dziennik_zapisz("info", f"nowa modelka: {slug}", modelka=slug)
-    return _ok(slug=slug)
+    return _ok(slug=slug, foldery=foldery)
 
 
 @app.route("/api/modelki/aktywna", methods=["POST"])
@@ -549,8 +595,9 @@ def _funkcja_akcji(typ, slug, dane):
                                               model=dane.get("model") or None, opcje=opcje)
     if typ == "zdjecia":
         import zdjecia
+        stroj = dane.get("stroj")      # None = wg ustawien (co drugie w stroju), "bez", "auto" albo nazwa pliku ze stroje/
         return lambda log, stop: zdjecia.generuj(slug, ile=int(dane.get("ile") or 1), prompt=(dane.get("prompt") or "").strip() or None,
-                                                 dry_run=bool(dane.get("dry_run")), log=log, stop=stop)
+                                                 dry_run=bool(dane.get("dry_run")), log=log, stop=stop, stroj=stroj)
     if typ == "podpis":
         def _podpis(log, stop):
             tekst, cel = fabryka.podpis(slug, int(dane["id"]))
@@ -575,12 +622,16 @@ def _funkcja_akcji(typ, slug, dane):
             raise ValueError("Ta rolka nie ma jeszcze gotowego pliku.")
         if not telegram.sparowany():
             raise ValueError("Telegram nie jest sparowany - napisz /start do bota na telefonie.")
+        konto = (baza.ustawienia_modelki(slug).get("telegram_czat") or "").strip()
+        cid, opis = telegram.czat_dla(konto)
+        if not cid:
+            raise ValueError(f"Konto {konto} tej persony nie napisalo jeszcze /start do bota ({opis}).")
 
         def _wyslij(log, stop):
-            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (f"\n\n{p['podpis']}" if p.get("podpis") else ""))
+            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (f"\n\n{p['podpis']}" if p.get("podpis") else ""), chat_id=cid)
             baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
-            log(f"wyslalem #{p['id']} na telefon")
-            return {"wyslano": p["id"]}
+            log(f"wyslalem #{p['id']} na Telegram ({opis})")
+            return {"wyslano": p["id"], "czat": opis}
         return _wyslij
     raise ValueError(f"Nieznana akcja '{typ}'.")
 
@@ -821,16 +872,29 @@ def api_statystyki():
         d = str(w.get("czas", ""))[:10]
         if d in bledy:
             bledy[d] += 1
+    nsfw = 0
+    for slug in baza.lista_modelek():
+        nsfw += sum(1 for p in baza.lista_pomyslow(slug) if p.get("powod") == "nsfw" and (p.get("zaktualizowano") or "")[:10] in bledy)
     return _ok(dni=[{"dzien": d, "rolki": rolki[d], "zdjecia": zdjecia[d], "bledy": bledy[d],
                      "kredyty": {k: int(v.get(d, 0)) for k, v in kredyty.items()}} for d in dni],
-               razem={"rolki": sum(rolki.values()), "zdjecia": sum(zdjecia.values()), "bledy": sum(bledy.values()),
+               razem={"rolki": sum(rolki.values()), "zdjecia": sum(zdjecia.values()), "bledy": sum(bledy.values()), "nsfw": nsfw,
                       "kredyty": {k: sum(int(v.get(d, 0)) for d in dni) for k, v in kredyty.items()}})
 
 
 @app.route("/api/diagnoza")
 def api_diagnoza():
-    """Czy wszystko jest na miejscu (ffmpeg, Higgsfield, Media Tool, Telegram, persony) - panel pokazuje w Ustawienia -> Konta."""
+    """Czy wszystko jest na miejscu (ffmpeg, Higgsfield, Media Tool, Telegram, persony, foldery) - panel: Start -> Pierwsze kroki."""
     return _ok(diagnoza=fabryka.diagnoza())
+
+
+@app.route("/api/nsfw")
+def api_nsfw():
+    """Czemu filtr tresci odrzuca rolki aktywnej persony: liczba odrzucen, ryzykowne slowa w promptach, wskazowki."""
+    try:
+        slug = _wymaga_modelki()
+    except ValueError as e:
+        return _blad(e)
+    return _ok(**fabryka.wskazowki_nsfw(slug))
 
 
 @app.route("/api/konta", methods=["POST"])
@@ -1136,6 +1200,23 @@ def _otworz_przegladarke():
     webbrowser.open(f"http://localhost:{PORT}")
 
 
+def _foldery_na_pulpicie():
+    """Przy starcie: Pulpit\\ROLKI AI\\tu wrzucasz rolki\\<persona> itd. (stare przed/po przenosi). Nie wywala panelu."""
+    try:
+        wyniki = baza.przygotuj_foldery_pulpitu_wszystkich()
+    except Exception as e:
+        print(f"(foldery na pulpicie: {e})")
+        return
+    for slug, w in wyniki.items():
+        if w.get("blad"):
+            baza.dziennik_zapisz("uwaga", f"foldery na pulpicie ({slug}): {w['blad']}", modelka=slug)
+        elif w.get("zmienione"):
+            baza.dziennik_zapisz("info", "foldery na pulpicie: " + ", ".join(f"{k} -> {v}" for k, v in w["zmienione"].items()), modelka=slug)
+        f = w.get("foldery") or {}
+        if f.get("zrodla_dir"):
+            print(f"  {slug}: wrzucasz do {f['zrodla_dir']}  |  gotowe: {f.get('wyniki_dir')}")
+
+
 def main():
     if _port_zajety():
         # panel juz dziala (np. w tle z autostartu) - nie wywalamy sie, tylko pokazujemy ten, ktory jest
@@ -1146,6 +1227,7 @@ def main():
             webbrowser.open(f"http://localhost:{PORT}")
         return 0
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
+    _foldery_na_pulpicie()
     threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
     if "--autopilot" in sys.argv:
         autopilot_start()

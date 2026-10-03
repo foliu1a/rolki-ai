@@ -9,11 +9,12 @@ echo.
 echo [3/4] Skille Higgsfield dla Claude Code (opcjonalne)...
 call npx -y skills add higgsfield-ai/skills -g -a claude-code -s higgsfield-generate -s higgsfield-soul-id -y --copy
 echo.
-echo [4/4] Szybki test kodu (bez kredytow)...
+echo [4/4] Szybki test kodu (bez kredytow) + skrot "Rolki AI" na pulpicie...
 python -m pytest -q
+wscript.exe //nologo "%~dp0skroty.vbs" pulpit
 echo.
 echo Gotowe. Teraz zaloguj CLI Higgsfield (otworzy sie przegladarka):
 echo     zaloguj-higgsfield.bat
 echo Klucze yapper.so / sync.so wpiszesz w panelu (zakladka Konta).
-echo Panel: panel.bat     Autopilot bez panelu: autopilot.bat     Widget: widget.bat
+echo Panel: skrot "Rolki AI" na pulpicie (albo panel.bat)   Autostart z Windows: autostart.bat   Widget: widget.bat
 pause

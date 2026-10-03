@@ -6,8 +6,11 @@
   - komendy: /status, /pomoc
 
 Token bota (od @BotFather) w kluczach jako "telegram" (panel -> Konta albo TELEGRAM_BOT_TOKEN).
-Parowanie: pierwszy czat, ktory napisze do bota (np. /start), zostaje zapisany w telegram.json obok stan.json;
-od tej pory bot slucha TYLKO tego czatu i tylko tam wysyla. Limity Telegrama: pobieranie <= 20 MB, wysylka <= 50 MB.
+Parowanie: pierwszy czat, ktory napisze do bota (np. /start), zostaje CZATEM GLOWNYM (telegram.json obok stan.json):
+tam ida alarmy, raporty i rolki person bez wlasnego konta. Osobne konto per persona: ustawienie `telegram_czat`
+("@huy7128") - to konto musi raz napisac /start do bota (Telegram nie pozwala botom pisac pierwszym); bot paruje je,
+bo jest na liscie dozwolonych (odbierz(dozwolone=...)), i od tej pory gotowe rolki tej persony leca tam.
+Obce czaty sa ignorowane. Limity Telegrama: pobieranie <= 20 MB, wysylka <= 50 MB.
 """
 import json
 import os
@@ -63,7 +66,11 @@ def _plik_stanu():
 
 
 def stan():
-    return baza._wczytaj_json(_plik_stanu(), {"chat_id": None, "offset": 0, "czat": "", "ostatni_raport": ""})
+    s = {"chat_id": None, "offset": 0, "czat": "", "ostatni_raport": "", "czaty": {}}
+    s.update(baza._wczytaj_json(_plik_stanu(), {}))
+    if not isinstance(s.get("czaty"), dict):
+        s["czaty"] = {}
+    return s
 
 
 def zapisz_stan(**pola):
@@ -78,7 +85,41 @@ def sparowany():
 
 
 def rozparuj():
-    zapisz_stan(chat_id=None, czat="")
+    zapisz_stan(chat_id=None, czat="", czaty={})
+
+
+def czaty():
+    """Wszystkie sparowane czaty: {"<chat_id>": {"nazwa": "huy7128", "glowny": bool}} (czat glowny tez)."""
+    s = stan()
+    wynik = dict(s.get("czaty") or {})
+    if s.get("chat_id") and str(s["chat_id"]) not in wynik:
+        wynik[str(s["chat_id"])] = {"nazwa": s.get("czat") or str(s["chat_id"])}
+    for cid, info in wynik.items():
+        info["glowny"] = bool(s.get("chat_id")) and str(cid) == str(s["chat_id"])
+    return wynik
+
+
+def _konto(konto):
+    return (konto or "").strip().lstrip("@").lower()
+
+
+def czat_dla(konto):
+    """chat_id dla konta z ustawienia persony ("@huy7128", "huy7128" albo id liczbowe); "" = czat glowny.
+    Zwraca (chat_id | None, opis) - None, gdy to konto nie napisalo jeszcze /start do bota."""
+    s = stan()
+    k = _konto(konto)
+    if not k:
+        return (s.get("chat_id") or None), (s.get("czat") or "czat glowny")
+    for cid, info in czaty().items():
+        if (info.get("nazwa") or "").lower() == k or str(cid) == k:
+            return int(cid), info.get("nazwa") or str(cid)
+    if k.lstrip("-").isdigit():
+        return int(k), k      # user wpisal chat_id liczbowo - probujemy wprost
+    return None, f"@{k} nie napisal jeszcze /start do bota"
+
+
+def _nazwa_czatu(czat_msg):
+    return czat_msg.get("username") or czat_msg.get("first_name") or str(czat_msg.get("id"))
 
 
 # ---------------- wysylanie ----------------
@@ -92,7 +133,9 @@ def gotowy():
         return False, str(e)
     nazwa = ja.get("username") or ja.get("first_name") or "?"
     if sparowany():
-        return True, f"bot @{nazwa}, sparowany z czatem {stan().get('czat') or stan().get('chat_id')}"
+        inne = [i.get("nazwa") for c, i in czaty().items() if not i.get("glowny")]
+        return True, (f"bot @{nazwa}, sparowany z czatem {stan().get('czat') or stan().get('chat_id')}"
+                      + (f" (+ konta person: {', '.join('@' + str(n) for n in inne)})" if inne else ""))
     return True, f"bot @{nazwa} dziala - napisz do niego /start na telefonie, zeby sparowac"
 
 
@@ -152,15 +195,19 @@ def _rozpoznaj(msg):
     return {"typ": "tekst", "file_id": None, "nazwa": "", "rozmiar": 0, "tekst": tekst}
 
 
-def odbierz():
-    """Nowe wiadomosci ze sparowanego czatu (paruje pierwszy czat, ktory napisze). Zwraca liste slownikow
-    z _rozpoznaj + "chat_id", "od". Offset zapisuje w telegram.json."""
+def odbierz(dozwolone=None):
+    """Nowe wiadomosci ze sparowanych czatow. Paruje: pierwszy czat, ktory napisze (= czat glowny), oraz konta z
+    `dozwolone` ({"huy7128": "noemi"} - z ustawien telegram_czat person). Obce czaty sa pomijane.
+    Zwraca liste slownikow z _rozpoznaj + "chat_id", "od", "glowny", "persona" (slug z dozwolonych albo None),
+    "nowy" (czat wlasnie sparowany). Offset zapisuje w telegram.json."""
     s = stan()
+    dozwolone = {_konto(k): v for k, v in (dozwolone or {}).items() if _konto(k)}
     wynik = _wywolaj("getUpdates", {"offset": int(s.get("offset") or 0), "timeout": 0, "allowed_updates": ["message"]}, timeout=30)
     wiadomosci = []
     offset = int(s.get("offset") or 0)
     chat_id = s.get("chat_id")
     czat = s.get("czat") or ""
+    znane = dict(s.get("czaty") or {})
     for u in wynik or []:
         offset = max(offset, int(u.get("update_id", 0)) + 1)
         msg = u.get("message") or {}
@@ -168,17 +215,25 @@ def odbierz():
         cid = czat_msg.get("id")
         if cid is None:
             continue
+        nazwa = _nazwa_czatu(czat_msg)
+        klucze = {_konto(czat_msg.get("username")), str(cid)} - {""}
+        nowy = False
         if chat_id is None:
-            # parowanie: pierwszy czat, ktory sie odezwal
-            chat_id = cid
-            czat = czat_msg.get("username") or czat_msg.get("first_name") or str(cid)
-        if cid != chat_id:
-            continue
+            chat_id, czat, nowy = cid, nazwa, True          # parowanie: pierwszy czat = glowny
+        elif cid != chat_id and str(cid) not in znane:
+            if not (klucze & set(dozwolone)):
+                continue                                    # obcy czat - ignorujemy
+            nowy = True
+        if str(cid) not in znane or znane[str(cid)].get("nazwa") != nazwa:
+            znane[str(cid)] = {"nazwa": nazwa}
         w = _rozpoznaj(msg)
         w["chat_id"] = cid
         w["od"] = (msg.get("from") or {}).get("username") or ""
+        w["glowny"] = cid == chat_id
+        w["persona"] = next((dozwolone[k] for k in klucze if k in dozwolone), None)
+        w["nowy"] = nowy
         wiadomosci.append(w)
-    zapisz_stan(offset=offset, chat_id=chat_id, czat=czat)
+    zapisz_stan(offset=offset, chat_id=chat_id, czat=czat, czaty=znane)
     return wiadomosci
 
 
