@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.1"
+WERSJA = "2.2"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -349,11 +349,32 @@ def api_stan():
     stan = fabryka.stan_modelki(aktywna) if aktywna else None
     salda = _salda(wymus=request.args.get("saldo") == "1", dostawca_aktywnej=(stan or {}).get("dostawca"))
     ostatnie = baza.dziennik_ostatnie(1)
+    jakosc = fabryka.jakosc_i_koszt(aktywna) if aktywna else None
+    dzis = _dzis(aktywna)
+    if jakosc and jakosc["koszt_rolki"]:
+        # ile rolek jeszcze "wejdzie" dzis: limit dzienny Higgsfield i saldo (ponad min_kredyty), co nizsze
+        limit, wydano = baza.limit_dzienny("higgsfield"), dzis["kredyty"]["higgsfield"]
+        zostalo = [(limit - wydano) // jakosc["koszt_rolki"]] if limit else []
+        kredyty = (salda.get("higgsfield") or {}).get("kredyty")
+        if kredyty is not None:
+            zostalo.append(max(0, int(kredyty) - int(baza.ustawienia_modelki(aktywna).get("min_kredyty") or 0)) // jakosc["koszt_rolki"])
+        dzis["rolek_zostalo"] = max(0, min(zostalo)) if zostalo else None
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
-               dzis=_dzis(aktywna), zadanie=konsola.opis(), konta=_konta_skrot(salda),
+               dzis=dzis, zadanie=konsola.opis(), konta=_konta_skrot(salda), jakosc=jakosc,
                foldery=_foldery(aktywna) if aktywna else None, pulpit=baza.pulpit(),
                dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA)
+
+
+@app.route("/api/ustawienia/preset", methods=["POST"])
+def api_preset_jakosci():
+    """Zestaw 'Jakosc i koszt': {"nazwa": "oszczednie"|"normalnie"|"najlepiej"} -> ustawia resolution + max_sekund_rolki."""
+    try:
+        slug = _wymaga_modelki()
+        fabryka.ustaw_preset_jakosci(slug, (request.json or {}).get("nazwa", ""))
+    except ValueError as e:
+        return _blad(e)
+    return _ok(ustawienia=baza.ustawienia_modelki(slug), jakosc=fabryka.jakosc_i_koszt(slug))
 
 
 def _foldery(slug):

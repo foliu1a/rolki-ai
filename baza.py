@@ -51,7 +51,9 @@ USTAWIENIA_DOMYSLNE = {
     "telegram_wysylaj": True,             # gotowe rolki (i zdjecia) leca na telefon przez bota Telegram
     "telegram_czat": "",                  # konto Telegram tej persony, np. "@huy7128" - tam leca jej gotowe rolki ("" = czat glowny);
                                           # to konto musi raz napisac /start do bota (inaczej Telegram nie pozwala botowi pisac)
-    "dziel_dlugie": True,                 # filmik dluzszy niz 30 s (max Seedance) tnij na kawalki po 30 s
+    "dziel_dlugie": True,                 # filmik dluzszy niz max_sekund_rolki tnij na kawalki (kazdy = osobna rolka)
+    "max_sekund_rolki": 15,               # dlugosc jednej rolki (4-30; Seedance max 30). Koszt rosnie z dlugoscia: 720p ~7.5 kr/s,
+                                          # 1080p ~12 kr/s -> 15 s = ~110 kr. Panel: Ustawienia -> Jakosc i koszt (oszczednie 10 s)
     "sprzataj_po_dniach": 14,             # autopilot kasuje surowe wyniki (.raw.mp4) starsze niz tyle dni, gdy gotowy plik istnieje (0 = nigdy)
     # --- zdjecia persony ---
     "zdjecia_model": "",            # job_type modelu obrazu z `model list --image` (wybor w panelu), "" = wylaczone

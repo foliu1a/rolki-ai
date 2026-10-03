@@ -306,7 +306,62 @@ def cmd_status(args):
 
 # ---------------- skanowanie wrzutni ----------------
 
-MAX_SEKUND_ZRODLA = 30   # Seedance 2.5 edit: do 30 s; dluzsze zrodla tniemy (dziel_dlugie)
+MAX_SEKUND_ZRODLA = 30   # Seedance 2.5 edit: twardy limit 30 s; user tnie krocej (max_sekund_rolki), bo koszt rosnie z dlugoscia
+
+# Ile kredytow Higgsfield kosztuje sekunda rolki (video_edit = wejscie + wyjscie). 720p i 1080p zmierzone (6 s: 45 / 72 kr),
+# 480p szacunek z cennika apki. Tylko do podpowiedzi w panelu - prawdziwa cene mowi `generate cost` przed generacja.
+KR_NA_SEKUNDE = {"480p": 3.5, "720p": 7.5, "1080p": 12.0}
+
+# Gotowe zestawy "Jakosc i koszt" (panel -> Ustawienia): co ustawiaja i ile mniej wiecej kosztuje rolka.
+PRESETY_JAKOSCI = {
+    "oszczednie": {"resolution": "720p", "max_sekund_rolki": 10},
+    "normalnie": {"resolution": "720p", "max_sekund_rolki": 15},
+    "najlepiej": {"resolution": "1080p", "max_sekund_rolki": 15},
+}
+
+
+def max_sekund_rolki(ust):
+    """Dlugosc kawalka/rolki z ustawien, przycieta do 4-30 s (limit Seedance)."""
+    try:
+        n = int(ust.get("max_sekund_rolki") or MAX_SEKUND_ZRODLA)
+    except (TypeError, ValueError):
+        n = MAX_SEKUND_ZRODLA
+    return max(4, min(MAX_SEKUND_ZRODLA, n))
+
+
+def szacunek_kosztu_rolki(ust, sekundy=None):
+    """Orientacyjny koszt jednej rolki w kredytach Higgsfield (dlugosc x stawka za sekunde dla rozdzielczosci)."""
+    sek = float(sekundy) if sekundy else max_sekund_rolki(ust)
+    stawka = KR_NA_SEKUNDE.get(str(ust.get("resolution") or "720p"), KR_NA_SEKUNDE["720p"])
+    return int(round(sek * stawka))
+
+
+def preset_jakosci(ust):
+    """Ktory zestaw 'Jakosc i koszt' odpowiada ustawieniom persony ('oszczednie'|'normalnie'|'najlepiej'|'wlasne')."""
+    for nazwa, pola in PRESETY_JAKOSCI.items():
+        if all(str(ust.get(k)) == str(v) for k, v in pola.items()):
+            return nazwa
+    return "wlasne"
+
+
+def jakosc_i_koszt(slug, ust=None):
+    """Dla panelu: aktualny zestaw, szacunek kosztu rolki i tabela zestawow z kosztami."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    koszt = szacunek_kosztu_rolki(ust)
+    _, max_na_rolke = bezpiecznik(ust, "higgsfield")
+    return {
+        "preset": preset_jakosci(ust), "resolution": ust.get("resolution"), "max_sekund_rolki": max_sekund_rolki(ust),
+        "koszt_rolki": koszt, "koszt_sekundy": KR_NA_SEKUNDE.get(str(ust.get("resolution") or "720p"), KR_NA_SEKUNDE["720p"]),
+        "za_drogo": koszt > max_na_rolke, "max_kredyty_na_rolke": max_na_rolke,
+        "presety": {n: dict(p, koszt_rolki=szacunek_kosztu_rolki(p, p["max_sekund_rolki"])) for n, p in PRESETY_JAKOSCI.items()},
+    }
+
+
+def ustaw_preset_jakosci(slug, nazwa):
+    """Zapisuje zestaw 'Jakosc i koszt' (resolution + max_sekund_rolki) w ustawieniach persony."""
+    if nazwa not in PRESETY_JAKOSCI:
+        raise ValueError(f"Nieznany zestaw '{nazwa}'. Dozwolone: {', '.join(PRESETY_JAKOSCI)}")
+    return baza.zapisz_ustawienia(slug, **PRESETY_JAKOSCI[nazwa])
 
 
 def nowe_zrodla(slug):
@@ -320,12 +375,12 @@ def nowe_zrodla(slug):
     return wynik
 
 
-def _potnij_dlugi(slug, zrodlo, inf, log):
-    """Filmik dluzszy niz MAX_SEKUND_ZRODLA -> kawalki w modelki/<slug>/zrodla_ciete/ (oryginal zostaje, skanuj go pomija)."""
+def _potnij_dlugi(slug, zrodlo, inf, log, max_s=MAX_SEKUND_ZRODLA):
+    """Filmik dluzszy niz max_s -> kawalki w modelki/<slug>/zrodla_ciete/ (oryginal zostaje, skanuj go pomija)."""
     folder = os.path.join(baza.folder_modelki(slug), "zrodla_ciete")
-    kawalki = klatki.potnij(zrodlo, folder, max_s=MAX_SEKUND_ZRODLA)
+    kawalki = klatki.potnij(zrodlo, folder, max_s=max_s)
     baza.oznacz_pociete(slug, zrodlo, kawalki)
-    _zdarzenie(log, slug, "info", f"{os.path.basename(zrodlo)} ma {inf['czas']} s (max {MAX_SEKUND_ZRODLA}) - pociety na {len(kawalki)} kawalkow")
+    _zdarzenie(log, slug, "info", f"{os.path.basename(zrodlo)} ma {inf['czas']} s (max {max_s}) - pociety na {len(kawalki)} kawalkow")
     return kawalki
 
 
@@ -371,9 +426,10 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
             log(f"[POMIJAM] {os.path.basename(zrodlo)}: {e}")
             wynik["pominiete"].append(os.path.basename(zrodlo))
             continue
-        if ust.get("dziel_dlugie") and inf["czas"] > MAX_SEKUND_ZRODLA + 0.5:
+        max_s = max_sekund_rolki(ust)
+        if ust.get("dziel_dlugie") and inf["czas"] > max_s + 0.5:
             try:
-                kawalki = _potnij_dlugi(slug, zrodlo, inf, log)
+                kawalki = _potnij_dlugi(slug, zrodlo, inf, log, max_s=max_s)
             except Exception as e:
                 log(f"[UWAGA] {nazwa}: nie udalo sie pociac ({e}) - robie z pierwszych {MAX_SEKUND_ZRODLA} s")
                 kawalki = []
@@ -384,7 +440,7 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
                     try:
                         inf_k = klatki.info(kawalek)
                     except Exception:
-                        inf_k = dict(inf, czas=MAX_SEKUND_ZRODLA)
+                        inf_k = dict(inf, czas=max_s)
                     folder_k = os.path.join(folder_klatek, _bezpieczna_nazwa(f"{nazwa}_cz{i:02d}"))
                     try:
                         klatki.wytnij(kawalek, folder_k, ile=ile_klatek)

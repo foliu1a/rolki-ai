@@ -57,6 +57,12 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - Zdjęcia ze strojów: ustawienia `zdjecia_stroje` (bool, co drugie zdjęcie w kolejnym stroju ze `stroje/`) i `zdjecia_prompt_stroj`
   (dopisek do promptu, strój = ostatni obraz). Akcja `{"typ": "zdjecia", "stroj": "auto"|"bez"|"<plik ze stroje/>"}` (brak = automatycznie).
   Wpis w `/api/zdjecia` ma `stroj` (ścieżka albo null).
+- Jakość i koszt (2.2): `/api/stan.jakosc` = `{"preset": "oszczednie"|"normalnie"|"najlepiej"|"wlasne", "resolution", "max_sekund_rolki",
+  "koszt_rolki": 112, "koszt_sekundy": 7.5, "za_drogo": false, "max_kredyty_na_rolke": 150, "presety": {"oszczednie": {"resolution": "720p",
+  "max_sekund_rolki": 10, "koszt_rolki": 75}, "normalnie": {...112}, "najlepiej": {...180}}}` (szacunek: sekundy × stawka; prawdziwą cenę
+  daje akcja `koszt`). `dzis.rolek_zostalo` = ile rolek jeszcze wejdzie dziś (limit dzienny i saldo ponad `min_kredyty`, co niższe; null bez danych).
+  `POST /api/ustawienia/preset {"nazwa": "oszczednie"}` → `{"ustawienia", "jakosc"}` (ustawia `resolution` + `max_sekund_rolki`).
+  Ustawienie `max_sekund_rolki` (4–30, domyślnie 15): filmik dłuższy jest cięty na kawałki tej długości (`dziel_dlugie`) – krótsza rolka = mniej kredytów.
 - Skrót na pulpit i autostart bez admina: `skroty.vbs pulpit|autostart|autostart-usun` (wołane przez `skrot-na-pulpit.bat`, `autostart.bat`,
   `autostart-usun.bat`, `aktualizuj.bat`, `instaluj.bat`); skrót „Rolki AI” uruchamia `rolki.vbs` (panel w tle + przeglądarka).
   Ikona: `static/rolki.ico` / `static/rolki.png`. Statyczne pliki: `?v=<wersja>` + `SEND_FILE_MAX_AGE_DEFAULT=0` (bez cache po aktualizacji).

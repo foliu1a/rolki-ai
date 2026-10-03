@@ -56,7 +56,10 @@ modelki z włączonym `autopilot`. Pilnuje `autopilot_max_rolek_dziennie`, limit
 
 - **Hamulec**: po `autopilot_stop_po_bledach` (3) nieudanych rolkach z rzędu autopilot zatrzymuje personę, alarmuje
   na telefon i czeka na „Wznów” w panelu (albo `/wznow` z Telegrama) - nie pali kredytów w kółko.
-- **Długie filmiki**: źródło dłuższe niż 30 s (limit Seedance) jest cięte na kawałki po 30 s (`dziel_dlugie`), każdy to osobna rolka.
+- **Długie filmiki i koszt**: koszt rolki rośnie z długością (720p ≈ 7,5 kr/s, 1080p ≈ 12 kr/s), więc źródło dłuższe niż
+  `max_sekund_rolki` (domyślnie 15 s, max 30) jest cięte na kawałki tej długości (`dziel_dlugie`) – każdy to osobna rolka.
+  Panel → Ustawienia → **Jakość i koszt**: *Oszczędnie* (720p, 10 s, ~75 kr) / *Normalnie* (720p, 15 s, ~110 kr) / *Najlepiej*
+  (1080p, 15 s, ~180 kr). Start pokazuje, ile rolek jeszcze „wejdzie” dziś w limit.
 - **Podpisy**: z banku tekstów + hashtagi persony (Ustawienia → Persona).
 - **Tani podgląd**: zanim wydasz 45–72 kr na rolkę, „Tani podgląd (~21 kr)” w Rolkach pokaże, czy prompt działa (Seedance draft).
 - **Porządki**: raz dziennie kasuje surowe pliki `.raw.mp4` starsze niż `sprzataj_po_dniach` (gdy gotowy plik jest)

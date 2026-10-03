@@ -31,6 +31,10 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   najpierw doczytuje `generate get <id>` 5x (0 kr, `hf.doczytaj_url`), a gdy dalej nic - status blad BEZ powtorki.
 - `min_kredyty` (200) i `max_kredyty_na_rolke` (150) = Higgsfield; yapper ma wlasne `yapper.min_kredyty` /
   `yapper.max_kredyty_na_rolke` (inna skala kredytow). Zmienia tylko user. Autopilot dodatkowo `autopilot_max_rolek_dziennie`.
+- Koszt rolki rosnie z DLUGOSCIA zrodla (edit = wejscie + wyjscie): `fabryka.KR_NA_SEKUNDE` 720p ~7.5 kr/s, 1080p ~12 kr/s. Dlatego
+  `max_sekund_rolki` (domyslnie 15; `skanuj` tnie dluzsze zrodla na takie kawalki) i zestawy `PRESETY_JAKOSCI` oszczednie (720p/10 s,
+  ~75 kr) / normalnie (720p/15 s, ~112 kr) / najlepiej (1080p/15 s, ~180 kr > max/rolka 150 -> panel ostrzega). `jakosc_i_koszt(slug)`,
+  `POST /api/ustawienia/preset`, `dzis.rolek_zostalo` w /api/stan. Szacunek tylko do podpowiedzi - prawdziwa cena z `generate cost`.
 - Filtr tresci (status `nsfw` / `ip_detected`): `fabryka.powod_odrzucenia` -> pomysl dostaje `powod` (nsfw|ip|inny); po DWOCH
   odrzuceniach NSFW z rzedu petla powtorek konczy (kredyty wracaja, ale czas nie). `fabryka.wskazowki_nsfw(slug)` / `GET /api/nsfw` /
   `python fabryka.py nsfw`: ryzykowne slowa w promptach (`SLOWA_RYZYKOWNE`), liczba odrzucen, wskazowki. Filtr Higgsfield+Seedance
