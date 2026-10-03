@@ -98,9 +98,20 @@ def _wczytaj_json(sciezka, domyslnie):
 
 
 def _zapisz_json(sciezka, dane):
+    """Zapis atomowy (plik tymczasowy + os.replace): panel, autopilot i CLI pisza te same JSON-y, a przerwany zapis
+    (zamkniecie okna, brak pradu) nie moze zostawic pol pliku kolejki."""
     os.makedirs(os.path.dirname(sciezka), exist_ok=True)
-    with open(sciezka, "w", encoding="utf-8") as f:
-        json.dump(dane, f, ensure_ascii=False, indent=2)
+    tmp = f"{sciezka}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dane, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, sciezka)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _slug(nazwa):

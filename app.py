@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.2"
+WERSJA = "2.3"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -759,6 +759,7 @@ def api_zapisz_ustawienia():
         return _blad(e)
     dane = request.json or {}
     zmiany = {}
+    rozdzielczosc_przed = baza.ustawienia_modelki(slug).get("resolution")
     try:
         for k, v in dane.items():
             if k == "prompt_a_tekst":
@@ -779,6 +780,8 @@ def api_zapisz_ustawienia():
         return _blad(e)
     if "autopilot" in zmiany:
         baza.dziennik_zapisz("info", f"autopilot dla {slug}: {'wlaczony' if zmiany['autopilot'] else 'wylaczony'}", modelka=slug)
+    if ust.get("resolution") != rozdzielczosc_przed:
+        fabryka.uniewaznij_koszty(slug)      # stare szacunki kosztu rolek nie pasuja do nowej rozdzielczosci
     return _ok(ustawienia=ust)
 
 

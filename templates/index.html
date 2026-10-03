@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Rolki AI</title>
-<meta name="theme-color" content="#0b0a10">
+<meta name="theme-color" content="#0f1115">
 <link rel="icon" href="/static/rolki.png">
 <link rel="apple-touch-icon" href="/static/rolki.png">
 <link rel="stylesheet" href="/static/style.css?v={{ wersja }}">
@@ -19,13 +19,13 @@
       <a href="#start" data-strona="start"><span class="ikona" data-ikona="start"></span><span class="etykieta">Start</span></a>
       <a href="#rolki" data-strona="rolki"><span class="ikona" data-ikona="film"></span><span class="etykieta">Rolki</span><span class="odznaka" id="odznaka-rolki" title="rolki, które czekają" hidden></span><span class="odznaka zle" id="odznaka-rolki-bledy" title="rolki, które nie wyszły" hidden></span></a>
       <a href="#zdjecia" data-strona="zdjecia"><span class="ikona" data-ikona="zdjecia"></span><span class="etykieta">Zdjęcia</span></a>
-      <a href="#lipsync" data-strona="lipsync"><span class="ikona" data-ikona="lipsync"></span><span class="etykieta">Lipsync</span></a>
+      <a href="#lipsync" data-strona="lipsync" data-zaawansowane><span class="ikona" data-ikona="lipsync"></span><span class="etykieta">Lipsync</span></a>
       <a href="#ustawienia" data-strona="ustawienia"><span class="ikona" data-ikona="ustawienia"></span><span class="etykieta">Ustawienia</span></a>
-      <a href="#historia" data-strona="historia"><span class="ikona" data-ikona="historia"></span><span class="etykieta">Historia</span></a>
+      <a href="#historia" data-strona="historia" data-zaawansowane><span class="ikona" data-ikona="historia"></span><span class="etykieta">Historia</span></a>
       <a href="#pomoc" data-strona="pomoc" class="nav-pomoc"><span class="ikona" data-ikona="pomoc"></span><span class="etykieta">Pomoc</span></a>
     </nav>
     <div class="bok-dol">
-      <label class="tryb" title="Tryb prosty pokazuje tylko to, co potrzebne. Tryb pełny pokazuje wszystkie ustawienia, surowe komunikaty i logi.">
+      <label class="tryb" title="Tryb prosty pokazuje tylko to, co potrzebne. Tryb pełny pokazuje wszystkie ustawienia, Lipsync, Historię, surowe komunikaty i logi.">
         <span class="tryb-tekst"><b id="tryb-nazwa">Tryb prosty</b><small id="tryb-opis">tylko to, co potrzebne</small></span>
         <span class="przelacznik"><input type="checkbox" id="tryb-przelacznik" aria-label="Tryb pełny (wszystkie ustawienia i logi)"><span class="suwak"></span></span>
       </label>
@@ -42,7 +42,7 @@
         <span class="persona-avatar" id="persona-avatar" aria-hidden="true" hidden></span>
         <label class="sr-only" for="wybor-modelki">Persona</label>
         <select id="wybor-modelki" class="select-persona"><option value="">— brak persony —</option></select>
-        <button class="btn btn-maly" type="button" data-akcja="nowa-persona"><span class="ikona" data-ikona="plus"></span>nowa</button>
+        <button class="btn btn-maly" type="button" data-akcja="nowa-persona" title="Dodaj nową personę"><span class="ikona" data-ikona="plus"></span><span class="nowa-etykieta">nowa</span></button>
       </div>
       <div class="kredyty" id="kredyty">
         <span class="kropka kredyty-kropka" id="kredyty-kropka" aria-hidden="true"></span>
@@ -79,16 +79,6 @@
             <div class="banner-tekst" id="banner-tekst">Sprawdzam, co się dzieje…</div>
             <div class="banner-akcja" id="banner-akcja"></div>
           </div>
-
-          <!-- pierwsze kroki (lista kontrolna z /api/diagnoza) – widoczna od razu, nagłówek zawsze „Pierwsze kroki” + pigułka stanu -->
-          <section class="karta pierwsze-kroki" id="pierwsze-kroki" aria-labelledby="pk-tytul">
-            <div class="pk-gora">
-              <div class="pk-tytul-wrap"><span class="ikona" data-ikona="tarcza"></span><h2 id="pk-tytul">Pierwsze kroki</h2><span class="pk-pill czekam" id="pk-pill">sprawdzam…</span><span class="pk-licznik" id="pk-licznik"></span></div>
-              <button class="btn btn-maly btn-tekst" type="button" data-akcja="kroki-przelacz" id="pk-przelacz" aria-controls="pk-lista" aria-expanded="true" hidden>zwiń</button>
-            </div>
-            <p class="pk-opis" id="pk-opis">To, co trzeba ustawić raz, żeby fabryka działała. Zielona kropka = gotowe, czerwona = kliknij i uzupełnij.</p>
-            <div class="pk-lista" id="pk-lista"><div class="pk-wiersz czekam"><span class="pk-kropka" aria-hidden="true"></span><div class="pk-tekst"><span>Sprawdzam, czy wszystko jest na miejscu (programy, konto, zdjęcia persony, foldery)…</span></div></div></div>
-          </section>
 
           <!-- gdzie wrzucam, gdzie odbieram (ścieżki z /api/stan -> foldery) -->
           <section class="karta gdzie" id="gdzie" aria-labelledby="gdzie-tytul">
@@ -131,11 +121,11 @@
               </div>
               <p class="krok-info" id="krok1-info">—</p>
               <div class="folder">
-                <span class="etykieta">Albo wrzuć je do folderu „tu wrzucasz rolki”:</span>
-                <span class="sciezka" id="folder-wrzutnia">—</span>
+                <span class="etykieta">Albo wrzuć je do folderu „tu wrzucasz rolki”<span data-zaawansowane>:</span></span>
+                <span class="sciezka" id="folder-wrzutnia" data-zaawansowane>—</span>
                 <div class="folder-przyciski">
                   <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="wrzutnia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
-                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-wrzutnia"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-wrzutnia" data-zaawansowane><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
                 </div>
               </div>
             </section>
@@ -162,11 +152,11 @@
               <header class="krok-naglowek"><span class="krok-numer">3</span><h2 id="krok3-tytul">Odbierz</h2></header>
               <div class="odbierz" id="odbierz-lista"></div>
               <div class="folder">
-                <span class="etykieta">Gotowe rolki leżą w folderze „tu rolki zrobione”:</span>
-                <span class="sciezka" id="folder-gotowe">—</span>
+                <span class="etykieta">Gotowe rolki leżą w folderze „tu rolki zrobione”<span data-zaawansowane>:</span></span>
+                <span class="sciezka" id="folder-gotowe" data-zaawansowane>—</span>
                 <div class="folder-przyciski">
                   <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
-                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-gotowe"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-gotowe" data-zaawansowane><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
                 </div>
               </div>
               <a class="link-dalej" href="#rolki">wszystkie rolki →</a>
@@ -178,7 +168,8 @@
               <div class="autopilot-gora">
                 <div>
                   <h2>Rób wszystko sam (autopilot)</h2>
-                  <p id="autopilot-opis">Co 15 min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, zrobi zdjęcia, dobierze podpisy i wyśle gotowe na Telegram. Pilnuje limitów kredytów. Ust nie dopasowuje – lipsync robisz ręcznie.</p>
+                  <p id="autopilot-opis-krotki" data-tylko-prosty>Sam zrobi rolki z nowych filmików w folderze i wyśle gotowe na Telegram. Ust nie dopasowuje (lipsync robisz ręcznie).</p>
+                  <p id="autopilot-opis" data-zaawansowane>Co 15 min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, zrobi zdjęcia, dobierze podpisy i wyśle gotowe na Telegram. Pilnuje limitów kredytów. Ust nie dopasowuje – lipsync robisz ręcznie.</p>
                 </div>
                 <label class="przelacznik duzy" title="Włącza autopilota w tle i zaznacza tę personę do obsługi (ustawienie „autopilot” persony). Wyłączenie odznacza personę; pętla gaśnie, gdy żadna persona jej nie potrzebuje.">
                   <input type="checkbox" id="autopilot-przelacznik" aria-label="Autopilot włączony">
@@ -193,20 +184,32 @@
             </section>
 
             <div class="kolumna">
+              <!-- „Dziś”: wydane z limitu, ile rolek jeszcze wejdzie (dzis.rolek_zostalo), rolki, problemy; koszt jednej rolki z /api/stan.jakosc -->
               <section class="karta karta-dzis" id="karta-dzis" hidden aria-labelledby="dzis-tytul">
                 <div class="karta-naglowek"><div><h2 id="dzis-tytul">Dziś</h2></div><span class="muted" id="dzis-podtytul"></span></div>
                 <div class="dzis" id="dzis-liczby"></div>
+                <p class="dzis-koszt" id="dzis-koszt" hidden></p>
               </section>
 
-              <section class="karta" id="karta-ostatnio">
+              <section class="karta" id="karta-ostatnio" data-zaawansowane>
                 <div class="karta-naglowek"><div><h2>Ostatnio</h2></div><a href="#historia" class="link-dalej">cała historia →</a></div>
                 <ul class="wpisy" id="start-ostatnio"></ul>
               </section>
             </div>
           </div>
 
-          <!-- statystyki: ostatnie 14 dni (zwinięte w trybie prostym, rozwinięte w pełnym; stan w localStorage) -->
-          <details class="karta zwijane staty" id="staty-start" data-staty="start">
+          <!-- pierwsze kroki (lista kontrolna z /api/diagnoza): pełna lista, gdy czegoś brakuje; jedna zielona linia, gdy komplet -->
+          <section class="karta pierwsze-kroki" id="pierwsze-kroki" aria-labelledby="pk-tytul">
+            <div class="pk-gora">
+              <div class="pk-tytul-wrap"><span class="ikona" data-ikona="tarcza"></span><h2 id="pk-tytul">Pierwsze kroki</h2><span class="pk-pill czekam" id="pk-pill">sprawdzam…</span><span class="pk-licznik" id="pk-licznik"></span></div>
+              <button class="btn btn-maly btn-tekst" type="button" data-akcja="kroki-przelacz" id="pk-przelacz" aria-controls="pk-lista" aria-expanded="true" hidden>zwiń</button>
+            </div>
+            <p class="pk-opis" id="pk-opis">To, co trzeba ustawić raz, żeby fabryka działała. Zielona kropka = gotowe, czerwona = kliknij i uzupełnij.</p>
+            <div class="pk-lista" id="pk-lista"><div class="pk-wiersz czekam"><span class="pk-kropka" aria-hidden="true"></span><div class="pk-tekst"><span>Sprawdzam, czy wszystko jest na miejscu (programy, konto, zdjęcia persony, foldery)…</span></div></div></div>
+          </section>
+
+          <!-- statystyki: ostatnie 14 dni (tryb pełny; stan rozwinięcia w localStorage) -->
+          <details class="karta zwijane staty" id="staty-start" data-staty="start" data-zaawansowane>
             <summary><span class="ikona" data-ikona="chevron-dol"></span><span class="staty-tytul">Ostatnie 14 dni</span><span class="staty-skrot muted" data-staty-skrot></span></summary>
             <div class="staty-tresc" data-staty-tresc></div>
           </details>
@@ -233,7 +236,7 @@
           <div class="chipy" id="rolki-filtry"></div>
           <div class="lista" id="rolki-lista"></div>
 
-          <details class="karta zwijane" id="pomysl-tekst-wrap">
+          <details class="karta zwijane" id="pomysl-tekst-wrap" data-zaawansowane>
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Dodaj pomysł z tekstu (rolka bez filmiku)</summary>
             <form id="form-pomysl-tekst" class="kolumna">
               <div class="callout uwaga" id="pomysl-tekst-hint" hidden><span class="ikona" data-ikona="uwaga"></span><span>Pomysły bez filmiku są <b>pomijane</b>, dopóki w <a href="#ustawienia/generowanie">Ustawienia → Jak robić rolki</a> (tryb pełny) nie ustawisz trybu „bez filmiku”.</span></div>
@@ -255,7 +258,7 @@
             <a class="btn btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>
           </div>
           <form class="karta" id="form-zdjecia">
-            <div class="karta-naglowek"><div><h2>Zrób zdjęcie</h2><p id="zdjecia-opis-modelu">Każde zdjęcie kosztuje kredyty.</p></div></div>
+            <div class="karta-naglowek"><div><h2>Zrób zdjęcie</h2><p id="zdjecia-opis-modelu">Każde zdjęcie kosztuje ok. 2 kredyty.</p></div></div>
             <div class="rzad rzad-pola">
               <div class="pole waskie"><label for="zd-ile">Ile zdjęć</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
               <div class="pole rosnie"><label for="zd-prompt">Jakie (puste = kolejne z listy w Ustawieniach)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
@@ -298,6 +301,15 @@
               <div class="pole" id="ls-audio-sciezka-wrap" hidden>
                 <label for="ls-audio-sciezka">Ścieżka do pliku z głosem</label>
                 <input type="text" id="ls-audio-sciezka" placeholder="C:\…\glos.mp3" autocomplete="off">
+              </div>
+              <div class="pole">
+                <label for="ls-styl">Brzmienie głosu</label>
+                <select id="ls-styl">
+                  <option value="telefon">jak nagranie z telefonu w pokoju (naturalne)</option>
+                  <option value="czysty">czysty głos, tylko wyrównana głośność</option>
+                  <option value="brak">bez zmian – plik idzie taki, jaki jest</option>
+                </select>
+                <small class="pole-info">Głos jest najpierw przerabiany, żeby nie brzmiał jak ze studia: pasmo mikrofonu telefonu, lekki pogłos pokoju, cichy szum tła. Działa też z głosówkami z Telegrama.</small>
               </div>
               <div class="strefa mala" data-upload="audio" tabindex="0" role="button" aria-label="Wrzuć nagranie głosu">
                 <span class="ikona" data-ikona="audio"></span>
@@ -348,15 +360,6 @@
             <button class="btn btn-maly" type="button" data-akcja="odswiez-listy" data-zaawansowane><span class="ikona" data-ikona="odswiez"></span>odśwież listy modeli i głosów</button>
           </div>
 
-          <!-- Konta -->
-          <details class="sekcja" id="sekcja-konta">
-            <summary><span class="ikona" data-ikona="klucz"></span><span class="sekcja-tytul">Konta</span><span class="sekcja-opis">Logowanie do Higgsfield, telefon (Telegram) i klucze do yapper.so i sync.so.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
-            <div class="sekcja-tresc">
-              <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Klucze zostają <b>tylko na tym komputerze</b> (plik <span class="mono">klucze.json</span> w folderze programu). Panel wysyła je wyłącznie do ich dostawcy.</span></div>
-              <div class="siatka siatka-3" id="konta-lista"></div>
-            </div>
-          </details>
-
           <!-- Persona -->
           <details class="sekcja" id="sekcja-persona">
             <summary><span class="ikona" data-ikona="persona"></span><span class="sekcja-tytul">Persona</span><span class="sekcja-opis">Nazwa, Instagram, zdjęcia persony i stroje.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
@@ -365,7 +368,7 @@
                 <div class="pola-siatka">
                   <div class="pole"><label for="p-nazwa">Nazwa</label><input type="text" id="p-nazwa" name="nazwa" placeholder="np. Noemi"></div>
                   <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
-                  <div class="pole szerokie"><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
+                  <div class="pole szerokie" data-zaawansowane><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
                   <div class="pole szerokie"><label for="p-telegram">Konto Telegram tej persony</label><input type="text" id="p-telegram" name="telegram_czat" placeholder="@huy7128" autocomplete="off"><small class="pole-info">np. <span class="mono">@huy7128</span> — gotowe rolki tej persony polecą tam. To konto musi raz napisać <span class="mono">/start</span> do bota (Telegram nie pozwala botom pisać pierwszym). Puste = Twój główny czat.</small><small class="pole-info" id="p-telegram-stan"></small></div>
                   <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
@@ -405,9 +408,20 @@
             </form>
           </details>
 
-          <!-- Jak robić rolki -->
-          <details class="sekcja" id="sekcja-generowanie">
-            <summary><span class="ikona" data-ikona="film"></span><span class="sekcja-tytul">Jak robić rolki</span><span class="sekcja-opis">Kto robi rolki, w jakiej jakości i czy prać je w Media Tool.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+          <!-- Jakość i koszt (oba tryby): zestawy z /api/stan.jakosc.presety, klik -> POST /api/ustawienia/preset -->
+          <details class="sekcja" id="sekcja-jakosc">
+            <summary><span class="ikona" data-ikona="metka"></span><span class="sekcja-tytul">Jakość i koszt</span><span class="sekcja-opis">Ile kredytów ma kosztować jedna rolka. Jeden klik, bez zapisywania.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <div class="sekcja-tresc">
+              <div class="jakosc-karty" id="jakosc-karty" role="radiogroup" aria-label="Zestaw jakości i kosztu"><div class="muted">Sprawdzam ustawienia…</div></div>
+              <div class="callout uwaga" id="jakosc-ostrzezenie" hidden><span class="ikona" data-ikona="uwaga"></span><span id="jakosc-ostrzezenie-tekst"></span></div>
+              <p class="jakosc-info">Koszt rolki rośnie z jej długością: <b>720p</b> to ok. <b>7,5 kr za sekundę</b>, <b>1080p</b> ok. <b>12 kr</b>. Dłuższy filmik jest cięty na kawałki tej długości – każdy to osobna rolka. Dokładną cenę policzy „Ile to będzie kosztować?” na Starcie.</p>
+              <p class="jakosc-info" data-zaawansowane>Własną rozdzielczość i długość rolki ustawisz niżej, w „Jak robić rolki”.</p>
+            </div>
+          </details>
+
+          <!-- Jak robić rolki (tryb pełny) -->
+          <details class="sekcja" id="sekcja-generowanie" data-zaawansowane>
+            <summary><span class="ikona" data-ikona="film"></span><span class="sekcja-tytul">Jak robić rolki</span><span class="sekcja-opis">Kto robi rolki, rozdzielczość, długość rolki, Media Tool i parametry modelu.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
             <form class="sekcja-tresc" data-ustawienia novalidate id="form-generowanie">
               <div class="pole-grupa">
                 <span class="etykieta">Kto robi rolki</span>
@@ -416,18 +430,16 @@
                   <label class="kafelek"><input type="radio" name="dostawca" value="yapper"><span><b>yapper.so – Wan 3.0</b><small>potrzebny klucz (Ustawienia → Konta)</small></span></label>
                 </div>
               </div>
-              <div class="pole-grupa">
-                <span class="etykieta">Jakość</span>
-                <div class="kafelki">
-                  <label class="kafelek"><input type="radio" name="jakosc" value="480p"><span><b>Szybko i tanio</b><small>480p</small></span></label>
-                  <label class="kafelek"><input type="radio" name="jakosc" value="720p"><span><b>Normalnie</b><small>720p</small></span></label>
-                  <label class="kafelek"><input type="radio" name="jakosc" value="1080p"><span><b>Najlepiej</b><small>1080p – najdrożej</small></span></label>
-                </div>
+              <div class="pola-siatka">
+                <div class="pole"><label for="u-resolution">Rozdzielczość</label>
+                  <select id="u-resolution" name="resolution"><option value="480p">480p – najtaniej (ok. 3,5 kr/s)</option><option value="720p">720p – normalnie (ok. 7,5 kr/s)</option><option value="1080p">1080p – najlepiej (ok. 12 kr/s)</option></select>
+                  <small class="pole-info">Ta sama jakość u obu dostawców (Higgsfield i yapper).</small></div>
+                <div class="pole"><label for="u-max-sekund">Długość jednej rolki (s)</label><input type="number" id="u-max-sekund" name="max_sekund_rolki" min="4" max="30" data-domyslne="15"><small class="pole-info">4–30 s. Dłuższy filmik jest cięty na kawałki tej długości (każdy = osobna rolka). Krótsza rolka = mniej kredytów.</small></div>
               </div>
               <label class="check"><input type="checkbox" name="mediatool"><span>Wypierz rolkę w Media Tool (iPhone)<small>po zrobieniu plik dostaje metadane jak z iPhone’a i trafia do folderu gotowych</small></span></label>
               <label class="check"><input type="checkbox" name="prompt_auto"><span>Sam wpisuj prompt persony do nowych filmików<small>wyłącz tylko, jeśli chcesz pisać prompt do każdej rolki ręcznie</small></span></label>
 
-              <div class="pola-siatka" data-zaawansowane data-dostawca-blok="higgsfield">
+              <div class="pola-siatka" data-dostawca-blok="higgsfield">
                 <div class="pole"><label for="u-model">Model</label><input type="text" id="u-model" name="model" placeholder="seedance_2_5"></div>
                 <div class="pole"><label for="u-mode">Tryb</label>
                   <select id="u-mode" name="mode">
@@ -450,7 +462,7 @@
                 <div class="pole szerokie"><label for="u-dodatkowe">Dodatkowe parametry CLI (JSON)</label><textarea id="u-dodatkowe" name="dodatkowe_parametry" class="mono" data-typ="json" placeholder='{"seed": 42}'></textarea></div>
               </div>
 
-              <div class="pola-siatka" data-zaawansowane data-dostawca-blok="yapper">
+              <div class="pola-siatka" data-dostawca-blok="yapper">
                 <div class="pole"><label for="u-yapper-model">Model yapper</label>
                   <select id="u-yapper-model" name="yapper.model" data-lista="modele?dostawca=yapper" data-pusta="— nie wybrano —"></select>
                   <input type="text" name="yapper.model" data-zapas placeholder="np. wan-3.0, wan-3.0-prime" hidden disabled>
@@ -463,56 +475,6 @@
             </form>
           </details>
 
-          <!-- Foldery -->
-          <details class="sekcja" id="sekcja-foldery">
-            <summary><span class="ikona" data-ikona="folder"></span><span class="sekcja-tytul">Foldery</span><span class="sekcja-opis">Skąd brać filmiki i gdzie zapisywać gotowe.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
-            <form class="sekcja-tresc" data-ustawienia novalidate id="form-foldery">
-              <p class="muted">Puste pole = folder w programie (modelki\&lt;persona&gt;\…). Wpisz pełną ścieżkę, np. <span class="mono">C:\Users\…\Desktop\ROLKI AI\przed\noemi</span>.</p>
-              <div class="pole"><label for="u-zrodla">Skąd brać filmiki (wrzutnia)</label><input type="text" id="u-zrodla" name="zrodla_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\przed\noemi"></div>
-              <div class="pole"><label for="u-wyniki">Gdzie zapisywać gotowe rolki</label><input type="text" id="u-wyniki" name="wyniki_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\po\noemi"></div>
-              <div class="pole"><label for="u-zdjecia-dir">Gdzie zapisywać gotowe zdjęcia</label><input type="text" id="u-zdjecia-dir" name="zdjecia_dir" placeholder="puste = modelki\noemi\zdjecia"></div>
-              <div class="lista-sciezek" id="foldery-efektywne"></div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-            </form>
-          </details>
-
-          <!-- Limity -->
-          <details class="sekcja" id="sekcja-limity">
-            <summary><span class="ikona" data-ikona="tarcza"></span><span class="sekcja-tytul">Limity kredytów (bezpiecznik)</span><span class="sekcja-opis">Fabryka zatrzyma się, zanim przekroczy te progi.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
-            <form class="sekcja-tresc" data-ustawienia novalidate id="form-limity">
-              <div class="pola-siatka">
-                <div class="pole"><label for="limit-higgsfield">Nie wydawaj więcej niż … kredytów dziennie</label><input type="number" id="limit-higgsfield" name="budzet.higgsfield" min="0"><small class="pole-info">Limit wspólny dla wszystkich person. 0 = bez limitu.</small></div>
-                <div class="pole"><label for="u-min">Zostaw na koncie co najmniej … kredytów</label><input type="number" id="u-min" name="min_kredyty" min="0" data-domyslne="200"></div>
-                <div class="pole"><label for="u-max">Jedna rolka może kosztować najwyżej … kredytów</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"></div>
-                <div class="pole"><label for="u-max-rolek">Najwyżej … rolek dziennie (autopilot)</label><input type="number" id="u-max-rolek" name="autopilot_max_rolek_dziennie" min="0" data-domyslne="10"><small class="pole-info">0 = bez limitu ilościowego.</small></div>
-                <div class="pole" data-zaawansowane><label for="limit-yapper">yapper.so: nie więcej niż … kredytów dziennie</label><input type="number" id="limit-yapper" name="budzet.yapper" min="0"></div>
-                <div class="pole" data-zaawansowane><label for="u-yapper-min">yapper.so: zostaw na koncie co najmniej …</label><input type="number" id="u-yapper-min" name="yapper.min_kredyty" min="0" data-domyslne="0"></div>
-                <div class="pole" data-zaawansowane><label for="u-yapper-max">yapper.so: jedna rolka najwyżej …</label><input type="number" id="u-yapper-max" name="yapper.max_kredyty_na_rolke" min="0" data-domyslne="1000"><small class="pole-info">Kredyty yapper mają inną skalę niż Higgsfield.</small></div>
-                <div class="pole" data-zaawansowane><label for="u-warianty">Warianty VideoRemixer po generacji</label><input type="number" id="u-warianty" name="warianty" min="0" max="500" data-domyslne="0"><small class="pole-info">0 = pomiń.</small></div>
-              </div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-            </form>
-          </details>
-
-          <!-- Autopilot -->
-          <details class="sekcja" id="sekcja-autopilot">
-            <summary><span class="ikona" data-ikona="bolt"></span><span class="sekcja-tytul">Autopilot</span><span class="sekcja-opis">Co ile minut sprawdzać folder i co robić samemu.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
-            <form class="sekcja-tresc" data-ustawienia novalidate id="form-autopilot-ust">
-              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki (Higgsfield / yapper) → pierze w Media Tool → robi zdjęcia → dobiera podpisy → wysyła na Telegram</small></span></label>
-              <div class="pola-siatka">
-                <div class="pole"><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
-              </div>
-              <label class="check"><input type="checkbox" name="lipsync_auto"><span>Przy ręcznym „Zrób rolkę”: jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, od razu dopasuj usta<small>Autopilot nigdy nie robi lipsyncu — usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a>.</small></span></label>
-              <label class="check"><input type="checkbox" name="telegram_wysylaj"><span>Wysyłaj gotowe rolki na telefon (Telegram)<small>bot odsyła każdą gotową rolkę z podpisem – na Twój główny czat albo na konto persony (<a href="#ustawienia/persona">Persona → Konto Telegram</a>). Telefon podłączasz w <a href="#ustawienia/konta">Konta</a>.</small></span></label>
-              <label class="check"><input type="checkbox" name="dziel_dlugie"><span>Filmik dłuższy niż 30 s potnij na kawałki po 30 s<small>Seedance robi najwyżej 30 s naraz – każdy kawałek stanie się osobną rolką</small></span></label>
-              <div class="pola-siatka">
-                <div class="pole"><label for="u-stop-bledy">Zatrzymaj autopilot po … nieudanych rolkach z rzędu</label><input type="number" id="u-stop-bledy" name="autopilot_stop_po_bledach" min="0" max="100" data-domyslne="3"><small class="pole-info">0 = nigdy. Po zatrzymaniu na Starcie pojawi się czerwony pasek z przyciskiem „Wznów”.</small></div>
-              </div>
-              <div class="callout info" id="autostart-info"><span class="ikona" data-ikona="info"></span><span>Na pulpicie masz skrót <b>„Rolki AI”</b> (tworzy go <b>aktualizuj.bat</b>; jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b>). Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-            </form>
-          </details>
-
           <!-- Zdjęcia -->
           <details class="sekcja" id="sekcja-zdjecia">
             <summary><span class="ikona" data-ikona="zdjecia"></span><span class="sekcja-tytul">Zdjęcia</span><span class="sekcja-opis">Jaki model robi zdjęcia persony i jakie zdjęcia ma robić.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
@@ -521,8 +483,8 @@
                 <div class="pole szerokie"><label for="u-zdjecia-model">Model zdjęć („aparat” AI)</label>
                   <select id="u-zdjecia-model" name="zdjecia_model" data-lista="modele?dostawca=higgsfield&amp;typ=image" data-pusta="— wyłączone —"></select>
                   <input type="text" name="zdjecia_model" data-zapas placeholder="np. nano_banana_2 (puste = wyłączone)" hidden disabled>
-                  <small class="pole-info" data-lista-info></small></div>
-                <div class="pole"><label for="u-zdjecia-dziennie">Ile zdjęć dziennie robi autopilot</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">0 = tylko ręcznie.</small></div>
+                  <small class="pole-info" data-lista-info></small>
+                  <small class="pole-info">Taniej: <span class="mono">nano_banana_flash</span>. Najładniej: <span class="mono">nano_banana_2</span>. Ile zdjęć dziennie robi autopilot – w <a href="#ustawienia/autopilot">Autopilot</a>.</small></div>
                 <div class="pole" data-zaawansowane><label for="u-zd-aspect">Proporcje</label><input type="text" id="u-zd-aspect" name="zdjecia_parametry.aspect_ratio" list="lista-proporcji" placeholder="np. 3:4"></div>
                 <div class="pole" data-zaawansowane><label for="u-zd-res">Rozdzielczość</label><input type="text" id="u-zd-res" name="zdjecia_parametry.resolution" placeholder="np. 1080p"></div>
                 <div class="pole" data-zaawansowane><label for="u-soul">Soul ID (modele *soul*)</label><input type="text" id="u-soul" name="soul_id" placeholder="puste = bez Soul"></div>
@@ -530,6 +492,69 @@
               <div class="pole"><label for="u-zdjecia-prompty">Jakie zdjęcia robić (jedna linia = jedno zdjęcie, po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
               <label class="check"><input type="checkbox" name="zdjecia_stroje"><span>Co drugie zdjęcie w stroju z folderu Stroje (po kolei)<small>zdjęcie stroju leci do modelu jako ostatni obraz; stroje dodajesz w <a href="#ustawienia/persona">Persona → Stroje</a>. Na stronie Zdjęcia możesz wybrać strój ręcznie.</small></span></label>
               <div class="pole" data-zaawansowane><label for="u-zdjecia-prompt-stroj">Dopisek do promptu przy stroju</label><textarea id="u-zdjecia-prompt-stroj" name="zdjecia_prompt_stroj" class="mono" rows="2" placeholder="She is wearing exactly the outfit from the last reference image…"></textarea><small class="pole-info">Doklejany na końcu promptu zdjęcia, gdy dołączamy zdjęcie stroju.</small></div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+          </details>
+
+          <!-- Foldery -->
+          <details class="sekcja" id="sekcja-foldery">
+            <summary><span class="ikona" data-ikona="folder"></span><span class="sekcja-tytul">Foldery</span><span class="sekcja-opis">Gdzie wrzucasz filmiki i gdzie lądują gotowe rolki i zdjęcia.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-foldery">
+              <div class="lista-sciezek" id="foldery-efektywne"></div>
+              <div class="podsekcja" data-zaawansowane>
+                <h3>Własne foldery</h3>
+                <p class="muted">Puste pole = folder na pulpicie w <span class="mono">ROLKI AI</span> (program tworzy go sam). Wpisz pełną ścieżkę, jeśli chcesz inny, np. <span class="mono">D:\rolki\noemi</span>.</p>
+                <div class="pole"><label for="u-zrodla">Skąd brać filmiki (wrzutnia)</label><input type="text" id="u-zrodla" name="zrodla_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\tu wrzucasz rolki\Noemi"></div>
+                <div class="pole"><label for="u-wyniki">Gdzie zapisywać gotowe rolki</label><input type="text" id="u-wyniki" name="wyniki_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\tu rolki zrobione\Noemi"></div>
+                <div class="pole"><label for="u-zdjecia-dir">Gdzie zapisywać gotowe zdjęcia</label><input type="text" id="u-zdjecia-dir" name="zdjecia_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\tu zdjęcia zrobione\Noemi"></div>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </div>
+              <p class="muted" data-tylko-prosty>Chcesz inne foldery? Włącz tryb pełny (lewy dolny róg) – pojawią się pola ze ścieżkami.</p>
+            </form>
+          </details>
+
+          <!-- Konta -->
+          <details class="sekcja" id="sekcja-konta">
+            <summary><span class="ikona" data-ikona="klucz"></span><span class="sekcja-tytul">Konta</span><span class="sekcja-opis" data-tylko-prosty>Logowanie do Higgsfield i telefon (Telegram).</span><span class="sekcja-opis" data-zaawansowane>Logowanie do Higgsfield, telefon (Telegram) i klucze do yapper.so i sync.so.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <div class="sekcja-tresc">
+              <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Klucze zostają <b>tylko na tym komputerze</b> (plik <span class="mono">klucze.json</span> w folderze programu). Panel wysyła je wyłącznie do ich dostawcy.</span></div>
+              <div class="siatka siatka-3" id="konta-lista"></div>
+              <p class="muted" data-tylko-prosty>Klucze do yapper.so (zapasowy sposób robienia rolek) i sync.so (lipsync) pokazuje tryb pełny – lewy dolny róg.</p>
+            </div>
+          </details>
+
+          <!-- Limity (tryb pełny) -->
+          <details class="sekcja" id="sekcja-limity" data-zaawansowane>
+            <summary><span class="ikona" data-ikona="tarcza"></span><span class="sekcja-tytul">Limity kredytów (bezpiecznik)</span><span class="sekcja-opis">Fabryka zatrzyma się, zanim przekroczy te progi.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-limity">
+              <div class="pola-siatka">
+                <div class="pole"><label for="limit-higgsfield">Nie wydawaj więcej niż … kredytów dziennie</label><input type="number" id="limit-higgsfield" name="budzet.higgsfield" min="0"><small class="pole-info">Limit wspólny dla wszystkich person. 0 = bez limitu.</small></div>
+                <div class="pole"><label for="u-min">Zostaw na koncie co najmniej … kredytów</label><input type="number" id="u-min" name="min_kredyty" min="0" data-domyslne="200"></div>
+                <div class="pole"><label for="u-max">Jedna rolka może kosztować najwyżej … kredytów</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"><small class="pole-info">Zestaw „Najlepiej” (1080p, 15 s) to ok. 180 kr – podnieś ten próg, jeśli go wybierasz.</small></div>
+                <div class="pole"><label for="limit-yapper">yapper.so: nie więcej niż … kredytów dziennie</label><input type="number" id="limit-yapper" name="budzet.yapper" min="0"></div>
+                <div class="pole"><label for="u-yapper-min">yapper.so: zostaw na koncie co najmniej …</label><input type="number" id="u-yapper-min" name="yapper.min_kredyty" min="0" data-domyslne="0"></div>
+                <div class="pole"><label for="u-yapper-max">yapper.so: jedna rolka najwyżej …</label><input type="number" id="u-yapper-max" name="yapper.max_kredyty_na_rolke" min="0" data-domyslne="1000"><small class="pole-info">Kredyty yapper mają inną skalę niż Higgsfield.</small></div>
+                <div class="pole"><label for="u-warianty">Warianty VideoRemixer po generacji</label><input type="number" id="u-warianty" name="warianty" min="0" max="500" data-domyslne="0"><small class="pole-info">0 = pomiń.</small></div>
+              </div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+          </details>
+
+          <!-- Autopilot -->
+          <details class="sekcja" id="sekcja-autopilot">
+            <summary><span class="ikona" data-ikona="bolt"></span><span class="sekcja-tytul">Autopilot</span><span class="sekcja-opis">Czy ma pracować sam i ile rolek i zdjęć dziennie może zrobić.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-autopilot-ust">
+              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki → pierze w Media Tool → robi zdjęcia → dobiera podpisy → wysyła na Telegram. Lipsyncu nie robi.</small></span></label>
+              <div class="pola-siatka">
+                <div class="pole"><label for="u-max-rolek">Najwyżej … rolek dziennie</label><input type="number" id="u-max-rolek" name="autopilot_max_rolek_dziennie" min="0" data-domyslne="10"><small class="pole-info">Chroni kredyty. 0 = bez limitu ilościowego (pilnuje tylko dziennego limitu kredytów).</small></div>
+                <div class="pole"><label for="u-zdjecia-dziennie">Ile zdjęć dziennie robi autopilot</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">0 = zdjęcia tylko ręcznie (strona Zdjęcia). Model zdjęć wybierasz w <a href="#ustawienia/zdjecia">Zdjęcia</a>.</small></div>
+                <div class="pole" data-zaawansowane><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
+                <div class="pole" data-zaawansowane><label for="u-stop-bledy">Zatrzymaj autopilot po … nieudanych rolkach z rzędu</label><input type="number" id="u-stop-bledy" name="autopilot_stop_po_bledach" min="0" max="100" data-domyslne="3"><small class="pole-info">0 = nigdy. Po zatrzymaniu na Starcie pojawi się czerwony pasek z przyciskiem „Wznów”.</small></div>
+              </div>
+              <label class="check"><input type="checkbox" name="telegram_wysylaj"><span>Wysyłaj gotowe rolki na telefon (Telegram)<small>bot odsyła każdą gotową rolkę z podpisem – na Twój główny czat albo na konto persony (<a href="#ustawienia/persona">Persona → Konto Telegram</a>). Telefon podłączasz w <a href="#ustawienia/konta">Konta</a>.</small></span></label>
+              <label class="check" data-zaawansowane><input type="checkbox" name="lipsync_auto"><span>Przy ręcznym „Zrób rolkę”: jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, od razu dopasuj usta<small>Autopilot nigdy nie robi lipsyncu — usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a>.</small></span></label>
+              <label class="check" data-zaawansowane><input type="checkbox" name="dziel_dlugie"><span>Długi filmik potnij na kawałki (długość rolki z „Jak robić rolki”)<small>Seedance robi najwyżej 30 s naraz – każdy kawałek stanie się osobną rolką. Wyłączone = filmik idzie w całości (do 30 s) i kosztuje odpowiednio więcej.</small></span></label>
+              <div class="callout info" id="autostart-info" data-zaawansowane><span class="ikona" data-ikona="info"></span><span>Na pulpicie masz skrót <b>„Rolki AI”</b> (tworzy go <b>aktualizuj.bat</b>; jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b>). Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
           </details>
@@ -549,6 +574,13 @@
                   <select id="u-sync-mode" name="lipsync_parametry.sync_mode">
                     <option value="bounce">bounce</option><option value="loop">loop</option><option value="cut_off">cut_off</option><option value="silence">silence</option><option value="remap">remap</option>
                   </select></div>
+                <div class="pole"><label for="u-glos-styl">Brzmienie głosu przed lipsynciem</label>
+                  <select id="u-glos-styl" name="lipsync_glos_styl">
+                    <option value="telefon">jak nagranie z telefonu w pokoju (naturalne)</option>
+                    <option value="czysty">czysty głos, tylko wyrównana głośność</option>
+                    <option value="brak">bez zmian – plik idzie taki, jaki jest</option>
+                  </select>
+                  <small class="pole-info">„Telefon” dodaje pasmo mikrofonu, lekki pogłos pokoju i cichy szum tła, żeby głos nie brzmiał jak ze studia. Głosówki z Telegrama (.ogg) też przechodzą.</small></div>
                 <div class="pole"><label for="u-tts-glos">Głos do czytania tekstu (sync.so)</label>
                   <select id="u-tts-glos" name="tts_glos" data-lista="glosy?dostawca=sync" data-pusta="— brak —"></select>
                   <input type="text" name="tts_glos" data-zapas placeholder="voice id" hidden disabled>
@@ -561,8 +593,8 @@
             </form>
           </details>
 
-          <!-- Teksty -->
-          <details class="sekcja" id="sekcja-teksty">
+          <!-- Teksty (tryb pełny) -->
+          <details class="sekcja" id="sekcja-teksty" data-zaawansowane>
             <summary><span class="ikona" data-ikona="podpis"></span><span class="sekcja-tytul">Teksty (podpisy)</span><span class="sekcja-opis">Bank podpisów pod rolki. Fabryka dobiera z niego nieużyte.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
             <div class="sekcja-tresc">
               <div class="siatka siatka-2">
@@ -647,7 +679,7 @@
               <p><b>Zdjęcia persony</b> lądują w folderze „tu zdjęcia zrobione”:</p>
               <span class="sciezka" id="pomoc-zdjecia">—</span>
               <p>Wrzuć filmik do folderu → fabryka zrobi rolkę sama (autopilot) albo kliknij <b>Zrób rolki</b> na Starcie. Gotowa rolka pojawi się w folderze „tu rolki zrobione” i na Telegramie.</p>
-              <p class="muted">Każda persona ma swoje foldery. Zmienisz je w <a href="#ustawienia/foldery">Ustawienia → Foldery</a>. Nagrania głosu do lipsyncu leżą w folderze audio persony (wrzucasz je w zakładce Lipsync).</p>
+              <p class="muted">Każda persona ma swoje foldery. Zmienisz je w <a href="#ustawienia/foldery">Ustawienia → Foldery</a>. Nagrania głosu do lipsyncu leżą w folderze audio persony (wrzucasz je w zakładce Lipsync – tryb pełny).</p>
             </div>
           </details>
           <details class="karta zwijane pomoc" id="pomoc-rolka">
@@ -667,7 +699,21 @@
                 <li><b>Zdjęcie</b> persony ≈ <b>2 kredyty</b>.</li>
                 <li><b>Lipsync</b> (dopasowanie ust do głosu) to osobna usługa sync.so: ≈ <b>0,05 $ za sekundę</b> filmu.</li>
               </ul>
-              <p>Program zawsze <b>zapyta, zanim wyda kredyty</b>, i pilnuje bezpiecznika z Ustawień → Limity: nie wyda więcej niż dzienny limit i zostawi na koncie minimum.</p>
+              <p>Program zawsze <b>zapyta, zanim wyda kredyty</b>, i pilnuje bezpiecznika (Ustawienia → Limity, tryb pełny): nie wyda więcej niż dzienny limit i zostawi na koncie minimum.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc" id="pomoc-oszczedzanie">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak oszczędzać kredyty?</summary>
+            <div class="pomoc-tresc">
+              <ul>
+                <li><b>Krótsze rolki.</b> Koszt rośnie z każdą sekundą (720p ≈ 7,5 kr/s, 1080p ≈ 12 kr/s). W <a href="#ustawienia/jakosc">Ustawienia → Jakość i koszt</a> wybierz <b>Oszczędnie</b> (rolki do 10 s, ok. 75 kr) – dłuższy filmik program sam potnie na kawałki.</li>
+                <li><b>720p zamiast 1080p.</b> Na telefonie różnicy prawie nie widać, a 1080p kosztuje ok. 60 % więcej.</li>
+                <li><b>Bezpieczne stroje i słowa.</b> Odrzucona rolka to kredyty z powrotem, ale stracony czas i powtórki. Unikaj siatki, prześwitów i słów typu „mesh”, „sheer” – lista w <a href="#pomoc/nsfw">„Filtr NSFW”</a>.</li>
+                <li><b>Tani podgląd tylko, gdy nie wiesz, czy prompt działa.</b> Podgląd (~21 kr) ma sens przy nowym prompcie albo nowych zdjęciach persony, nie przy każdej rolce.</li>
+                <li><b>Do zdjęć tańszy model.</b> W <a href="#ustawienia/zdjecia">Ustawienia → Zdjęcia</a> wybierz <span class="mono">nano_banana_flash</span> zamiast <span class="mono">nano_banana_2</span>.</li>
+                <li><b>Limit rolek dziennie</b> w <a href="#ustawienia/autopilot">Ustawienia → Autopilot</a> – autopilot nie zrobi więcej, niż pozwolisz.</li>
+              </ul>
+              <p class="muted">Na Starcie w kafelku „Dziś” widzisz, ile kredytów już poszło i ile rolek jeszcze dziś wejdzie.</p>
             </div>
           </details>
           <details class="karta zwijane pomoc" id="pomoc-niewyszla">
@@ -704,8 +750,8 @@
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak działa autopilot i hamulec?</summary>
             <div class="pomoc-tresc">
               <p><b>Autopilot</b> to przełącznik na Starcie. Gdy jest włączony, program co kilkanaście minut sam sprawdza wrzutnię, robi rolki z nowych filmików (Higgsfield albo yapper), pierze je w Media Tool, robi zdjęcia, dobiera podpisy i wysyła gotowe rolki na Telegram. Pilnuje limitów kredytów i liczby rolek dziennie.</p>
-              <p><b>Autopilot nigdy nie robi lipsyncu.</b> Usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a> (albo przy ręcznym „Zrób rolkę”, jeśli włączysz to w Ustawienia → Autopilot i obok filmiku leży <span class="mono">nazwa.audio.mp3</span>).</p>
-              <p><b>Hamulec</b> chroni kredyty: gdy kilka rolek z rzędu nie wyjdzie (liczbę ustawiasz w Ustawienia → Autopilot), autopilot zatrzymuje się. Na Starcie pojawia się czerwony pasek – sprawdź rolki, które nie wyszły, i kliknij <b>Wznów</b>.</p>
+              <p><b>Autopilot nigdy nie robi lipsyncu.</b> Usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a> (tryb pełny) – albo przy ręcznym „Zrób rolkę”, jeśli włączysz to w Ustawienia → Autopilot (tryb pełny) i obok filmiku leży <span class="mono">nazwa.audio.mp3</span>.</p>
+              <p><b>Hamulec</b> chroni kredyty: gdy kilka rolek z rzędu nie wyjdzie (liczbę ustawiasz w Ustawienia → Autopilot, tryb pełny), autopilot zatrzymuje się. Na Starcie pojawia się czerwony pasek – sprawdź rolki, które nie wyszły, i kliknij <b>Wznów</b>.</p>
             </div>
           </details>
           <details class="karta zwijane pomoc" id="pomoc-autostart">
@@ -736,7 +782,7 @@
           <details class="karta zwijane pomoc" id="pomoc-tryb">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to jest Tryb pełny?</summary>
             <div class="pomoc-tresc">
-              <p>Przełącznik w lewym dolnym rogu. <b>Tryb prosty</b> pokazuje tylko to, co potrzebne na co dzień. <b>Tryb pełny</b> odsłania wszystkie ustawienia (modele, parametry, yapper.so, lipsync), surowe komunikaty błędów, numery rolek i pełny log w pasku „Co się dzieje”.</p>
+              <p>Przełącznik w lewym dolnym rogu. <b>Tryb prosty</b> pokazuje tylko to, co potrzebne na co dzień: Start, Rolki, Zdjęcia, Ustawienia i Pomoc. <b>Tryb pełny</b> odsłania zakładki <b>Lipsync</b> i <b>Historia</b>, wszystkie ustawienia (modele, parametry, limity-bezpiecznik, klucze do yapper.so i sync.so, lipsync, bank podpisów), wykres 14 dni, surowe komunikaty błędów, numery rolek i pełny log w pasku „Co się dzieje”.</p>
               <p>Jeśli nie wiesz, co coś znaczy – zostań w trybie prostym. Nic nie stracisz: ustawienia z trybu pełnego dalej działają w tle.</p>
             </div>
           </details>
@@ -799,6 +845,12 @@
     <div class="pole"><label for="ls-dlg-audio">Nagranie głosu</label>
       <select id="ls-dlg-audio"><option value="">— wpisz ścieżkę poniżej —</option></select>
       <input type="text" id="ls-dlg-sciezka" placeholder="C:\…\glos.mp3" autocomplete="off"></div>
+    <div class="pole"><label for="ls-dlg-styl">Brzmienie głosu</label>
+      <select id="ls-dlg-styl">
+        <option value="telefon">jak nagranie z telefonu w pokoju (naturalne)</option>
+        <option value="czysty">czysty głos, tylko wyrównana głośność</option>
+        <option value="brak">bez zmian</option>
+      </select></div>
     <p class="dialog-tresc">Model i tryb z Ustawień persony. <span class="dialog-uwaga">To wyda kredyty.</span></p>
     <div class="dialog-przyciski">
       <button class="btn" type="button" data-akcja="zamknij-dialog">Anuluj</button>

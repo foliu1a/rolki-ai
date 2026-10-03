@@ -7,15 +7,14 @@
 <link rel="icon" href="/static/rolki.png">
 <title>Rolki AI – widget</title>
 <style>
-  /* ta sama paleta co panel: prawie czarne tło z nutą fioletu, akcent fiolet */
-  :root { --tlo: #0b0a10; --karta: #14121c; --linia: #2f2942; --tekst: #f3f0f8; --szary: #aba4bd;
-          --akcent: #a855f7; --akcent-jasny: #c084fc; --ok: #3ddc84; --uwaga: #ffb454; --zle: #ff5c7a; }
+  /* ta sama paleta co panel: neutralny grafit, jeden stonowany akcent (fiolet), zielony = ok, czerwony = źle, bursztyn = uwaga */
+  :root { --tlo: #0f1115; --karta: #171a21; --linia: #262b36; --tekst: #e7e9ef; --szary: #9aa3b2;
+          --akcent: #8b7cf6; --akcent-jasny: #a79dff; --ok: #45c97a; --uwaga: #e8b04f; --zle: #f0647e; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: var(--tlo); color: var(--tekst); font: 13px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; height: 100%; }
-  body { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 300px;
-         background-image: radial-gradient(360px 200px at 0% 0%, rgba(124, 58, 237, .18), transparent 70%); }
+  body { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
   .gora { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .gora b { font-size: 14px; font-family: Georgia, "Times New Roman", serif; display: inline-flex; align-items: center; gap: 7px; }
+  .gora b { font-size: 14px; display: inline-flex; align-items: center; gap: 7px; }
   .gora b img { width: 18px; height: 18px; border-radius: 5px; }
   .gora a { color: var(--szary); text-decoration: none; font-size: 12px; }
   .gora a:hover { color: var(--akcent-jasny); }
@@ -24,7 +23,7 @@
   .saldo .liczba.uwaga { color: var(--uwaga); } .saldo .liczba.zle { color: var(--zle); }
   .saldo small { color: var(--szary); }
   .pasek { height: 6px; background: var(--karta); border: 1px solid var(--linia); border-radius: 4px; overflow: hidden; }
-  .pasek > div { height: 100%; width: 0; background: linear-gradient(90deg, #7c3aed, var(--akcent)); box-shadow: 0 0 8px rgba(168, 85, 247, .5); transition: width .4s; }
+  .pasek > div { height: 100%; width: 0; background: var(--akcent); transition: width .4s; }
   .pasek > div.uwaga { background: var(--uwaga); } .pasek > div.zle { background: var(--zle); }
   .dzis { display: flex; justify-content: space-between; color: var(--szary); font-size: 12px; margin-top: 4px; }
   .kafle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -34,7 +33,7 @@
   .kafel.zle .n { color: var(--zle); } .kafel.ok .n { color: var(--ok); }
   .stopka { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--szary); min-height: 18px; }
   .kropka { width: 8px; height: 8px; border-radius: 50%; background: var(--szary); flex: none; }
-  .kropka.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); } .kropka.praca { background: var(--akcent); }
+  .kropka.on { background: var(--ok); } .kropka.praca { background: var(--akcent); }
   .ostatni { color: var(--szary); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ostatni.blad { color: var(--zle); } .ostatni.ok { color: var(--ok); }
   .blad-polaczenia { color: var(--zle); font-size: 12px; }

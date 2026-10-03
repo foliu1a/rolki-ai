@@ -43,6 +43,44 @@ def test_jakosc_i_koszt_persony(modelka):
         pass
 
 
+def test_zmiana_rozdzielczosci_uniewaznia_koszty(modelka):
+    import app as panel
+    panel.app.config["TESTING"] = True
+    a = baza.dodaj_pomysl(modelka, "a", "p"); baza.aktualizuj_pomysl(modelka, a, koszt=45)
+    b = baza.dodaj_pomysl(modelka, "b", "p"); baza.aktualizuj_pomysl(modelka, b, koszt=45, status="gotowe")
+    fabryka.ustaw_preset_jakosci(modelka, "normalnie")                    # ta sama rozdzielczosc -> koszty zostaja
+    assert baza.pomysl(modelka, a)["koszt"] == 45
+    fabryka.ustaw_preset_jakosci(modelka, "najlepiej")                    # 1080p -> koszt 'nowy' wyczyszczony, 'gotowe' nie
+    assert baza.pomysl(modelka, a)["koszt"] is None and baza.pomysl(modelka, b)["koszt"] == 45
+    baza.aktualizuj_pomysl(modelka, a, koszt=72)
+    with panel.app.test_client() as c:
+        assert c.post("/api/ustawienia", json={"max_sekund_rolki": 12}).status_code == 200
+        assert baza.pomysl(modelka, a)["koszt"] == 72
+        assert c.post("/api/ustawienia", json={"resolution": "720p"}).status_code == 200
+        assert baza.pomysl(modelka, a)["koszt"] is None
+
+
+def test_zapis_json_atomowy(modelka, monkeypatch):
+    """Przerwany zapis nie psuje pliku: stara wersja zostaje, plik tymczasowy znika."""
+    plik = baza._plik_pomyslow(modelka)
+    baza.dodaj_pomysl(modelka, "a", "p")
+    przed = open(plik, encoding="utf-8").read()
+    prawdziwy = baza.json.dump
+
+    def padnij(*a, **k):
+        raise OSError("dysk pelny")
+    monkeypatch.setattr(baza.json, "dump", padnij)
+    try:
+        baza.dodaj_pomysl(modelka, "b", "p")
+        assert False, "zapis mial sie nie udac"
+    except OSError:
+        pass
+    monkeypatch.setattr(baza.json, "dump", prawdziwy)
+    assert open(plik, encoding="utf-8").read() == przed
+    assert not [n for n in os.listdir(os.path.dirname(plik)) if n.endswith(".tmp")]
+    assert len(baza.lista_pomyslow(modelka)) == 1
+
+
 def test_skanuj_tnie_wg_max_sekund_rolki(modelka, cli, bez_ffmpeg, monkeypatch):
     czasy = {}
     monkeypatch.setattr(fabryka.klatki, "info", lambda p: {"czas": czasy.get(p, 10.0), "szer": 720, "wys": 1280, "fps": 30.0})

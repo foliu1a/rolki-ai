@@ -151,6 +151,7 @@ const IKONY = {
   ksiezyc: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   filtr: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
   stroj: '<path d="M9 4 6 6 3 11l3 1.5V20h12v-7.5L21 11l-3-5-3-2a3 3 0 0 1-6 0z"/>',
+  metka: '<path d="M3 12 12 3h8v8l-9 9z"/><circle cx="16" cy="8" r="1.5"/>',
 };
 function ikona(nazwa) {
   const p = IKONY[nazwa];
@@ -380,7 +381,8 @@ const state = {
   modelki: [], aktywna: null, saldo: {}, autopilot: {}, zadanie: {}, konta: {}, dziennikOstatni: null, wersja: '',
   autopilotStan: {},     // hamulec aktywnej persony: {bledy_z_rzedu, pauza, pauza_od}
   telegram: {},          // bot Telegram: {skonfigurowany, sparowany, czat, czaty: [{nazwa, glowny}]}
-  dzis: null,            // podsumowanie dnia: {rolki, zdjecia, bledy, kredyty{...}}
+  dzis: null,            // podsumowanie dnia: {rolki, zdjecia, bledy, kredyty{...}, rolek_zostalo}
+  jakosc: null,          // /api/stan.jakosc: {preset, resolution, max_sekund_rolki, koszt_rolki, koszt_sekundy, za_drogo, max_kredyty_na_rolke, presety}
   foldery: null, pulpit: '',   // foldery aktywnej persony na pulpicie {wrzutnia, gotowe, zdjecia} + folder ROLKI AI
   stroje: [],            // zdjęcia strojów persony (z /api/ustawienia) – wybór stroju na stronie Zdjęcia
   nsfw: null,            // /api/nsfw aktywnej persony (Pomoc → Filtr NSFW)
@@ -393,6 +395,9 @@ const state = {
   // rolki
   pomysly: [], statusy: STATUSY.slice(), pomyslyJson: '', filtr: 'wszystkie',
   odbierzTelefon: false, rolkiTelefon: false,   // czy listy były rysowane z podłączonym telefonem (przycisk „Wyślij na telefon”)
+  kosztJakosc: {},       // id rolki -> podpis jakości (rozdzielczość|długość) z chwili policzenia kosztu w tej sesji; inny podpis = koszt nieaktualny
+  rolkiJakosc: '',       // podpis jakości, z którym rysowano listę rolek (zmiana zestawu przerysowuje szacunki „ok. N kr”)
+  bledyOdswiezania: 0,   // kolejne nieudane odpytania /api/stan w tle – toast dopiero po kilku z rzędu (jednorazowy błąd nie alarmuje)
   otwartePrompty: new Set(), odtwarzane: new Set(), podglady: new Set(),   // podglady = rolki z otwartym filmem taniego podglądu
   // reszta stron
   zdjecia: [], lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
@@ -410,6 +415,7 @@ function wyczyscCachePersony() {
   state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear(); state.podglady.clear();
   state.zdjecia = []; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
   state.stroje = []; state.nsfw = null;
+  state.kosztJakosc = {}; state.rolkiJakosc = '';
   state.lancuch.wynik = null;
 }
 
@@ -434,6 +440,7 @@ function ustawTryb(pelny, zapisz = true) {
     else if (state.strona === 'historia') { renderHistoria(); if (zapisz) ladujHistoria().catch(() => {}); }
     else if (state.strona === 'start') renderStart();
     else if (state.strona === 'lipsync') renderLipsyncHistoria();
+    else if (state.strona === 'zdjecia') ladujZdjecia().catch(() => {});
   }
 }
 
@@ -446,17 +453,23 @@ function zastosujHash() {
     const [s, sek] = STARE_STRONY[strona].split('/');
     strona = s; sekcja = sekcja || sek;
   }
+  let st = null;
   if (q) {
     const p = new URLSearchParams(q);
-    const st = p.get('status');
+    st = p.get('status');
     if (st) state.filtr = STATUS_NA_FILTR[st] || st;
   }
+  // samo #rolki (link w nawigacji, „wszystkie rolki →”) pokazuje całą listę – filtr z #rolki?status=… nie jest „lepki”
+  if (strona === 'rolki' && !st) state.filtr = 'wszystkie';
   state.sekcja = sekcja || null;
   pokazStrone(STRONY.includes(strona) ? strona : 'start');
 }
 
 function pokazStrone(nazwa) {
   state.strona = nazwa;
+  // strona tylko z trybu pełnego (Lipsync, Historia) otwarta linkiem w trybie prostym -> włączamy tryb pełny, jak otworzSekcje() dla sekcji ustawień
+  const nav = $(`.nav a[data-strona="${nazwa}"]`);
+  if (nav && nav.hasAttribute('data-zaawansowane') && !state.pelny) ustawTryb(true);
   $$('.strona').forEach(s => { s.hidden = s.id !== 'strona-' + nazwa; });
   $$('.nav a').forEach(a => a.classList.toggle('aktywny', a.dataset.strona === nazwa));
   if (state.timery.dziennik) { clearInterval(state.timery.dziennik); state.timery.dziennik = null; }
@@ -510,6 +523,7 @@ async function odswiez(wymusSaldo = false) {
     state.autopilotStan = d.autopilot_stan || {};
     state.telegram = d.telegram || {};
     state.dzis = d.dzis || null;
+    state.jakosc = d.jakosc || null;
     state.foldery = d.foldery || null;
     state.pulpit = d.pulpit || '';
     state.dziennikOstatni = d.dziennik_ostatni || null;
@@ -525,10 +539,19 @@ async function odswiez(wymusSaldo = false) {
       $('#ustawienia-tytul').textContent = 'Ustawienia: ' + (nazwaPersony(state.aktywna) || state.stan.modelka || '');
       if (state.strona === 'start') ladujStart(true).catch(() => {});
       else if (state.strona === 'rolki') ladujRolki(true).catch(() => {});
+      else if (state.strona === 'ustawienia') renderJakosc();
     }
     if (state.zadanie && state.zadanie.trwa) startKonsoli();
+    state.bledyOdswiezania = 0;
   } catch (e) {
-    if (e.status === 0) polaczenie(false); else bladToast(e);
+    if (e.status === 0) polaczenie(false);
+    else {
+      // odpytywanie w tle (co 5 s): jednorazowy błąd (np. plik JSON w trakcie zapisu) nie alarmuje – toast dopiero po 3 z rzędu;
+      // ręczne odświeżenie (wymusSaldo) mówi od razu
+      state.bledyOdswiezania += 1;
+      if (wymusSaldo || state.bledyOdswiezania >= 3) bladToast(e);
+      else console.warn('odświeżanie stanu nie wyszło (spróbuję za chwilę):', e.message);
+    }
   } finally {
     state.odswiezanie = false;
   }
@@ -619,7 +642,7 @@ function renderKredyty() {
     html += ` <span class="kredyty-dzis">· dziś ${wydano ? 'wydałeś ' + esc(liczba(wydano)) : 'nic nie wydałeś'}${limit ? ' z ' + esc(liczba(limit)) : ''}</span>`;
     if (limit && wydano >= limit) { klasa = klasa || 'zle'; tytul.push('Dzisiejszy limit kredytów jest wykorzystany – jutro liczy się od nowa.'); }
     else if (limit && wydano >= limit * 0.8) { klasa = klasa || 'uwaga'; tytul.push(`Zbliżasz się do dziennego limitu ${liczba(limit)}.`); }
-    else if (limit) tytul.push(`Dzienny limit: ${liczba(limit)} (Ustawienia → Limity).`);
+    else if (limit) tytul.push(`Dzienny limit: ${liczba(limit)} (Ustawienia → Limity, tryb pełny).`);
   }
   el.innerHTML = html;
   // kropka obok kredytów: zielona (wszystko gra), pomarańczowa (blisko limitu), czerwona (za mało / nie widzę), szara (sprawdzam)
@@ -718,12 +741,16 @@ async function sprawdzZadanie() {
       stopKonsoli();
       if (state.konsola.trwalo) {
         state.konsola.trwalo = false;
+        zapamietajPodpisKosztu(z);
         const czekajacy = state.konsola.oczekujacy.splice(0);
         // kroki pośrednie łańcucha „Zrób rolki” (skanuj, koszt) pokazuje karta kroku 2, bez toastów
         const cicho = state.lancuch.trwa && z.typ !== 'generuj';
         if (!cicho) {
           if (z.blad) toast(`Nie wyszło: ${prostyBlad(z.blad)}`, 'blad');
-          else { const w = prostyWynik(z.typ, z.wynik); toast(`Gotowe: ${NAZWY_AKCJI[z.typ] || z.typ}${w ? ' – ' + w : ''}`, 'ok'); }
+          else if (z.typ === 'podpis' && !(z.wynik && z.wynik.tekst)) {
+            // pusty bank podpisów: bank jest w Ustawieniach (tryb pełny) – od razu podsuwamy drogę
+            toast('Bank podpisów jest pusty albo wszystko użyte – dodaj podpisy.', 'uwaga', { akcja: 'Dodaj podpisy', cb: () => { location.hash = '#ustawienia/teksty'; } });
+          } else { const w = prostyWynik(z.typ, z.wynik); toast(`Gotowe: ${NAZWY_AKCJI[z.typ] || z.typ}${w ? ' – ' + w : ''}`, 'ok'); }
         }
         czekajacy.forEach(r => r(z));
         odswiez();
@@ -911,23 +938,46 @@ async function wyslijNaTelefon(id) {
   await akcja({ typ: 'telegram_wyslij', id }, 'wysyłam na telefon');
 }
 
-// Karta „Dziś” na Starcie: rolki, zdjęcia, kredyty i problemy z dzisiejszego dnia (wszystkie persony razem).
+// Nazwy zestawów „Jakość i koszt” (fabryka.PRESETY_JAKOSCI) po ludzku.
+const PRESETY_JAKOSCI = {
+  oszczednie: { nazwa: 'Oszczędnie', opis: 'rolki do 10 s w 720p – najtaniej, w sam raz na telefon' },
+  normalnie: { nazwa: 'Normalnie', opis: 'rolki do 15 s w 720p – dobry kompromis' },
+  najlepiej: { nazwa: 'Najlepiej', opis: 'rolki do 15 s w 1080p – najostrzej, najdrożej' },
+};
+function nazwaPresetu(p) { return (PRESETY_JAKOSCI[p] || {}).nazwa || (p === 'wlasne' ? 'Własne ustawienia' : p); }
+
+// Karta „Dziś” na Starcie: wydane z limitu, ile rolek jeszcze dziś wejdzie (dzis.rolek_zostalo), rolki, problemy (+ zdjęcia w pełnym)
+// i jedno zdanie o koszcie jednej rolki (jakosc.koszt_rolki).
 function renderDzis() {
   const d = state.dzis, karta = $('#karta-dzis');
   if (!karta) return;
   if (!d) { karta.hidden = true; return; }
   karta.hidden = false;
-  const kr = d.kredyty || {};
+  const kr = d.kredyty || {}, b = (state.stan && state.stan.budzet) || {}, j = state.jakosc || {};
+  const u = (state.stan && state.stan.ustawienia) || {};
+  const yapperRobi = (b.dostawca || u.dostawca || 'higgsfield') === 'yapper';
   const rolki = Number(d.rolki) || 0, zdjecia = Number(d.zdjecia) || 0, bledy = Number(d.bledy) || 0;
-  const hf = Number(kr.higgsfield) || 0, yapper = Number(kr.yapper) || 0;
+  // kafelek liczy kredyty Higgsfield – limit dzienny bierzemy tylko wtedy, gdy to Higgsfield robi rolki (dla yapper b.limit_dzienny jest w skali yapper)
+  const hf = Number(kr.higgsfield) || 0, yapper = Number(kr.yapper) || 0, limit = yapperRobi ? 0 : (Number(b.limit_dzienny) || 0);
+  const zostalo = d.rolek_zostalo === null || d.rolek_zostalo === undefined ? null : Number(d.rolek_zostalo);
   const poz = [
-    { id: 'rolki', n: rolki, e: odmiana(rolki, 'rolka', 'rolki', 'rolek') },
-    { id: 'zdjecia', n: zdjecia, e: odmiana(zdjecia, 'zdjęcie', 'zdjęcia', 'zdjęć') },
-    { id: 'kredyty', n: hf, e: odmiana(hf, 'kredyt', 'kredyty', 'kredytów'), dop: yapper > 0 ? `+ ${liczba(yapper)} yapper` : '' },
+    { id: 'kredyty', n: hf, dop2: limit ? ` <small>z ${esc(liczba(limit))}</small>` : '', e: limit ? 'kr wydane dziś' : `${odmiana(hf, 'kredyt wydany', 'kredyty wydane', 'kredytów wydanych')} dziś`, dop: yapper > 0 ? `+ ${liczba(yapper)} yapper` : '', klasa: limit && hf >= limit ? 'zle' : (limit && hf >= limit * 0.8 ? 'uwaga' : '') },
+    { id: 'zostalo', n: zostalo, tekst: zostalo === null ? '?' : `~${liczba(zostalo)}`, e: zostalo === null ? 'rolek jeszcze dziś – nie wiem' : `${odmiana(zostalo, 'rolka', 'rolki', 'rolek')} jeszcze dziś`, klasa: zostalo === 0 ? 'zle' : (zostalo !== null && zostalo <= 2 ? 'uwaga' : ''), tytul: 'Ile rolek jeszcze dziś wejdzie: liczone z dziennego limitu kredytów i z salda na koncie (ponad minimum z bezpiecznika), co niższe.' },
+    { id: 'rolki', n: rolki, e: `${odmiana(rolki, 'rolka zrobiona', 'rolki zrobione', 'rolek zrobionych')}` },
     { id: 'problemy', n: bledy, e: odmiana(bledy, 'problem', 'problemy', 'problemów'), klasa: bledy ? 'zle' : '' },
+    { id: 'zdjecia', n: zdjecia, e: odmiana(zdjecia, 'zdjęcie', 'zdjęcia', 'zdjęć'), zaawansowane: true },
   ];
-  $('#dzis-liczby').innerHTML = poz.map(p => `<div class="dzis-poz${p.klasa ? ' ' + p.klasa : ''}" id="dzis-${p.id}"><b>${esc(liczba(p.n))}</b><span>${esc(p.e)}</span>${p.dop ? `<small>${esc(p.dop)}</small>` : ''}</div>`).join('');
+  $('#dzis-liczby').innerHTML = poz.map(p => `<div class="dzis-poz${p.klasa ? ' ' + p.klasa : ''}" id="dzis-${p.id}"${p.zaawansowane ? ' data-zaawansowane' : ''}${p.tytul ? ` title="${esc(p.tytul)}"` : ''}><b>${p.tekst !== undefined ? esc(p.tekst) : esc(liczba(p.n))}${p.dop2 || ''}</b><span>${esc(p.e)}</span>${p.dop ? `<small>${esc(p.dop)}</small>` : ''}</div>`).join('');
   $('#dzis-podtytul').textContent = state.modelki.length > 1 ? 'wszystkie persony razem' : '';
+  const koszt = $('#dzis-koszt');
+  // zdanie o koszcie rolki liczy stawki Higgsfield – przy yapper (inna skala kredytów) go nie pokazujemy
+  if (j.koszt_rolki && !yapperRobi) {
+    koszt.hidden = false;
+    koszt.innerHTML = `Jedna rolka to ok. <b>${esc(liczba(j.koszt_rolki))} kr</b> (zestaw „${esc(nazwaPresetu(j.preset))}”${j.max_sekund_rolki ? `, do ${esc(j.max_sekund_rolki)}&nbsp;s, ${esc(j.resolution || '')}` : ''}). <a href="#ustawienia/jakosc">Zmień jakość i koszt →</a>`
+      + (j.za_drogo ? `<span class="zle dzis-uwaga">Uwaga: to więcej niż Twój limit na rolkę (${esc(liczba(j.max_kredyty_na_rolke))} kr) – fabryka ją pominie.</span>` : '');
+  } else {
+    koszt.hidden = true;
+  }
 }
 
 function ustawWynikKroku(tekst, klasa) {
@@ -1104,7 +1154,7 @@ function renderPersony() {
       ${avatarHtml(m, 'persona-karta-avatar')}
       <span class="persona-karta-tresc">
         <span class="persona-karta-nazwa">${esc(nazwa)}${odznaki}</span>
-        <span class="persona-karta-meta">czeka ${Number(st.nowy) || 0} · gotowe ${Number(st.gotowe) || 0} · dziś ${dzis} ${esc(odmiana(dzis, 'rolka', 'rolki', 'rolek'))}</span>
+        <span class="persona-karta-meta" data-zaawansowane>czeka ${Number(st.nowy) || 0} · gotowe ${Number(st.gotowe) || 0} · dziś ${dzis} ${esc(odmiana(dzis, 'rolka', 'rolki', 'rolek'))}</span>
       </span>
     </button>`;
   }).join('');
@@ -1245,7 +1295,7 @@ function renderPierwszeKroki() {
   if (klucz !== state.pkKlucz) { state.pkKlucz = klucz; state.pkOtwarte = null; }
   const otwarte = state.pkOtwarte === null ? !komplet : state.pkOtwarte;
   karta.classList.toggle('gotowe', komplet);
-  pill.textContent = komplet ? 'wszystko gotowe ✓' : `${gotowe.length} z ${wymagane.length} gotowe`;
+  pill.textContent = komplet ? 'wszystko ustawione ✓' : `${gotowe.length} z ${wymagane.length} gotowe`;
   pill.className = 'pk-pill ' + (komplet ? 'ok' : 'uwaga');
   const opc = lista.length - wymagane.length;
   licznik.textContent = opc ? `· ${opc} ${odmiana(opc, 'opcjonalny', 'opcjonalne', 'opcjonalnych')}` : '';
@@ -1426,7 +1476,7 @@ const POLSKIE_WSKAZOWKI = [
   [/przeswity/g, 'prześwity'], [/duzo skory/g, 'dużo skóry'], [/odrzucaja/g, 'odrzucają'], [/CALA rolke/g, 'CAŁĄ rolkę'],
   [/odwazniejsze/g, 'odważniejsze'], [/zwyklym/g, 'zwykłym'], [/kapielowego/g, 'kąpielowego'], [/ida do kazdej/g, 'idą do każdej'],
   [/wiecej/g, 'więcej'], [/\bwiec\b/g, 'więc'], [/zrodlowy/g, 'źródłowy'], [/lozko/g, 'łóżko'], [/\bbron\b/g, 'broń'],
-  [/Sprobuj/g, 'Spróbuj'], [/krotszego ujecia/g, 'krótszego ujęcia'], [/\(potnij w panelu: dziel_dlugie\)/g, '(Ustawienia → Autopilot → „potnij na kawałki po 30 s”)'],
+  [/Sprobuj/g, 'Spróbuj'], [/krotszego ujecia/g, 'krótszego ujęcia'], [/\(potnij w panelu: dziel_dlugie\)/g, '(Ustawienia → Autopilot, tryb pełny → „Długi filmik potnij na kawałki”)'],
   [/Jesli masz pewnosc/g, 'Jeśli masz pewność'], [/pomylka/g, 'pomyłka'], [/oddaja/g, 'oddają'], [/cofaja/g, 'cofają'], [/zglos/g, 'zgłoś'],
   [/dwoch odrzuceniach z rzedu/g, 'dwóch odrzuceniach z rzędu'], [/probowac/g, 'próbować'], [/jedna powtorka/g, 'jedna powtórka'],
   [/\bslowa\b/g, 'słowa'], [/tresci/g, 'treści'], [/\bWYNIKU\b/g, 'WYNIKU'],
@@ -1470,7 +1520,8 @@ async function ladujRolki(cicho) {
   state.statusy = (d.statusy && d.statusy.length) ? d.statusy : STATUSY.slice();
   const telefon = telefonGotowy();
   if (cicho) {
-    if (json === state.pomyslyJson && telefon === state.rolkiTelefon) return;
+    // bez zmian w rolkach, telefonie i zestawie jakości (szacunki „ok. N kr” zależą od zestawu) – nic nie przerysowujemy
+    if (json === state.pomyslyJson && telefon === state.rolkiTelefon && podpisRolek() === state.rolkiJakosc) return;
     const akt = document.activeElement;
     if (akt && akt.tagName === 'TEXTAREA' && $('#rolki-lista').contains(akt)) return; // nie przerywaj edycji promptu
     if ($$('#rolki-lista video').some(v => !v.paused)) return;                        // ani odtwarzania
@@ -1483,6 +1534,7 @@ async function ladujRolki(cicho) {
 
 function renderRolki() {
   const u = (state.stan && state.stan.ustawienia) || {};
+  state.rolkiJakosc = podpisRolek();
   renderHamulecRolek();
   $('#pomysl-tekst-hint').hidden = !!u.mode_bez_zrodla;
   if (!FILTRY_ROLEK.some(f => f.id === state.filtr)) state.filtr = 'wszystkie';
@@ -1504,6 +1556,47 @@ function renderRolki() {
   kont.innerHTML = lista.map(kartaRolki).join('');
 }
 
+// Szacunek kosztu rolki w kredytach: sekundy × stawka (jakosc.koszt_sekundy); bez długości – jakosc.koszt_rolki. null = nie wiem.
+function szacunekKosztu(sekundy) {
+  const j = state.jakosc;
+  if (!j) return null;
+  const s = Number(sekundy);
+  if (s > 0 && j.koszt_sekundy) return Math.max(1, Math.round(s * Number(j.koszt_sekundy)));
+  return j.koszt_rolki ? Number(j.koszt_rolki) : null;
+}
+
+// Podpis tego, co decyduje o cenie rolki: rozdzielczość i stawka za sekundę. Koszt policzony przy innym podpisie jest nieaktualny.
+// (Długość rolki max_sekund_rolki nie wchodzi – już zeskanowane filmiki nie są cięte na nowo, więc ich cena się nie zmienia.)
+function podpisJakosci() {
+  const j = state.jakosc || {};
+  return `${j.resolution || ''}|${j.koszt_sekundy || ''}`;
+}
+// Podpis listy rolek: cena + koszt typowej rolki (szacunek dla pomysłów bez filmiku) – zmiana przerysowuje „ok. N kr”.
+function podpisRolek() {
+  const j = state.jakosc || {};
+  return `${podpisJakosci()}|${j.koszt_rolki || ''}`;
+}
+
+// Po zadaniu „koszt” zapamiętujemy, przy jakim zestawie jakości policzono każdą rolkę (pozycje [id, koszt]).
+function zapamietajPodpisKosztu(z) {
+  if (!z || z.typ !== 'koszt' || z.blad || !z.wynik || !Array.isArray(z.wynik.pozycje)) return;
+  const sig = podpisJakosci();
+  z.wynik.pozycje.forEach(x => { if (Array.isArray(x) && x[1] !== null && x[1] !== undefined) state.kosztJakosc[Number(x[0])] = sig; });
+}
+
+// Czy zapisany koszt czekającej rolki (p.koszt) jest jeszcze aktualny? Nie, gdy od policzenia zmienił się zestaw „Jakość i koszt”
+// (np. 720p -> 1080p) albo gdy odbiega od bieżącego szacunku (długość × stawka za sekundę) o ponad 30 %.
+// Backend liczy koszt od nowa tuż przed generacją, więc bez tego panel pokazywałby zaniżoną kwotę i pytał o inną, niż user zapłaci.
+function kosztNieaktualny(p) {
+  if (!p || p.koszt === null || p.koszt === undefined) return false;
+  const sig = state.kosztJakosc[Number(p.id)];
+  if (sig && sig !== podpisJakosci()) return true;
+  const czas = Number((p.info_zrodla || {}).czas) || 0;
+  const sz = czas ? szacunekKosztu(czas) : null;
+  if (!sz) return false;   // bez długości filmiku nie ma z czym porównać
+  return Math.abs(Number(p.koszt) - sz) / sz > 0.3;
+}
+
 function przyciskRolki(akcja, id, tekst, klasa = '') {
   return `<button class="btn btn-maly${klasa ? ' ' + klasa : ''}" type="button" data-akcja="${akcja}" data-id="${id}">${tekst}</button>`;
 }
@@ -1513,9 +1606,20 @@ function kartaRolki(p) {
   const status = p.status || 'nowy';
   const info = p.info_zrodla || {};
   const nazwa = tytulRolki(p);
+  const u = (state.stan && state.stan.ustawienia) || {};
+  const higgsfield = (u.dostawca || 'higgsfield') === 'higgsfield';
   const fakty = [];
   fakty.push(p.wariant === 'tekst' ? 'z tekstu' : (p.wariant === 'B' ? 'strój ze zdjęcia' : 'strój z filmu'));
-  if (p.koszt !== null && p.koszt !== undefined) fakty.push(esc(kredytow(p.koszt)));
+  const nieaktualny = status === 'nowy' && higgsfield && kosztNieaktualny(p);
+  if (p.koszt !== null && p.koszt !== undefined && !nieaktualny) fakty.push(esc(kredytow(p.koszt)));
+  else if (status === 'nowy' && higgsfield) {
+    // szacunek dla rolki, która czeka: długość filmiku × stawka za sekundę (jakosc.koszt_sekundy); bez długości – koszt typowej rolki.
+    // Stawki są w kredytach Higgsfield – przy yapper (inna skala) szacunku nie pokazujemy.
+    const sz = szacunekKosztu(info.czas);
+    const jak = info.czas ? `${esc(Number(info.czas).toFixed(1).replace('.', ','))} s × ${esc(String(state.jakosc.koszt_sekundy).replace('.', ','))} kr/s` : 'typowa rolka w Twoim zestawie jakości';
+    if (sz && nieaktualny) fakty.push(`<span class="uwaga" title="Od ostatniego liczenia (${esc(kredytow(p.koszt))}) zmienił się zestaw „Jakość i koszt”. Szacunek: ${jak}. „Zrób tę rolkę” policzy koszt na nowo, zanim zapyta.">ok. ${esc(liczba(sz))} kr · policz ponownie</span>`);
+    else if (sz) fakty.push(`<span title="Szacunek: ${jak}. Dokładną cenę policzy „Ile kosztuje?”.">ok. ${esc(liczba(sz))} kr</span>`);
+  }
   if (p.audio_nazwa || p.audio) fakty.push(`${ikona('audio')}z głosem`);
   if (p.lipsync_plik) fakty.push('usta dopasowane');
   if (p.telegram_wyslano) fakty.push(`<span class="ok" title="Ta rolka poleciała już na telefon">${ikona('ok')}wysłane na telefon</span>`);
@@ -1537,8 +1641,7 @@ function kartaRolki(p) {
   const gra = state.odtwarzane.has(id) && p.wideo_url;
   const telefon = telefonGotowy() && !!p.wideo_url;
   // tani podgląd (Seedance draft, ~21 kr): tylko Higgsfield i tylko rolki, które czekają
-  const u = (state.stan && state.stan.ustawienia) || {};
-  const podgladMozliwy = status === 'nowy' && (u.dostawca || 'higgsfield') === 'higgsfield';
+  const podgladMozliwy = status === 'nowy' && higgsfield;
   const maPodglad = !!p.podglad_url;
   const podgladGra = maPodglad && !gra && state.podglady.has(id);
   if (p.podglad_koszt !== null && p.podglad_koszt !== undefined) fakty.push(`podgląd: ${esc(kredytow(p.podglad_koszt))}`);
@@ -1632,7 +1735,8 @@ async function generujPomysl(id) {
   if (p && !p.prompt_higgsfield) { toast('Ta rolka nie ma promptu – wpisz go (więcej → Wpisz prompt) i zapisz.', 'uwaga'); return; }
   if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
   let koszt = p && p.koszt !== null && p.koszt !== undefined ? Number(p.koszt) : null;
-  if (koszt === null) {
+  if (koszt === null || kosztNieaktualny(p)) {
+    // brak kosztu albo koszt sprzed zmiany zestawu „Jakość i koszt” – liczymy na nowo (tanie, ~12 s), żeby pytać o prawdziwą kwotę
     const z = await akcjaCzekaj({ typ: 'koszt', ids: [id] }, 'liczę koszt', true);
     if (!z) return;
     koszt = z.blad ? null : kosztZWyniku(z, id);
@@ -1718,7 +1822,7 @@ async function ladujZdjecia() {
   const u = s.ustawienia || {};
   $('#zdjecia-brak-modelu').hidden = !!u.zdjecia_model;
   $('#form-zdjecia').hidden = !u.zdjecia_model;
-  $('#zdjecia-opis-modelu').textContent = u.zdjecia_model ? `Każde zdjęcie kosztuje kredyty Higgsfield (model: ${u.zdjecia_model}).` : 'Każde zdjęcie kosztuje kredyty Higgsfield.';
+  $('#zdjecia-opis-modelu').textContent = `Każde zdjęcie kosztuje ok. 2 kredyty Higgsfield.${state.pelny && u.zdjecia_model ? ` Model: ${u.zdjecia_model}.` : ''}`;
   $('#zdjecia-dzis').textContent = `dziś zrobione: ${s.zdjecia_dzis !== undefined ? s.zdjecia_dzis : 0}${u.zdjecia_dziennie ? ` z ${u.zdjecia_dziennie} (autopilot)` : ''}`;
   const [d, ust] = await Promise.allSettled([api('/api/zdjecia'), state.ustawieniaPelne ? Promise.resolve(state.ustawieniaPelne) : api('/api/ustawienia')]);
   if (ust.status === 'fulfilled') { state.ustawieniaPelne = ust.value; state.stroje = ust.value.stroje || []; }
@@ -1757,7 +1861,7 @@ function renderZdjecia() {
   const lista = state.zdjecia.slice().sort((a, b) => b.id - a.id);
   if (!lista.length) {
     const u = (state.stan && state.stan.ustawienia) || {};
-    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>${u.zdjecia_model ? 'Wpisz, jakie zdjęcie chcesz, i kliknij „Zrób zdjęcie”.' : 'Najpierw wybierz model zdjęć w Ustawieniach – potem kliknij „Zrób zdjęcie”.'} Autopilot też może robić zdjęcia sam – ustaw „Ile zdjęć dziennie” w Ustawienia → Zdjęcia.</span>${u.zdjecia_model ? '<button class="btn btn-maly btn-glowny" type="button" data-akcja="fokus-zdjecia">Zrób pierwsze zdjęcie</button>' : '<a class="btn btn-maly btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>'}</div>`;
+    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>${u.zdjecia_model ? 'Wpisz, jakie zdjęcie chcesz, i kliknij „Zrób zdjęcie”.' : 'Najpierw wybierz model zdjęć w Ustawieniach – potem kliknij „Zrób zdjęcie”.'} Autopilot też może robić zdjęcia sam – ustaw „Ile zdjęć dziennie” w <a href="#ustawienia/autopilot">Ustawienia → Autopilot</a>.</span>${u.zdjecia_model ? '<button class="btn btn-maly btn-glowny" type="button" data-akcja="fokus-zdjecia">Zrób pierwsze zdjęcie</button>' : '<a class="btn btn-maly btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>'}</div>`;
     return;
   }
   kont.innerHTML = lista.map(z => `<figure class="zdjecie" data-id="${Number(z.id)}">
@@ -1859,6 +1963,13 @@ function renderLipsyncFormularz() {
   const ust = (state.stan && state.stan.ustawienia) || {};
   const tryb = $('#ls-tryb');
   if (!tryb.dataset.ustawiony) { ustawSelectWartosc(tryb, (ust.lipsync_parametry || {}).sync_mode || 'bounce'); tryb.dataset.ustawiony = '1'; }
+  // brzmienie głosu: domyślnie z ustawienia persony (lipsync_glos_styl), user może zmienić na jedno dopasowanie
+  const styl = $('#ls-styl');
+  if (styl && !styl.dataset.ustawiony) {
+    const s = String(ust.lipsync_glos_styl || 'telefon');
+    styl.value = ['telefon', 'czysty', 'brak'].includes(s) ? s : 'telefon';
+    styl.dataset.ustawiony = '1';
+  }
 }
 
 function renderLipsyncHistoria() {
@@ -1889,7 +2000,10 @@ async function startLipsync() {
   const p = wideoId ? state.pomysly.find(x => Number(x.id) === wideoId) : null;
   const dane = { typ: 'lipsync', audio };
   if (wideoId) dane.id = wideoId; else dane.wideo = wideoSciezka;
-  let szczegoly = '';
+  const stylSel = $('#ls-styl');
+  if (stylSel && stylSel.value) dane.styl = stylSel.value;
+  const NAZWY_STYLU = { telefon: 'jak z telefonu w pokoju', czysty: 'czysty', brak: 'bez zmian' };
+  let szczegoly = dane.styl ? `<br>Brzmienie głosu: <b>${esc(NAZWY_STYLU[dane.styl] || dane.styl)}</b>.` : '';
   if (state.pelny) {
     // `model` i `sync_mode` to pola dodatkowe akcji lipsync – w trybie prostym obowiązują ustawienia persony
     dane.model = $('#ls-model').value;
@@ -1944,15 +2058,27 @@ async function otworzLipsyncDialog(id) {
   $('#ls-dlg-sciezka').value = '';
   $('#ls-dlg-id').value = String(id);
   $('#ls-dlg-tytul').textContent = `Dopasuj usta: ${p ? tytulRolki(p) : '#' + id}`;
+  const stylDlg = $('#ls-dlg-styl');
+  if (stylDlg) stylDlg.value = stylGlosuZUstawien();
   otworzDialog('#dlg-lipsync');
+}
+
+// Domyślne brzmienie głosu (ustawienie lipsync_glos_styl persony): telefon | czysty | brak
+function stylGlosuZUstawien() {
+  const u = (state.ustawieniaPelne && state.ustawieniaPelne.ustawienia) || {};
+  const s = String(u.lipsync_glos_styl || 'telefon');
+  return ['telefon', 'czysty', 'brak'].includes(s) ? s : 'telefon';
 }
 
 async function startLipsyncZDialogu() {
   const id = Number($('#ls-dlg-id').value);
   const audio = $('#ls-dlg-audio').value || $('#ls-dlg-sciezka').value.trim();
   if (!audio) { toast('Wybierz nagranie głosu albo wpisz ścieżkę do pliku.', 'uwaga'); return; }
+  const stylDlg = $('#ls-dlg-styl');
+  const dane = { typ: 'lipsync', id, audio };
+  if (stylDlg && stylDlg.value) dane.styl = stylDlg.value;
   $('#dlg-lipsync').close();
-  await akcja({ typ: 'lipsync', id, audio }, 'dopasowuję usta');
+  await akcja(dane, 'dopasowuję usta');
 }
 
 async function usunLipsync(id) {
@@ -2003,9 +2129,11 @@ function ustawSelectWartosc(sel, v) {
   sel.value = v;
 }
 
-function wypelnijFormularz(form, dane) {
+// tylkoPodane=true: zmienia wyłącznie pola, których nazwy są w `dane` (reszta formularza zostaje, jak była)
+function wypelnijFormularz(form, dane, tylkoPodane = false) {
   Array.from(form.elements).forEach(el => {
     if (!el.name || el.type === 'submit' || el.type === 'button') return;
+    if (tylkoPodane && wartoscZ(dane, el.name) === undefined) return;
     const v = wartoscZ(dane, el.name);
     if (el.type === 'checkbox') el.checked = !!v;
     else if (el.type === 'radio') el.checked = String(el.value) === String(v === null || v === undefined ? '' : v);
@@ -2080,13 +2208,14 @@ async function ladujUstawienia() {
   state.ustawieniaPelne = d;
   const u = d.ustawienia || {};
   const pr = d.prompty || {};
-  const dane = Object.assign({}, u, { prompt_a_tekst: pr.a || '', prompt_b_tekst: pr.b || '', zdjecia_prompty_tekst: pr.zdjecia || '', jakosc: u.resolution || '' });
+  const dane = Object.assign({}, u, { prompt_a_tekst: pr.a || '', prompt_b_tekst: pr.b || '', zdjecia_prompty_tekst: pr.zdjecia || '' });
   renderStrojDomyslny(d);
   $$('#strona-ustawienia form[data-ustawienia]').forEach(f => wypelnijFormularz(f, dane));
   przelaczDostawce();
   renderReferencje(d);
   renderFoldery(d);
   renderPromptyInfo();
+  renderJakosc();
   // profil przychodzi z /api/ustawienia (pole profil); po zapisie trzymamy świeższą kopię w state.profile
   if (d.profil && !state.profile[state.aktywna]) state.profile[state.aktywna] = d.profil;
   const prof = state.profile[state.aktywna] || d.profil || {};
@@ -2135,12 +2264,77 @@ function renderStrojDomyslny(d) {
   if (biez) ustawSelectWartosc(sel, biez);
 }
 
+// Ustawienia → Foldery: ścieżki teraz używane + „Otwórz” (Eksplorator) i „kopiuj”; nagrania głosu i folder programu tylko w pełnym.
 function renderFoldery(d) {
   const f = d.foldery || {};
-  const wiersze = [['Filmiki (wrzutnia)', f.wrzutnia], ['Gotowe rolki', f.gotowe], ['Zdjęcia', f.zdjecia], ['Nagrania głosu', f.audio], ['Folder persony w programie', f.modelka]].filter(w => w[1]);
-  $('#foldery-efektywne').innerHTML = wiersze.length
-    ? '<div class="etykieta">Teraz używane:</div>' + wiersze.map(([n, s]) => `<div class="folder-wiersz"><span class="etykieta">${esc(n)}</span><span class="sciezka">${esc(s)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(s)}" title="kopiuj ścieżkę">${ikona('kopiuj')}</button></div>`).join('')
-    : '';
+  const wiersze = [['Tu wrzucasz filmiki', f.wrzutnia, 'wrzutnia'], ['Tu odbierasz gotowe rolki', f.gotowe, 'gotowe'], ['Tu lądują zdjęcia persony', f.zdjecia, 'zdjecia'],
+    ['Nagrania głosu (lipsync)', f.audio, null, true], ['Folder persony w programie', f.modelka, null, true]].filter(w => w[1]);
+  $('#foldery-efektywne').innerHTML = wiersze.map(([n, s, co, zaaw]) => `<div class="folder-wiersz"${zaaw ? ' data-zaawansowane' : ''}><span class="etykieta">${esc(n)}</span><span class="sciezka">${esc(s)}</span><span class="folder-przyciski">${co ? `<button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="${esc(co)}">${ikona('folder')}Otwórz</button>` : ''}<button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(s)}" title="kopiuj ścieżkę" aria-label="kopiuj ścieżkę">${ikona('kopiuj')}</button></span></div>`).join('');
+}
+
+// Ustawienia → „Jakość i koszt”: trzy karty-zestawy z /api/stan.jakosc.presety; klik -> POST /api/ustawienia/preset.
+function renderJakosc() {
+  const kont = $('#jakosc-karty');
+  if (!kont) return;
+  const j = state.jakosc;
+  if (!j) { kont.innerHTML = '<div class="muted">Sprawdzam ustawienia…</div>'; kont.dataset.klucz = ''; $('#jakosc-ostrzezenie').hidden = true; return; }
+  const presety = j.presety || {};
+  // przerysowujemy tylko przy zmianie danych (nie porównujemy HTML – przeglądarka serializuje SVG inaczej, więc karta traciłaby fokus co 5 s)
+  const klucz = JSON.stringify([j.preset, j.resolution, j.max_sekund_rolki, j.koszt_rolki, j.za_drogo, j.max_kredyty_na_rolke, presety]);
+  if (kont.dataset.klucz !== klucz) {
+    kont.dataset.klucz = klucz;
+    const karty = Object.keys(PRESETY_JAKOSCI).filter(k => presety[k]).map(k => {
+      const p = presety[k], o = PRESETY_JAKOSCI[k], aktywna = j.preset === k;
+      return `<button type="button" class="jakosc-karta${aktywna ? ' aktywna' : ''}" role="radio" aria-checked="${aktywna ? 'true' : 'false'}" data-akcja="jakosc-preset" data-preset="${esc(k)}">
+        <span class="jakosc-nazwa">${esc(o.nazwa)}<span class="ikona">${ikona('ok')}</span></span>
+        <span class="jakosc-opis">${esc(o.opis)}</span>
+        <span class="jakosc-koszt"><b>ok. ${esc(liczba(p.koszt_rolki))} kr</b> <small>za rolkę · ${esc(p.resolution)}, do ${esc(p.max_sekund_rolki)}&nbsp;s</small></span>
+      </button>`;
+    });
+    if (j.preset === 'wlasne') {
+      karty.push(`<div class="jakosc-karta wlasne aktywna" role="radio" aria-checked="true" aria-disabled="true">
+        <span class="jakosc-nazwa">Własne ustawienia<span class="ikona">${ikona('ok')}</span></span>
+        <span class="jakosc-opis">${esc(j.resolution || '?')}, rolki do ${esc(j.max_sekund_rolki || '?')}&nbsp;s – ustawione ręcznie w „Jak robić rolki” (tryb pełny). Kliknij zestaw obok, żeby wrócić do gotowego.</span>
+        <span class="jakosc-koszt"><b>ok. ${esc(liczba(j.koszt_rolki))} kr</b> <small>za rolkę</small></span>
+      </div>`);
+    }
+    kont.innerHTML = karty.join('');
+  }
+  const ostrz = $('#jakosc-ostrzezenie');
+  ostrz.hidden = !j.za_drogo;
+  if (j.za_drogo) {
+    $('#jakosc-ostrzezenie-tekst').innerHTML = `Ta rolka (ok. <b>${esc(liczba(j.koszt_rolki))} kr</b>) przekracza Twój limit na jedną rolkę (<b>${esc(liczba(j.max_kredyty_na_rolke))} kr</b>) – fabryka ją pominie. Wybierz <b>Normalnie</b> albo podnieś limit w trybie pełnym (<a href="#ustawienia/limity">Limity kredytów</a>).`;
+  }
+}
+
+async function ustawPresetJakosci(nazwa, btn) {
+  if (!nazwa || (state.jakosc && state.jakosc.preset === nazwa)) return;
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/ustawienia/preset', 'POST', { nazwa });
+    if (d.jakosc) state.jakosc = d.jakosc;
+    if (d.ustawienia) {
+      // zestaw ustawia resolution (Higgsfield); pole „Rozdzielczość” obiecuje tę samą jakość u yapper – dosyłamy yapper.resolution
+      const yr = (d.ustawienia.yapper || {}).resolution;
+      if (d.ustawienia.resolution && yr !== d.ustawienia.resolution) {
+        try {
+          const dy = await api('/api/ustawienia', 'POST', { yapper: { resolution: d.ustawienia.resolution } });
+          if (dy.ustawienia) d.ustawienia = dy.ustawienia;
+        } catch (e) { console.warn('yapper.resolution nie zapisane:', e.message); }
+      }
+      if (state.ustawieniaPelne) state.ustawieniaPelne.ustawienia = d.ustawienia;
+      if (state.stan) state.stan.ustawienia = d.ustawienia;
+      // pola „Rozdzielczość” i „Długość rolki” w „Jak robić rolki” pokazują to samo, co zestaw
+      const f = $('#form-generowanie');
+      if (f) wypelnijFormularz(f, { resolution: d.ustawienia.resolution, max_sekund_rolki: d.ustawienia.max_sekund_rolki }, true);
+    }
+    renderJakosc();
+    const j = state.jakosc || {};
+    toast(`Zestaw „${nazwaPresetu(nazwa)}”: jedna rolka to ok. ${liczba(j.koszt_rolki)} kr.`, 'ok');
+    odswiez();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function renderPromptyInfo() {
@@ -2161,9 +2355,18 @@ async function zapiszUstawienia(f) {
   if (btn) btn.disabled = true;
   try {
     if (f.id === 'form-generowanie') {
-      // kafelki „Jakość” -> resolution (Higgsfield) i yapper.resolution (ta sama jakość u obu dostawców)
-      if (dane.jakosc) { dane.resolution = dane.jakosc; ustawW(dane, 'yapper.resolution', dane.jakosc); }
-      delete dane.jakosc;
+      // „Rozdzielczość” -> resolution (Higgsfield) i yapper.resolution (ta sama jakość u obu dostawców)
+      if (dane.resolution) ustawW(dane, 'yapper.resolution', dane.resolution);
+      if (dane.max_sekund_rolki !== null && dane.max_sekund_rolki !== undefined) {
+        const wpisane = Number(dane.max_sekund_rolki);
+        dane.max_sekund_rolki = Math.max(4, Math.min(30, wpisane || 15));
+        // przycięte do 4–30 s: pole pokazuje to, co naprawdę się zapisze, i mówimy o tym wprost
+        const pole = f.elements.max_sekund_rolki;
+        if (pole && String(pole.value).trim() !== '' && wpisane !== dane.max_sekund_rolki) {
+          pole.value = dane.max_sekund_rolki;
+          toast(`Długość rolki przycięta do ${dane.max_sekund_rolki} s (dozwolone 4–30 s).`, 'uwaga');
+        }
+      }
     }
     if (dane.budzet) {
       // limity dzienne to osobny plik (budzet.json), wspólny dla wszystkich person
@@ -2176,6 +2379,12 @@ async function zapiszUstawienia(f) {
     if (d.ustawienia) {
       if (state.ustawieniaPelne) state.ustawieniaPelne.ustawienia = d.ustawienia;
       if (state.stan) state.stan.ustawienia = d.ustawienia;
+      // to samo ustawienie może być w dwóch formularzach (np. zdjecia_dziennie) – odświeżamy pozostałe, żeby nie nadpisały go starą wartością
+      const wspolne = {};
+      Object.keys(dane).forEach(k => { if (!k.includes('.') && d.ustawienia[k] !== undefined) wspolne[k] = d.ustawienia[k]; });
+      $$('#strona-ustawienia form[data-ustawienia]').forEach(inny => { if (inny !== f) wypelnijFormularz(inny, wspolne, true); });
+      // ten formularz też dostaje wartości z serwera (np. max_sekund_rolki przycięte po stronie backendu)
+      if (f.id === 'form-generowanie') wypelnijFormularz(f, { resolution: d.ustawienia.resolution, max_sekund_rolki: d.ustawienia.max_sekund_rolki }, true);
     }
     if (f.id === 'form-prompty' && state.ustawieniaPelne) {
       state.ustawieniaPelne.prompty = Object.assign({}, state.ustawieniaPelne.prompty, { a: dane.prompt_a_tekst, b: dane.prompt_b_tekst });
@@ -2337,7 +2546,9 @@ function kartaKonta(id, k) {
       <div class="rzad"><button class="btn btn-maly" type="button" data-akcja="konto-test" data-dostawca="${esc(id)}"${k.jest ? '' : ' disabled'}>Sprawdź</button>${k.jest && !k.z_env ? `<button class="btn btn-maly btn-zly" type="button" data-akcja="konto-usun" data-dostawca="${esc(id)}">Usuń klucz</button>` : ''}${wynikHtml}</div>`;
   }
   const opis = OPISY_KONT[id] || k.opis || '';
-  return `<div class="karta konto" data-konto="${esc(id)}"${id === 'elevenlabs' ? ' data-zaawansowane' : ''}>
+  // tryb prosty: tylko Higgsfield i telefon – yapper (dostawca do wyboru w „Jak robić rolki”) i sync (Lipsync) są tam niedostępne
+  const zaawansowane = ['yapper', 'sync', 'elevenlabs'].includes(id);
+  return `<div class="karta konto" data-konto="${esc(id)}"${zaawansowane ? ' data-zaawansowane' : ''}>
     <div class="karta-naglowek"><div><h2>${esc(nazwa)}</h2>${opis ? `<p>${esc(opis)}</p>` : ''}</div></div>
     <div class="konto-stan ${stanKlasa}"><span class="kropka ${stanKlasa}"></span>${esc(stanTekst)}</div>
     ${srodek}
@@ -2484,7 +2695,7 @@ function renderHistoria() {
   // filtr persony po stronie panelu (API przyjmuje tylko ile/typ); wpisy bez persony są wspólne, więc zostają
   const wpisy = state.dziennik.filter(w => !modelka || !w.modelka || w.modelka === modelka).slice().reverse();
   $('#historia-tabela').innerHTML = wpisy.length
-    ? wpisy.map(w => `<tr><td class="czas" title="${esc(formatData(w.czas))}">${esc(formatCzas(w.czas))}</td><td><span class="rzad" style="gap:6px;flex-wrap:nowrap"><span class="kropka ${esc(w.typ || 'info')}"></span>${esc(w.typ === 'blad' ? 'błąd' : (w.typ || ''))}</span></td><td class="nowrap">${esc(w.modelka || '')}</td><td>${esc(w.tekst)}${w.dane ? ` <small class="muted">${esc(daneDziennika(w.dane))}</small>` : ''}</td></tr>`).join('')
+    ? wpisy.map(w => `<tr><td class="czas" title="${esc(formatData(w.czas))}">${esc(formatCzas(w.czas))}</td><td class="typ"><span class="rzad" style="gap:6px;flex-wrap:nowrap"><span class="kropka ${esc(w.typ || 'info')}"></span>${esc(w.typ === 'blad' ? 'błąd' : (w.typ || ''))}</span></td><td class="nowrap">${esc(w.modelka || '')}</td><td>${esc(w.tekst)}${w.dane ? ` <small class="muted">${esc(daneDziennika(w.dane))}</small>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="4" class="muted">Brak wpisów.</td></tr>';
 }
 
@@ -2735,6 +2946,7 @@ document.addEventListener('click', async e => {
       case 'tts': await startTts(); break;
       // ustawienia
       case 'usun-plik': await usunPlik(el.dataset.typ, el.dataset.nazwa); break;
+      case 'jakosc-preset': await ustawPresetJakosci(el.dataset.preset, el); break;
       case 'odswiez-listy': await odswiezListy(); break;
       case 'konto-test': await testujKonto(el.dataset.dostawca, el); break;
       case 'konto-usun': await usunKlucz(el.dataset.dostawca); break;

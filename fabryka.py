@@ -357,11 +357,25 @@ def jakosc_i_koszt(slug, ust=None):
     }
 
 
+def uniewaznij_koszty(slug):
+    """Po zmianie rozdzielczosci policzone wczesniej koszty rolek 'nowy' sa nieaktualne - czyscimy, panel policzy od nowa."""
+    ile = 0
+    for p in baza.lista_pomyslow(slug, "nowy"):
+        if p.get("koszt") is not None:
+            baza.aktualizuj_pomysl(slug, p["id"], koszt=None)
+            ile += 1
+    return ile
+
+
 def ustaw_preset_jakosci(slug, nazwa):
     """Zapisuje zestaw 'Jakosc i koszt' (resolution + max_sekund_rolki) w ustawieniach persony."""
     if nazwa not in PRESETY_JAKOSCI:
         raise ValueError(f"Nieznany zestaw '{nazwa}'. Dozwolone: {', '.join(PRESETY_JAKOSCI)}")
-    return baza.zapisz_ustawienia(slug, **PRESETY_JAKOSCI[nazwa])
+    przed = baza.ustawienia_modelki(slug).get("resolution")
+    ust = baza.zapisz_ustawienia(slug, **PRESETY_JAKOSCI[nazwa])
+    if ust.get("resolution") != przed:
+        uniewaznij_koszty(slug)
+    return ust
 
 
 def nowe_zrodla(slug):
