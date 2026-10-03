@@ -120,7 +120,9 @@ def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None, s
     if not os.path.isfile(audio):
         raise FileNotFoundError(audio)
     lid = baza.dodaj_lipsync(slug, wideo, audio, dostawca, model, pomysl_id=pomysl_id)
-    cel = os.path.join(baza.folder_gotowych(slug), _nazwa_wyniku(slug, wideo, pomysl_id))
+    nazwa = _nazwa_wyniku(slug, wideo, pomysl_id)
+    cel = os.path.join(baza.folder_gotowych(slug), nazwa)
+    surowy = os.path.join(baza.folder_wynikow(slug), nazwa[:-4] + ".raw.mp4")   # wynik z API przed praniem
     _zdarzenie(log, slug, "info", f"lipsync #{lid}: {os.path.basename(wideo)} + {os.path.basename(audio)} ({dostawca} {model}, glos: {styl})", lipsync=lid)
     try:
         glos = przygotuj_glos(slug, audio, styl, log=log)
@@ -134,7 +136,8 @@ def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None, s
             raise ValueError(f"nieznany lipsync_dostawca '{dostawca}' (sync | higgsfield)")
         if not wynik.get("url"):
             raise RuntimeError(wynik.get("blad") or f"brak URL wyniku (status {wynik.get('status')})")
-        (sync_so if dostawca == "sync" else dostawcy.dostawca("higgsfield")).pobierz(wynik["url"], cel)
+        (sync_so if dostawca == "sync" else dostawcy.dostawca("higgsfield")).pobierz(wynik["url"], surowy)
+        cel = _postprodukcja(slug, surowy, cel, ust, log)
     except Exception as e:
         baza.aktualizuj_lipsync(slug, lid, status="blad", notatki=str(e)[:1000])
         raise
@@ -148,6 +151,19 @@ def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None, s
         except ValueError:
             pass
     _zdarzenie(log, slug, "ok", f"lipsync #{lid}: GOTOWE -> {cel}" + (f" ({koszt} c)" if koszt else ""), lipsync=lid, plik=cel)
+    return cel
+
+
+def _postprodukcja(slug, surowy, cel, ust, log):
+    """Jak przy rolkach: plik z API (surowy, w wyniki/) -> Media Tool (pranie: metadane jak z telefonu) -> folder gotowych.
+    Bez Media Tool (ustawienie mediatool=false) albo gdy padnie: kopia surowego pliku do gotowych."""
+    if ust.get("mediatool"):
+        try:
+            import mediatool
+            return mediatool.pierz_wideo(surowy, os.path.dirname(cel), nazwa_wyniku=os.path.basename(cel), log=log)
+        except Exception as e:
+            _zdarzenie(log, slug, "uwaga", f"lipsync: Media Tool nie wyszedl ({e}) - plik bez prania")
+    shutil.copy2(surowy, cel)
     return cel
 
 

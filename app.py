@@ -651,9 +651,12 @@ def _funkcja_akcji(typ, slug, dane):
         if not cid:
             raise ValueError(f"Konto {konto} tej persony nie napisalo jeszcze /start do bota ({opis}).")
 
+        z_lipsynciem = plik == p.get("lipsync_plik")
+
         def _wyslij(log, stop):
-            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (f"\n\n{p['podpis']}" if p.get("podpis") else ""), chat_id=cid)
-            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
+            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "")
+                                  + (f"\n\n{p['podpis']}" if p.get("podpis") else ""), chat_id=cid)
+            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True, **({"telegram_wyslano_lipsync": True} if z_lipsynciem else {}))
             log(f"wyslalem #{p['id']} na Telegram ({opis})")
             return {"wyslano": p["id"], "czat": opis}
         return _wyslij

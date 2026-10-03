@@ -165,6 +165,8 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   (`telefon` = jak nagranie z telefonu w pokoju: pasmo mikrofonu, lekki pogłos, szum tła, wyrównana głośność – domyślnie;
   `czysty` = tylko głośność; `brak` = plik bez zmian). Głosówki z Telegrama (.ogg) też przechodzą. Wynik w `modelki/<slug>/audio/_przygotowane/`.
   GUI: select „Brzmienie głosu” w dialogu Lipsync (pole `styl` akcji) + ustawienie w sekcji Lipsync (tryb pełny).
+  Wynik lipsyncu idzie jak rolka: surowy plik z API do `modelki/<slug>/wyniki/<nazwa>_lipsync.raw.mp4`, potem Media Tool (gdy `mediatool`)
+  → `wyniki_dir/<nazwa>_lipsync.mp4`. Autopilot wysyła wersję z dopasowanymi ustami na Telegram raz (`telegram_wyslano_lipsync`).
 - `DELETE /api/lipsync/<id>`
 - `GET /api/dziennik?ile=100&typ=blad` → `{"wpisy": [{"czas", "typ", "modelka", "tekst", "dane"}]}` (najnowszy na końcu)
 - `GET /api/budzet` → `{"budzet": {...plik budzet.json...}, "dzis": {"higgsfield": {"wydano": 90, "limit": 300, "jednostka": "kr"}, "yapper": {"wydano": 0, "limit": 0, "jednostka": "kr"}, "sync": {"wydano": 50, "limit": 0, "jednostka": "c"}}}`

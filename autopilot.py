@@ -317,10 +317,10 @@ def czat_persony(tg, slug, ust=None, log=None):
     return None
 
 
-def _swiezy(p, godzin=24):
-    """Rolka wygenerowana w ciagu ostatnich `godzin` (zeby po sparowaniu nie wysylac calej historii)."""
+def _swiezy(p, godzin=24, pole="wygenerowano"):
+    """Rolka wygenerowana (albo zmieniona - `pole`) w ciagu ostatnich `godzin`, zeby po sparowaniu nie wysylac calej historii."""
     try:
-        t = datetime.fromisoformat(p.get("wygenerowano") or "")
+        t = datetime.fromisoformat(p.get(pole) or "")
     except ValueError:
         return False
     if t.tzinfo is None:
@@ -335,8 +335,14 @@ def wyslij_gotowe(slug, log=None):
     ust = baza.ustawienia_modelki(slug)
     if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
         return 0
+    def _ma_lipsync(p):
+        return bool(p.get("lipsync_plik")) and os.path.isfile(p["lipsync_plik"])
+
+    # nowa gotowa rolka albo rolka, ktora dostala wersje z dopasowanymi ustami (lipsync robiony recznie, pozniej)
     do_wyslania = [p for p in baza.lista_pomyslow(slug)
-                   if p["status"] in ("gotowe", "wygenerowany") and not p.get("telegram_wyslano") and _swiezy(p)]
+                   if p["status"] in ("gotowe", "wygenerowany")
+                   and ((not p.get("telegram_wyslano") and _swiezy(p))
+                        or (_ma_lipsync(p) and not p.get("telegram_wyslano_lipsync") and _swiezy(p, pole="zaktualizowano")))]
     if not do_wyslania:
         return 0
     cid = czat_persony(tg, slug, ust, log)
@@ -344,14 +350,16 @@ def wyslij_gotowe(slug, log=None):
         return 0
     ile = 0
     for p in do_wyslania:
-        plik = p.get("lipsync_plik") if p.get("lipsync_plik") and os.path.isfile(p["lipsync_plik"]) else p.get("plik_wynikowy")
+        z_lipsynciem = _ma_lipsync(p)
+        plik = p["lipsync_plik"] if z_lipsynciem else p.get("plik_wynikowy")
         if not plik or not os.path.isfile(plik):
             continue
         podpis = (p.get("podpis") or "").strip()
-        tekst = f"{slug} · rolka #{p['id']} · {os.path.basename(plik)}" + (f"\n\n{podpis}" if podpis else "")
+        tekst = f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "") + f" · {os.path.basename(plik)}" \
+            + (f"\n\n{podpis}" if podpis else "")
         try:
             tg.wyslij_wideo(plik, tekst, chat_id=cid)
-            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True)
+            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True, **({"telegram_wyslano_lipsync": True} if z_lipsynciem else {}))
             ile += 1
             log(f"telegram: wyslalem #{p['id']} ({os.path.basename(plik)})")
         except Exception as e:

@@ -91,6 +91,38 @@ def test_zrob_uzywa_przygotowanego_glosu(modelka, monkeypatch):
         lipsync.zrob(modelka, wideo, audio, styl="xxx")
 
 
+def test_lipsync_przechodzi_przez_media_tool(modelka, monkeypatch):
+    """Wynik z sync.so laduje w wyniki/ jako .raw.mp4, a do folderu gotowych idzie po Media Tool (gdy mediatool=true)."""
+    import mediatool
+    wideo = os.path.join(baza.folder_gotowych(modelka), "001_a.mp4"); open(wideo, "wb").write(b"v")
+    audio = os.path.join(baza.folder_audio(modelka), "a.mp3"); open(audio, "wb").write(b"a")
+    monkeypatch.setattr(lipsync, "przygotuj_glos", lambda slug, a, styl, log=None: a)
+    monkeypatch.setattr(lipsync.sync_so, "generuj", lambda *a, **k: {"job_id": "g1", "status": "COMPLETED", "url": "https://cdn/x.mp4", "sekundy": 5})
+    monkeypatch.setattr(lipsync.sync_so, "pobierz", lambda url, cel: open(cel, "wb").write(b"surowe") and cel)
+    prane = []
+
+    def pierz_wideo(plik, folder, nazwa_wyniku=None, log=None):
+        prane.append(plik)
+        cel = os.path.join(folder, nazwa_wyniku)
+        open(cel, "wb").write(b"wyprane")
+        return cel
+    monkeypatch.setattr(mediatool, "pierz_wideo", pierz_wideo)
+    baza.zapisz_ustawienia(modelka, mediatool=True)
+    cel = lipsync.zrob(modelka, wideo, audio)
+    assert cel == os.path.join(baza.folder_gotowych(modelka), "001_a_lipsync.mp4") and open(cel, "rb").read() == b"wyprane"
+    assert prane == [os.path.join(baza.folder_wynikow(modelka), "001_a_lipsync.raw.mp4")] and os.path.isfile(prane[0])
+    # Media Tool pada -> kopia surowego pliku, lipsync nadal "gotowe", ostrzezenie w dzienniku
+    monkeypatch.setattr(mediatool, "pierz_wideo", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("brak Media Tool")))
+    cel = lipsync.zrob(modelka, wideo, audio)
+    assert open(cel, "rb").read() == b"surowe" and baza.lista_lipsync(modelka)[-1]["status"] == "gotowe"
+    assert any("Media Tool nie wyszedl" in w["tekst"] for w in baza.dziennik_ostatnie(5, typ="uwaga"))
+    # mediatool wylaczony -> kopia bez prania, bez ostrzezenia
+    baza.zapisz_ustawienia(modelka, mediatool=False)
+    ile_uwag = len(baza.dziennik_ostatnie(50, typ="uwaga"))
+    assert open(lipsync.zrob(modelka, wideo, audio), "rb").read() == b"surowe"
+    assert len(baza.dziennik_ostatnie(50, typ="uwaga")) == ile_uwag
+
+
 def test_api_lipsync_styl(modelka, monkeypatch):
     import app as panel
     panel.konsola.__init__()

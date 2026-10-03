@@ -153,6 +153,13 @@ def test_wyslij_gotowe_i_raport(tg, modelka, cli, bez_ffmpeg):
     assert baza.pomysl(modelka, 1)["klatki_wyniku"].endswith("001_wynik.jpg")
     # drugi przebieg nie wysyla ponownie
     assert autopilot.przebieg(modelka)["wyslane"] == 0 and len(tg.pliki) == 1
+    # recznie zrobiony lipsync (pozniej) -> wersja z dopasowanymi ustami leci na telefon raz
+    lip = os.path.join(baza.folder_gotowych(modelka), "001_a_lipsync.mp4")
+    open(lip, "wb").write(b"l")
+    baza.aktualizuj_pomysl(modelka, 1, lipsync_plik=lip)
+    assert autopilot.przebieg(modelka)["wyslane"] == 1 and tg.pliki[-1][2]["video"] == lip
+    assert "z dopasowanymi ustami" in tg.pliki[-1][1]["caption"] and baza.pomysl(modelka, 1)["telegram_wyslano_lipsync"] is True
+    assert autopilot.przebieg(modelka)["wyslane"] == 0 and len(tg.pliki) == 2
     # raport: wymuszony zawsze, automatyczny raz dziennie po godzinie raportu
     tekst = autopilot.raport_dnia(wymus=True)
     assert "noemi: 1 rolek" in tekst and telegram.stan()["ostatni_raport"]
