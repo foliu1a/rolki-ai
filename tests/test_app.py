@@ -330,3 +330,17 @@ def test_zamknij_konczy_proces(klient, monkeypatch):
     d = _json(klient.post("/api/zamknij"))
     assert d["zamykam"] is True
     assert wywolane.wait(3)
+
+
+def test_statystyki_i_avatar(klient, modelka, cli):
+    _wrzuc(modelka, "a.mp4")
+    fabryka.skanuj(modelka)
+    klient.post("/api/akcja", json={"typ": "generuj"})
+    _czekaj_na_zadanie()
+    d = _json(klient.get("/api/statystyki?dni=7"))
+    assert len(d["dni"]) == 7 and d["dni"][-1]["rolki"] == 1 and d["razem"]["kredyty"]["higgsfield"] == 45
+    s = _json(klient.get("/api/stan"))
+    m = s["modelki"][0]
+    assert m["rolki_dzis"] == 1 and m["autopilot_stan"]["pauza"] is None and m["avatar_url"].startswith("/api/plik")
+    d = _json(klient.post("/api/akcja", json={"typ": "podglad", "id": 1}))
+    _czekaj_na_zadanie()

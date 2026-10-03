@@ -336,7 +336,9 @@ def api_stan():
         ust = baza.ustawienia_modelki(slug)
         modelki.append({"slug": slug, "nazwa": baza.profil_modelki(slug).get("nazwa") or slug,
                         "autopilot": bool(ust.get("autopilot")), "dostawca": ust.get("dostawca") or "higgsfield",
-                        "statystyki": baza.statystyki_pomyslow(slug)})
+                        "statystyki": baza.statystyki_pomyslow(slug), "autopilot_stan": baza.autopilot_stan(slug),
+                        "rolki_dzis": len(baza.pomysly_z_dnia(slug)),
+                        "avatar_url": _avatar(slug)})
     stan = fabryka.stan_modelki(aktywna) if aktywna else None
     salda = _salda(wymus=request.args.get("saldo") == "1", dostawca_aktywnej=(stan or {}).get("dostawca"))
     ostatnie = baza.dziennik_ostatnie(1)
@@ -344,6 +346,15 @@ def api_stan():
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
                dzis=_dzis(aktywna), zadanie=konsola.opis(), konta=_konta_skrot(salda),
                dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA)
+
+
+def _avatar(slug):
+    """Pierwsze zdjecie referencyjne persony jako avatar (albo None)."""
+    try:
+        refs = baza.sciezki_referencji(slug)
+        return _url_pliku(refs[0]) if refs else None
+    except Exception:
+        return None
 
 
 def _stan_telegramu():
@@ -422,6 +433,8 @@ def _pomysl_dla_panelu(p):
     arkusz = os.path.join(klatki, "arkusz.jpg") if klatki else None
     p["miniatura_url"] = _url_pliku(arkusz)
     p["wynik_miniatura_url"] = _url_pliku(p.get("klatki_wyniku"))
+    p["podglad_url"] = _url_pliku(p.get("podglad_plik"))
+    p["podglad_miniatura_url"] = _url_pliku(p.get("klatki_podgladu"))
     p["wideo_url"] = _url_pliku(p.get("plik_wynikowy")) if p.get("plik_wynikowy") and os.path.isfile(p["plik_wynikowy"] or "") else None
     p["zrodlo_url"] = _url_pliku(p.get("zrodlo"))
     p["lipsync_url"] = _url_pliku(p.get("lipsync_plik"))
@@ -551,6 +564,9 @@ def _funkcja_akcji(typ, slug, dane):
         return lambda log, stop: lipsync.tts_z_tekstu(slug, tekst, voice_id=dane.get("voice_id"), nazwa=_bezpieczna(dane.get("nazwa") or ""), log=log)
     if typ == "autopilot_raz":
         return lambda log, stop: autopilot.przebieg(slug, log=log, stop=stop)
+    if typ == "podglad":
+        pid = int(dane["id"])
+        return lambda log, stop: {"plik": fabryka.podglad(slug, pid, log=log)}
     if typ == "telegram_wyslij":
         from dostawcy import telegram
         p = baza.pomysl(slug, int(dane["id"]))
@@ -777,6 +793,37 @@ def _konta_pelne():
 @app.route("/api/konta")
 def api_konta():
     return _ok(konta=_konta_pelne())
+
+
+@app.route("/api/statystyki")
+def api_statystyki():
+    """Ostatnie N dni (domyslnie 14): rolki, zdjecia, kredyty per dostawca, problemy - do wykresu w panelu."""
+    from datetime import datetime, timedelta
+    ile = max(1, min(90, int(request.args.get("dni", 14) or 14)))
+    dni = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(ile - 1, -1, -1)]
+    rolki = {d: 0 for d in dni}
+    zdjecia = {d: 0 for d in dni}
+    for slug in baza.lista_modelek():
+        for p in baza.lista_pomyslow(slug):
+            d = (p.get("wygenerowano") or "")[:10]
+            if d in rolki:
+                rolki[d] += 1
+        for z in baza.lista_zdjec(slug):
+            d = (z.get("utworzono") or "")[:10]
+            if d in zdjecia and z.get("status") == "gotowe":
+                zdjecia[d] += 1
+    bud = baza.budzet()
+    kredyty = {"higgsfield": bud.get("wydatki", {}), "yapper": (bud.get("dostawcy", {}).get("yapper") or {}).get("wydatki", {}),
+               "sync": (bud.get("dostawcy", {}).get("sync") or {}).get("wydatki", {})}
+    bledy = {d: 0 for d in dni}
+    for w in baza.dziennik_ostatnie(2000, typ="blad"):
+        d = str(w.get("czas", ""))[:10]
+        if d in bledy:
+            bledy[d] += 1
+    return _ok(dni=[{"dzien": d, "rolki": rolki[d], "zdjecia": zdjecia[d], "bledy": bledy[d],
+                     "kredyty": {k: int(v.get(d, 0)) for k, v in kredyty.items()}} for d in dni],
+               razem={"rolki": sum(rolki.values()), "zdjecia": sum(zdjecia.values()), "bledy": sum(bledy.values()),
+                      "kredyty": {k: sum(int(v.get(d, 0)) for d in dni) for k, v in kredyty.items()}})
 
 
 @app.route("/api/diagnoza")

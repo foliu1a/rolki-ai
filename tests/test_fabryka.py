@@ -450,3 +450,21 @@ def test_podpis_z_hashtagami(modelka):
     with open(cel, encoding="utf-8") as f:
         assert f.read() == "Sunset\n\n#ai #noemi\n"
     assert baza.pomysl(modelka, pid)["podpis"] == tekst
+
+
+def test_tani_podglad_draft(bez_mediatool, cli):
+    slug = bez_mediatool
+    _wrzuc(slug, "a.mp4")
+    fabryka.main(["skanuj"])
+    cli.cena = 21
+    cel = fabryka.podglad(slug, 1)
+    assert cel.endswith("001_a.podglad.mp4") and os.path.isfile(cel)
+    model, params, media = cli.generacje[0]
+    assert params["draft"] is True and params["mode"] == "video_edit"
+    p = baza.pomysl(slug, 1)
+    assert p["status"] == "nowy" and p["podglad_plik"] == cel and p["podglad_koszt"] == 21
+    assert baza.wydano_dzis() == 21
+    # bezpiecznik dziala tez dla podgladu
+    cli.saldo = 210
+    with pytest.raises(ValueError, match="min_kredyty"):
+        fabryka.podglad(slug, 1)

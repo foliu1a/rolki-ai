@@ -700,6 +700,55 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
     return wynik
 
 
+def podglad(slug, pid, log=None):
+    """Tani podglad rolki (Seedance `draft`, ~21 kr zamiast 45-72): ten sam prompt i referencje, wynik w
+    wyniki/NNN_nazwa.podglad.mp4, pomysl zostaje 'nowy' (pelna generacja dopiero, gdy user kliknie Zrob rolke).
+    Zwraca sciezke pliku podgladu."""
+    log = log or _log
+    ust = baza.ustawienia_modelki(slug)
+    nazwa_dostawcy = ust.get("dostawca") or "higgsfield"
+    if nazwa_dostawcy != "higgsfield":
+        raise ValueError("Tani podglad dziala tylko dla Higgsfield (Seedance draft).")
+    d = dostawcy.dostawca(nazwa_dostawcy)
+    p = baza.pomysl(slug, pid)
+    if not p.get("prompt_higgsfield"):
+        raise ValueError(f"#{pid} nie ma promptu.")
+    z = zlecenie(slug, p, ust)
+    z["parametry"] = dict(z.get("parametry") or {}, draft=True)
+    saldo = d.saldo()
+    k = d.koszt(z)
+    if k is None:
+        k = 25
+    min_kredyty, _ = bezpiecznik(ust, nazwa_dostawcy)
+    limit_dnia, wydano = baza.limit_dzienny(nazwa_dostawcy), baza.wydano_dzis(nazwa_dostawcy)
+    if saldo - k < min_kredyty:
+        raise ValueError(f"Podglad ({k} kr) zostawilby {saldo - k} < min_kredyty {min_kredyty}.")
+    if limit_dnia and wydano + k > limit_dnia:
+        raise ValueError(f"Podglad ({k} kr) przekroczylby limit dzienny ({wydano}+{k} > {limit_dnia}).")
+    _zdarzenie(log, slug, "info", f"#{pid}: tani podglad (draft, ~{k} kr)", pomysl=pid)
+    job = d.generuj(z, timeout="20m", log=log)
+    try:
+        zuzyte = max(0, saldo - d.saldo())
+    except dostawcy.BladDostawcy:
+        zuzyte = k
+    baza.dopisz_wydatek(zuzyte, nazwa_dostawcy)
+    urls = job.get("urls") or []
+    if not urls:
+        raise RuntimeError(job.get("blad") or f"brak URL podgladu (status {job.get('status')})")
+    nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{pid}"))[0])
+    cel = os.path.join(baza.folder_wynikow(slug), f"{pid:03d}_{nazwa}.podglad.mp4")
+    d.pobierz(urls[0], cel)
+    baza.aktualizuj_pomysl(slug, pid, podglad_plik=cel, podglad_koszt=zuzyte)
+    _klatki_podgladu = os.path.join(baza.folder_klatek(slug), f"{pid:03d}_podglad.jpg")
+    try:
+        klatki.arkusz(cel, _klatki_podgladu, ile=6)
+        baza.aktualizuj_pomysl(slug, pid, klatki_podgladu=_klatki_podgladu)
+    except Exception:
+        pass
+    _zdarzenie(log, slug, "ok", f"#{pid}: podglad gotowy ({zuzyte} kr) -> {cel}", pomysl=pid, plik=cel)
+    return cel
+
+
 def _lipsync_po_generacji(slug, p, plik, ust, log):
     """lipsync_auto: filmik ma sparowany glos (<nazwa>.audio.mp3) -> lipsync po generacji."""
     audio = p.get("audio") or baza.audio_dla_zrodla(p.get("zrodlo"))
