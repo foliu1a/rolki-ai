@@ -188,6 +188,7 @@ def test_akcja_stop_i_blad(klient, modelka, cli, monkeypatch):
 def test_ustawienia_get_post(klient, modelka):
     d = _json(klient.get("/api/ustawienia"))
     assert d["prompty"]["a"].startswith("PROMPT A") and len(d["referencje"]) == 2 and d["foldery"]["wrzutnia"]
+    assert d["profil"]["nazwa"] == "Noemi" and d["profil"]["hashtagi"] == ""
     d = _json(klient.post("/api/ustawienia", json={
         "resolution": "1080p", "autopilot": "true", "autopilot_co_minut": "30", "duration": "",
         "yapper": {"model": "wan-3.0"}, "prompt_a_tekst": "NOWY A", "zdjecia_prompty_tekst": "p1\np2",

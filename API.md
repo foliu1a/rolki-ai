@@ -88,7 +88,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 ## Ustawienia aktywnej modelki
 - `GET /api/ustawienia` →
 ```json
-{"ustawienia": {...}, "domyslne": {...},
+{"ustawienia": {...}, "domyslne": {...}, "profil": {"nazwa": "Noemi", "instagram": "", "opis_stylu": "", "cechy": [], "hashtagi": ""},
  "prompty": {"a": "tekst wariantu A", "b": "tekst wariantu B", "zdjecia": "linia\nlinia"},
  "referencje": [{"nazwa": "01_twarz.png", "url": "/api/plik?s=..."}],
  "stroje": [{"nazwa": "mesh.png", "url": "..."}],

@@ -640,6 +640,7 @@ def api_ustawienia():
             tekst_zdjec = f.read()
     return _ok(
         ustawienia=baza.ustawienia_modelki(slug),
+        profil=baza.profil_modelki(slug),
         domyslne=baza.USTAWIENIA_DOMYSLNE,
         prompty={"a": baza.prompt_bazowy(slug), "b": baza.prompt_stroj(slug), "zdjecia": tekst_zdjec},
         referencje=_lista_plikow(baza.folder_referencji(slug), baza.ROZSZERZENIA_OBRAZU),

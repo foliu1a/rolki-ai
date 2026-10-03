@@ -20,6 +20,7 @@
       <a href="#lipsync" data-strona="lipsync"><span class="ikona" data-ikona="lipsync"></span><span class="etykieta">Lipsync</span></a>
       <a href="#ustawienia" data-strona="ustawienia"><span class="ikona" data-ikona="ustawienia"></span><span class="etykieta">Ustawienia</span></a>
       <a href="#historia" data-strona="historia"><span class="ikona" data-ikona="historia"></span><span class="etykieta">Historia</span></a>
+      <a href="#pomoc" data-strona="pomoc" class="nav-pomoc"><span class="ikona" data-ikona="pomoc"></span><span class="etykieta">Pomoc</span></a>
     </nav>
     <div class="bok-dol">
       <label class="tryb" title="Tryb prosty pokazuje tylko to, co potrzebne. Tryb pełny pokazuje wszystkie ustawienia, surowe komunikaty i logi.">
@@ -35,11 +36,13 @@
     <header class="gora">
       <div class="marka"><span class="logo">r</span><span>rolki-ai</span></div>
       <div class="persona-wybor">
+        <span class="persona-avatar" id="persona-avatar" aria-hidden="true" hidden></span>
         <label class="sr-only" for="wybor-modelki">Persona</label>
         <select id="wybor-modelki" class="select-persona"><option value="">— brak persony —</option></select>
         <button class="btn btn-maly" type="button" data-akcja="nowa-persona"><span class="ikona" data-ikona="plus"></span>nowa</button>
       </div>
       <div class="kredyty" id="kredyty">
+        <span class="kropka kredyty-kropka" id="kredyty-kropka" aria-hidden="true"></span>
         <span class="kredyty-tekst" id="kredyty-tekst">Sprawdzam kredyty…</span>
         <button class="btn btn-ikona btn-tekst" type="button" data-akcja="odswiez-saldo" title="Sprawdź kredyty jeszcze raz" aria-label="Sprawdź kredyty jeszcze raz"><span class="ikona" data-ikona="odswiez"></span></button>
       </div>
@@ -65,11 +68,23 @@
             <div><h1>Start</h1><p id="start-podtytul">Trzy kroki: wrzuć filmiki, zrób rolki, odbierz.</p></div>
           </div>
 
+          <!-- persony (tylko gdy jest więcej niż jedna) -->
+          <div class="persony" id="persony-pasek" role="group" aria-label="Twoje persony" hidden></div>
+
           <div class="banner" id="banner" role="status">
             <span class="banner-kropka"></span>
             <div class="banner-tekst" id="banner-tekst">Sprawdzam, co się dzieje…</div>
             <div class="banner-akcja" id="banner-akcja"></div>
           </div>
+
+          <!-- pierwsze kroki (lista kontrolna z /api/diagnoza) -->
+          <section class="karta pierwsze-kroki" id="pierwsze-kroki" aria-labelledby="pk-tytul" hidden>
+            <div class="pk-gora">
+              <div class="pk-tytul-wrap"><span class="ikona" data-ikona="tarcza"></span><h2 id="pk-tytul">Pierwsze kroki</h2><span class="pk-licznik" id="pk-licznik"></span></div>
+              <button class="btn btn-maly btn-tekst" type="button" data-akcja="kroki-przelacz" id="pk-przelacz" aria-controls="pk-lista" aria-expanded="true">zwiń</button>
+            </div>
+            <div class="pk-lista" id="pk-lista"></div>
+          </section>
 
           <div class="kroki">
             <section class="karta krok" id="krok-1" aria-labelledby="krok1-tytul">
@@ -102,6 +117,7 @@
                 <button class="btn" type="button" data-akcja="skanuj">Tylko sprawdź nowe filmiki</button>
                 <button class="btn" type="button" data-akcja="koszt">Ile to będzie kosztować?</button>
               </div>
+              <a class="krok-link" id="krok2-podglad-link" href="#rolki?status=nowy">Nie wiesz, czy prompt działa? Zrób tani podgląd w Rolkach →</a>
             </section>
 
             <section class="karta krok" id="krok-3" aria-labelledby="krok3-tytul">
@@ -147,6 +163,12 @@
               </section>
             </div>
           </div>
+
+          <!-- statystyki: ostatnie 14 dni (zwinięte w trybie prostym, rozwinięte w pełnym; stan w localStorage) -->
+          <details class="karta zwijane staty" id="staty-start" data-staty="start">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span><span class="staty-tytul">Ostatnie 14 dni</span><span class="staty-skrot muted" data-staty-skrot></span></summary>
+            <div class="staty-tresc" data-staty-tresc></div>
+          </details>
         </section>
 
         <!-- ===================== ROLKI ===================== -->
@@ -295,6 +317,7 @@
                 <div class="pola-siatka">
                   <div class="pole"><label for="p-nazwa">Nazwa</label><input type="text" id="p-nazwa" name="nazwa" placeholder="np. Noemi"></div>
                   <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
+                  <div class="pole szerokie"><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
                   <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
                 </div>
@@ -535,6 +558,10 @@
               <button class="btn btn-ikona" type="button" data-akcja="odswiez-dziennik" title="Odśwież" aria-label="Odśwież historię"><span class="ikona" data-ikona="odswiez"></span></button>
             </div>
           </div>
+          <details class="karta zwijane staty" id="staty-historia" data-staty="historia" open>
+            <summary><span class="ikona" data-ikona="chevron-dol"></span><span class="staty-tytul">Ostatnie 14 dni</span><span class="staty-skrot muted" data-staty-skrot></span></summary>
+            <div class="staty-tresc" data-staty-tresc></div>
+          </details>
           <div class="chipy" id="historia-filtry" data-tylko-prosty></div>
           <ul class="wpisy duze karta" id="historia-lista" data-tylko-prosty></ul>
           <div class="tabela-wrap" data-zaawansowane>
@@ -546,6 +573,108 @@
         </section>
 
       </div><!-- /strony -->
+
+      <!-- ===================== POMOC (dostępna także bez persony) ===================== -->
+      <section class="strona" id="strona-pomoc" hidden>
+        <div class="naglowek-strony">
+          <div><h1>Pomoc</h1><p>Najczęstsze pytania, po ludzku. Kliknij pytanie, żeby zobaczyć odpowiedź.</p></div>
+        </div>
+
+        <div class="callout info pomoc-zglos"><span class="ikona" data-ikona="info"></span><span><b>Coś nie działa albo nie wiesz, co kliknąć?</b> Zrób zrzut ekranu (klawisz <span class="mono">PrtScn</span> albo <span class="mono">Win + Shift + S</span>) i wyślij go Claude'owi – napisz, co chciałeś zrobić. Dostaniesz gotową odpowiedź.</span></div>
+
+        <div class="pomoc-lista" id="pomoc-lista">
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to jest rolka i skąd ją bierze program?</summary>
+            <div class="pomoc-tresc">
+              <p>Rolka to krótki pionowy filmik (jak na Instagramie czy TikToku). Program bierze <b>Twój filmik źródłowy</b> z wrzutni (krok 1 na Starcie) i wstawia do niego personę – jej twarz i sylwetkę ze zdjęć z Ustawień. Ruch, scena i ubranie zostają z filmiku, a osoba jest już Twoją personą.</p>
+              <p>Każdy filmik w folderze to <b>jedna rolka</b>. Gotowa rolka trafia do folderu gotowych (krok 3) i – jeśli podłączysz telefon – od razu na Telegram.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to są kredyty i ile kosztuje rolka?</summary>
+            <div class="pomoc-tresc">
+              <p>Kredyty to waluta Higgsfield – usługi, która robi rolki i zdjęcia. Kupujesz je w abonamencie, a program wydaje je za każdą rolkę. Ile masz, widzisz zawsze w prawym górnym rogu.</p>
+              <ul>
+                <li><b>Rolka 6–10 s</b> (Seedance 2.5): jakość 480p ≈ <b>30 kredytów</b>, 720p ≈ <b>45–70</b>, 1080p ≈ <b>72–120</b>. Dłuższy filmik = drożej.</li>
+                <li><b>Tani podgląd</b> rolki ≈ <b>21 kredytów</b> (gorsza jakość, ale widać, czy prompt działa).</li>
+                <li><b>Zdjęcie</b> persony ≈ <b>2 kredyty</b>.</li>
+                <li><b>Lipsync</b> (dopasowanie ust do głosu) to osobna usługa sync.so: ≈ <b>0,05 $ za sekundę</b> filmu.</li>
+              </ul>
+              <p>Program zawsze <b>zapyta, zanim wyda kredyty</b>, i pilnuje bezpiecznika z Ustawień → Limity: nie wyda więcej niż dzienny limit i zostawi na koncie minimum.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Co zrobić, gdy rolka nie wyszła?</summary>
+            <div class="pomoc-tresc">
+              <ol>
+                <li>Wejdź w <a href="#rolki?status=blad">Rolki → nie wyszły</a>. Pod rolką jest napisane <b>dlaczego</b> (np. Higgsfield odrzucił filmik).</li>
+                <li>Kliknij <b>Spróbuj jeszcze raz</b>. Często druga próba wychodzi – za odrzuconą rolkę Higgsfield oddaje kredyty.</li>
+                <li>Jeśli znów nie wyjdzie: sprawdź prompt (więcej → Pokaż / zmień prompt), zrób <b>tani podgląd</b>, albo wrzuć inny filmik. Filmiki z logo, znakami towarowymi i nagością są odrzucane.</li>
+              </ol>
+              <p>Gdy kilka rolek z rzędu nie wyjdzie, autopilot zatrzymuje się sam (hamulec) – na Starcie zobaczysz czerwony pasek z przyciskiem <b>Wznów</b>.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak podłączyć telefon?</summary>
+            <div class="pomoc-tresc">
+              <ol>
+                <li>W Telegramie napisz do <b>@BotFather</b>: <span class="mono">/newbot</span>, nadaj nazwę – dostaniesz <b>token</b>.</li>
+                <li>Wejdź w <a href="#ustawienia/konta">Ustawienia → Konta → Telefon (Telegram)</a>, wklej token i kliknij <b>Zapisz</b>.</li>
+                <li>Na telefonie napisz do swojego bota <span class="mono">/start</span>. Gotowe – od teraz wysyłasz mu filmiki, a on odsyła gotowe rolki z podpisem.</li>
+              </ol>
+              <p>Komendy bota: <span class="mono">/status</span>, <span class="mono">/raport</span>, <span class="mono">/stop</span>, <span class="mono">/wznow</span>.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak działa autopilot i hamulec?</summary>
+            <div class="pomoc-tresc">
+              <p><b>Autopilot</b> to przełącznik na Starcie. Gdy jest włączony, program co kilkanaście minut sam sprawdza wrzutnię, robi rolki z nowych filmików, pierze je w Media Tool, dopasowuje usta (jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>), robi zdjęcia i dobiera podpisy. Pilnuje limitów kredytów i liczby rolek dziennie.</p>
+              <p><b>Hamulec</b> chroni kredyty: gdy kilka rolek z rzędu nie wyjdzie (liczbę ustawiasz w Ustawienia → Autopilot), autopilot zatrzymuje się. Na Starcie pojawia się czerwony pasek – sprawdź rolki, które nie wyszły, i kliknij <b>Wznów</b>.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak włączyć autostart z Windows?</summary>
+            <div class="pomoc-tresc">
+              <p>W folderze programu (rolki-ai) kliknij dwa razy w plik <b>autostart.bat</b>. Od tej chwili panel z autopilotem włącza się sam po zalogowaniu do Windows.</p>
+              <p>Żeby to wyłączyć, kliknij dwa razy <b>autostart-usun.bat</b>.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Gdzie są moje pliki?</summary>
+            <div class="pomoc-tresc">
+              <p><b>Filmiki do zrobienia</b> (wrzutnia) – tu wrzucasz swoje nagrania:</p>
+              <span class="sciezka" id="pomoc-wrzutnia">—</span>
+              <p><b>Gotowe rolki</b> – stąd je bierzesz do publikacji:</p>
+              <span class="sciezka" id="pomoc-gotowe">—</span>
+              <p class="muted">Każda persona ma swoje foldery. Zmienisz je w <a href="#ustawienia/foldery">Ustawienia → Foldery</a>. Zdjęcia persony lądują w folderze zdjęć, a nagrania głosu w folderze audio persony.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak dodać nową personę?</summary>
+            <div class="pomoc-tresc">
+              <ol>
+                <li>Kliknij <b>+ nowa</b> u góry ekranu, wpisz nazwę (i Instagram, jeśli chcesz).</li>
+                <li>W <a href="#ustawienia/persona">Ustawienia → Persona</a> dodaj 2–6 zdjęć persony (twarz i sylwetka).</li>
+                <li>W <a href="#ustawienia/prompty">Ustawienia → Prompty</a> wklej prompt – opis dla AI, co ma zrobić z filmikiem. Liczba <span class="mono">@[Image N]</span> w prompcie musi zgadzać się z liczbą zdjęć.</li>
+              </ol>
+              <p>Między personami przełączasz się listą u góry ekranu albo kafelkami na Starcie. Każda ma własną wrzutnię i folder gotowych.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak zaktualizować program?</summary>
+            <div class="pomoc-tresc">
+              <p>Kliknij dwa razy w plik <b>aktualizuj.bat</b> w folderze programu. Panel sam się zamknie, pobierze nową wersję i włączy się ponownie. Twoje persony, filmiki, klucze i ustawienia zostają.</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to jest Tryb pełny?</summary>
+            <div class="pomoc-tresc">
+              <p>Przełącznik w lewym dolnym rogu. <b>Tryb prosty</b> pokazuje tylko to, co potrzebne na co dzień. <b>Tryb pełny</b> odsłania wszystkie ustawienia (modele, parametry, yapper.so, lipsync), surowe komunikaty błędów, numery rolek i pełny log w pasku „Co się dzieje”.</p>
+              <p>Jeśli nie wiesz, co coś znaczy – zostań w trybie prostym. Nic nie stracisz: ustawienia z trybu pełnego dalej działają w tle.</p>
+            </div>
+          </details>
+        </div>
+      </section>
     </main>
   </div><!-- /glowna -->
 </div><!-- /aplikacja -->

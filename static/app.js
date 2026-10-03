@@ -17,7 +17,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const STRONY = ['start', 'rolki', 'zdjecia', 'lipsync', 'ustawienia', 'historia'];
+const STRONY = ['start', 'rolki', 'zdjecia', 'lipsync', 'ustawienia', 'historia', 'pomoc'];
 const STARE_STRONY = { pulpit: 'start', kolejka: 'rolki', persona: 'ustawienia/persona', konta: 'ustawienia/konta', teksty: 'ustawienia/teksty', dziennik: 'historia' };
 const STATUSY = ['nowy', 'wygenerowany', 'postprodukcja', 'gotowe', 'blad'];
 const FILTRY_ROLEK = [
@@ -32,6 +32,9 @@ const AKCEPT = { zrodlo: 'video/*,.mp4,.mov,.m4v,.webm', referencja: 'image/*', 
 const STRONY_PO_ZADANIU = ['start', 'rolki', 'zdjecia', 'lipsync', 'historia', 'ustawienia'];
 const MODELE_SYNC_ZAPAS = ['lipsync-2', 'lipsync-2-pro', 'sync-3'];
 const KLUCZ_TRYBU = 'rolki.tryb';
+const KLUCZ_STATY = 'rolki.staty.';   // + 'start' | 'historia' -> '1' (rozwinięte) / '0' (zwinięte)
+const DNI_TYGODNIA = ['nd', 'pn', 'wt', 'śr', 'cz', 'pt', 'sb'];
+const KOSZT_PODGLADU = 21;             // Seedance draft, ~21 kr (CLAUDE.md)
 
 const ESC_MAPA = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function esc(s) {
@@ -136,6 +139,7 @@ const IKONY = {
   teksty: '<path d="M4 6h16M4 12h10M4 18h14"/>',
   podpis: '<path d="M4 20h16"/><path d="m5 16 10-10 3 3-10 10H5v-3z"/>',
   telefon: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  pomoc: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.6a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.2 1-1.2 1.8"/><path d="M12 17h.01"/>',
 };
 function ikona(nazwa) {
   const p = IKONY[nazwa];
@@ -195,8 +199,8 @@ function prostyBlad(tekst) {
 }
 
 // Zadania w tle: nazwy i proste podsumowania wyników.
-const CO_ROBIE = { skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon' };
-const NAZWY_AKCJI = { skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon' };
+const CO_ROBIE = { skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
+const NAZWY_AKCJI = { skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
 const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia' };
 
 function prostyWynik(typ, w) {
@@ -206,6 +210,7 @@ function prostyWynik(typ, w) {
     if (typ === 'pierz') return `wyprane: ${nazwaPliku(w)}`;
     if (typ === 'lipsync') return `usta dopasowane: ${nazwaPliku(w)}`;
     if (typ === 'tts') return `nagranie gotowe: ${nazwaPliku(w)}`;
+    if (typ === 'podglad') return `podgląd gotowy: ${nazwaPliku(w)}`;
     return skroc(w, 120);
   }
   if (typeof w !== 'object') return String(w);
@@ -234,6 +239,7 @@ function prostyWynik(typ, w) {
       return `${z} ${odmiana(z, 'zdjęcie', 'zdjęcia', 'zdjęć')}` + (w.stop ? `, ${prostyBlad(w.stop)}` : '');
     }
     case 'podpis': return w.tekst ? `podpis: „${skroc(w.tekst, 80)}”` : 'bank podpisów jest pusty albo wszystko użyte';
+    case 'podglad': return w.plik ? `podgląd gotowy: ${nazwaPliku(w.plik)} – zobacz go w Rolkach` : 'podgląd gotowy – zobacz go w Rolkach';
     case 'lipsync': return w.url || w.plik ? 'usta dopasowane' : (w.status ? `status: ${w.status}` : 'gotowe');
     case 'telegram_wyslij': return w.wyslano !== undefined && w.wyslano !== null ? `rolka #${Number(w.wyslano)} poleciała na telefon` : 'wysłane na telefon';
     case 'autopilot_raz':
@@ -267,6 +273,7 @@ function postepZadania(z, linie) {
     skanuj: 'Sprawdzam nowe filmiki…', koszt: 'Liczę koszt…', pierz: 'Piorę rolkę w Media Tool…',
     lipsync: 'Dopasowuję usta do głosu… to może potrwać kilka minut', zdjecia: 'Robię zdjęcia…',
     podpis: 'Dobieram podpis…', tts: 'Robię głos z tekstu…', telegram_wyslij: 'Wysyłam rolkę na telefon…',
+    podglad: 'Robię tani podgląd… zwykle 1–2 min',
   }[typ] || 'Pracuję…';
 }
 
@@ -278,6 +285,8 @@ function prostyTekstWpisu(w) {
   if ((m = t.match(/^#(\d+): WYGENEROWANE \((\d+) kr/))) return `Rolka #${m[1]} zrobiona (${kredytow(m[2])})`;
   if ((m = t.match(/^#(\d+): start \(/))) return `Zaczynam rolkę #${m[1]}`;
   if ((m = t.match(/^#(\d+): BLAD po/i))) return `Rolka #${m[1]} nie wyszła`;
+  if ((m = t.match(/^#(\d+): tani podglad \(draft, ~(\d+) kr\)/i))) return `Rolka #${m[1]}: robię tani podgląd (~${kredytow(m[2])})`;
+  if ((m = t.match(/^#(\d+): podglad gotowy \((\d+) kr\) -> (.+)$/i))) return `Rolka #${m[1]}: tani podgląd gotowy (${kredytow(m[2])}) – ${nazwaPliku(m[3])}`;
   if ((m = t.match(/^#(\d+): (\d+) kr \(/)) && w.typ === 'kredyty') return `Rolka #${m[1]}: wydano ${kredytow(m[2])}`;
   if ((m = t.match(/^#(\d+): (.*)$/))) return `Rolka #${m[1]}: ${prostyBlad(m[2])}`;
   if ((m = t.match(/^#(\d+)\s+(\S.*?\.(?:mp4|mov|m4v|webm|avi|mkv))\b/i))) return `Nowy filmik #${m[1]}: ${m[2]}`;
@@ -361,10 +370,14 @@ const state = {
   telegram: {},          // bot Telegram: {skonfigurowany, sparowany, czat}
   dzis: null,            // podsumowanie dnia: {rolki, zdjecia, bledy, kredyty{...}}
   strona: 'start', sekcja: null,
+  diagnoza: [], diagnozaCzas: 0, pkOtwarte: null, pkKlucz: '',   // „Pierwsze kroki” (/api/diagnoza); pkOtwarte: null = automatycznie
+  statystyki: null, statystykiCzas: 0,                            // /api/statystyki?dni=14 (Start + Historia)
+  profile: {},           // slug -> profil zapisany w tej sesji (API nie ma GET profilu)
+  personyHtml: '',
   // rolki
   pomysly: [], statusy: STATUSY.slice(), pomyslyJson: '', filtr: 'wszystkie',
   odbierzTelefon: false, rolkiTelefon: false,   // czy listy były rysowane z podłączonym telefonem (przycisk „Wyślij na telefon”)
-  otwartePrompty: new Set(), odtwarzane: new Set(),
+  otwartePrompty: new Set(), odtwarzane: new Set(), podglady: new Set(),   // podglady = rolki z otwartym filmem taniego podglądu
   // reszta stron
   zdjecia: [], lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
   teksty: [], szablony: [], dziennik: [], historiaFiltr: 'wszystko',
@@ -378,7 +391,7 @@ const state = {
 };
 
 function wyczyscCachePersony() {
-  state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear();
+  state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear(); state.podglady.clear();
   state.zdjecia = []; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
   state.lancuch.wynik = null;
 }
@@ -398,6 +411,7 @@ function ustawTryb(pelny, zapisz = true) {
   $('#tryb-opis').textContent = state.pelny ? 'wszystkie ustawienia i logi' : 'tylko to, co potrzebne';
   if (zapisz) { try { localStorage.setItem(KLUCZ_TRYBU, state.pelny ? 'pelny' : 'prosty'); } catch (e) { /* nic */ } }
   renderKonsolaStan();
+  zastosujDomyslneStaty();
   if (state.stan) {
     if (state.strona === 'rolki') renderRolki();
     else if (state.strona === 'historia') { renderHistoria(); if (zapisz) ladujHistoria().catch(() => {}); }
@@ -430,7 +444,9 @@ function pokazStrone(nazwa) {
   $$('.nav a').forEach(a => a.classList.toggle('aktywny', a.dataset.strona === nazwa));
   if (state.timery.dziennik) { clearInterval(state.timery.dziennik); state.timery.dziennik = null; }
   window.scrollTo({ top: 0 });
-  if (state.stan) ladujStrone(nazwa);
+  // Pomoc leży poza #strony – działa też bez persony (ekran „dodaj personę” wtedy chowamy)
+  $('#brak-persony').hidden = !!state.stan || nazwa === 'pomoc';
+  if (state.stan || nazwa === 'pomoc') ladujStrone(nazwa);
   if (nazwa === 'ustawienia' && state.sekcja) otworzSekcje(state.sekcja);
 }
 
@@ -445,7 +461,7 @@ function otworzSekcje(id) {
 function ladujStrone(nazwa) {
   const mapa = {
     start: () => ladujStart(false), rolki: () => ladujRolki(false), zdjecia: ladujZdjecia, lipsync: ladujLipsync,
-    ustawienia: ladujUstawienia, historia: ladujHistoria,
+    ustawienia: ladujUstawienia, historia: ladujHistoria, pomoc: renderPomoc,
   };
   const f = mapa[nazwa];
   if (f) Promise.resolve().then(f).catch(bladToast);
@@ -473,7 +489,7 @@ async function odswiez(wymusSaldo = false) {
     renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan(); renderHamulecRolek();
     $('#wersja').textContent = state.wersja ? `rolki-ai v${state.wersja}` : '';
     const jest = !!state.stan;
-    $('#brak-persony').hidden = jest;
+    $('#brak-persony').hidden = jest || state.strona === 'pomoc';
     $('#strony').hidden = !jest;
     if (jest) {
       $('#ustawienia-tytul').textContent = 'Ustawienia: ' + (nazwaPersony(state.aktywna) || state.stan.modelka || '');
@@ -498,6 +514,28 @@ function renderPersonaSelect() {
   if (sel.innerHTML !== html) sel.innerHTML = html;
   sel.value = state.aktywna || '';
   sel.disabled = !state.modelki.length;
+  renderAvatarPersony();
+}
+
+// Avatar = pierwsze zdjęcie persony (avatar_url z /api/stan) albo pierwsza litera nazwy.
+function avatarHtml(m, klasa) {
+  const nazwa = String((m && (m.nazwa || m.slug)) || '?').trim();
+  const litera = nazwa.charAt(0).toUpperCase() || '?';
+  return m && m.avatar_url
+    ? `<span class="avatar ${klasa}"><img src="${esc(m.avatar_url)}" alt="" loading="lazy" data-litera="${esc(litera)}"></span>`
+    : `<span class="avatar ${klasa} litera">${esc(litera)}</span>`;
+}
+
+function renderAvatarPersony() {
+  const el = $('#persona-avatar');
+  const m = state.modelki.find(x => x.slug === state.aktywna);
+  if (!el) return;
+  if (!m) { el.hidden = true; el.innerHTML = ''; return; }
+  const litera = String(m.nazwa || m.slug).trim().charAt(0).toUpperCase();
+  const html = m.avatar_url ? `<img src="${esc(m.avatar_url)}" alt="" data-litera="${esc(litera)}">` : esc(litera);
+  if (el.innerHTML !== html) el.innerHTML = html;
+  el.title = `Persona: ${m.nazwa || m.slug}`;
+  el.hidden = false;
 }
 
 // „Masz 1 234 kredytów · dziś wydałeś 90 z 300” – czerwone poniżej minimum, pomarańczowe przy 80 % limitu.
@@ -531,7 +569,9 @@ function renderKredyty() {
     else if (limit) tytul.push(`Dzienny limit: ${liczba(limit)} (Ustawienia → Limity).`);
   }
   el.innerHTML = html;
-  wrap.className = 'kredyty' + (klasa ? ' ' + klasa : '');
+  // kropka obok kredytów: zielona (wszystko gra), pomarańczowa (blisko limitu), czerwona (za mało / nie widzę), szara (sprawdzam)
+  const znane = saldo.kredyty !== null && saldo.kredyty !== undefined;
+  wrap.className = 'kredyty' + (klasa ? ' ' + klasa : (znane ? ' ok' : ''));
   wrap.title = tytul.join(' ');
 }
 
@@ -661,6 +701,9 @@ function dopiszLog(linie) {
 // ---------- Start ----------
 async function ladujStart(cicho) {
   renderStart();
+  // lista kontrolna (co 30 s) i statystyki 14 dni (co 60 s) – dodatki, ich błędy nie psują Startu
+  ladujDiagnoze(!cicho).catch(() => {});
+  ladujStatystyki(!cicho).catch(() => {});
   const wyniki = await Promise.allSettled([api('/api/pomysly'), api('/api/dziennik?ile=5')]);
   const [p, d] = wyniki.map(w => (w.status === 'fulfilled' ? w.value : null));
   let zmiana = false;
@@ -689,6 +732,10 @@ function renderStart() {
     : 'Nic nowego nie czeka. Wrzuć filmiki, a potem kliknij „Zrób rolki”.';
   $('#folder-wrzutnia').textContent = s.wrzutnia || '—';
   $('#folder-gotowe').textContent = s.gotowe_dir || '—';
+  // tani podgląd (Seedance draft) jest tylko u Higgsfield
+  $('#krok2-podglad-link').hidden = (u.dostawca || 'higgsfield') !== 'higgsfield';
+  renderPersony();
+  renderPierwszeKroki();
   renderKrok2();
   renderAutopilot();
   renderDzis();
@@ -841,7 +888,10 @@ function renderOdbierz() {
     .slice().sort((a, b) => b.id - a.id).slice(0, 6);
   const kont = $('#odbierz-lista');
   if (!lista.length) {
-    kont.innerHTML = '<div class="pusto cicho"><b>Jeszcze nie ma gotowych rolek</b><span>Pojawią się tutaj, gdy klikniesz „Zrób rolki”.</span></div>';
+    // pusty stan z jednym jasnym następnym krokiem: wrzuć filmik (gdy nic nie czeka) albo zrób rolki (gdy już czekają)
+    const s = state.stan || {};
+    const nicNieCzeka = !(s.niezeskanowane || []).length && !(s.do_generacji || []).length;
+    kont.innerHTML = `<div class="pusto cicho"><b>Jeszcze nie ma gotowych rolek</b><span>${nicNieCzeka ? 'Najpierw wrzuć filmik (krok 1), potem kliknij „Zrób rolki”.' : 'Kliknij „Zrób rolki” (krok 2) – gotowe pojawią się tutaj.'}</span><button class="btn btn-maly" type="button" data-akcja="${nicNieCzeka ? 'fokus-wrzuc' : 'zrob-rolki'}">${nicNieCzeka ? 'Wrzuć filmik' : 'Zrób rolki'}</button></div>`;
     return;
   }
   kont.innerHTML = lista.map(kartaOdbioru).join('');
@@ -947,6 +997,275 @@ function renderWpisy(ul, wpisy, pusty = 'Jeszcze nic się nie wydarzyło.') {
     : `<li class="wpis"><span class="kropka"></span><span class="wpis-czas"></span><span class="wpis-tekst muted">${esc(pusty)}</span></li>`;
 }
 
+// ---------- Start: pasek person (gdy jest więcej niż jedna) ----------
+function renderPersony() {
+  const el = $('#persony-pasek');
+  if (!el) return;
+  const lista = state.modelki || [];
+  if (lista.length < 2) { el.hidden = true; if (state.personyHtml) { el.innerHTML = ''; state.personyHtml = ''; } return; }
+  const html = lista.map(m => {
+    const st = m.statystyki || {}, ap = m.autopilot_stan || {};
+    const aktywna = m.slug === state.aktywna;
+    const nazwa = m.nazwa || m.slug;
+    const dzis = Number(m.rolki_dzis) || 0;
+    const odznaki = (m.autopilot ? '<span class="persona-odznaka" title="Autopilot obsługuje tę personę">autopilot</span>' : '')
+      + (ap.pauza ? `<span class="persona-odznaka stop" title="${esc('Autopilot zatrzymał się: ' + ap.pauza)}">STOP</span>` : '');
+    return `<button type="button" class="persona-karta${aktywna ? ' aktywna' : ''}" data-akcja="persona-wybierz" data-slug="${esc(m.slug)}" aria-pressed="${aktywna ? 'true' : 'false'}" title="${aktywna ? 'To jest aktywna persona' : 'Przełącz na ' + esc(nazwa)}">
+      ${avatarHtml(m, 'persona-karta-avatar')}
+      <span class="persona-karta-tresc">
+        <span class="persona-karta-nazwa">${esc(nazwa)}${odznaki}</span>
+        <span class="persona-karta-meta">czeka ${Number(st.nowy) || 0} · gotowe ${Number(st.gotowe) || 0} · dziś ${dzis} ${esc(odmiana(dzis, 'rolka', 'rolki', 'rolek'))}</span>
+      </span>
+    </button>`;
+  }).join('');
+  if (html !== state.personyHtml) { el.innerHTML = html; state.personyHtml = html; }
+  el.hidden = false;
+}
+
+// ---------- Start: „Pierwsze kroki” (lista kontrolna z /api/diagnoza) ----------
+const NAZWY_DIAGNOZY = { ffmpeg: 'ffmpeg (program do filmików)', higgsfield: 'Higgsfield (robi rolki i zdjęcia)', mediatool: 'Media Tool (pranie rolek)', telegram: 'Telefon (Telegram)' };
+const TLUMACZENIA_DIAGNOZY = [
+  [/brak zdjec persony/g, 'brak zdjęć persony'],
+  [/brak promptu A \(stroj z filmu\) - rolki z filmiku beda bez promptu/g, 'brak promptu A'],
+  [/zdjecia_dziennie bez modelu zdjec/g, 'autopilot ma robić zdjęcia, ale nie wybrano modelu zdjęć'],
+  [/sa zdjecia strojow, ale prompt B \(stroj ze zdjecia\) jest pusty/g, 'są zdjęcia strojów, ale prompt B jest pusty'],
+  [/odwoluje sie do/g, 'odwołuje się do'], [/a zdjec jest/g, 'a zdjęć jest'], [/referencje \+ stroj/g, 'zdjęcia + strój'],
+  [/najwyzszy numer musi byc rowny liczbie zdjec/g, 'najwyższy numer musi być równy liczbie zdjęć'],
+  [/nie podlaczony \(opcjonalnie\)/g, 'nie podłączony'],
+  [/token jest, napisz \/start do bota/g, 'token jest – napisz /start do bota na telefonie'],
+];
+function poLudzkuDiagnoza(t) {
+  t = String(t || '');
+  TLUMACZENIA_DIAGNOZY.forEach(([re, z]) => { t = t.replace(re, z); });
+  return t;
+}
+
+async function ladujDiagnoze(wymus = false) {
+  if (Date.now() - state.diagnozaCzas < (wymus ? 2000 : 30000)) return;
+  state.diagnozaCzas = Date.now();
+  let d;
+  try { d = await api('/api/diagnoza'); }
+  catch (e) { return; }   // lista kontrolna to dodatek – Start działa bez niej
+  state.diagnoza = Array.isArray(d.diagnoza) ? d.diagnoza : [];
+  if (state.strona === 'start') renderPierwszeKroki();
+}
+// Po zapisie ustawień / kluczy / zdjęć persony lista kontrolna ma się odświeżyć od razu.
+function odswiezDiagnoze() { state.diagnozaCzas = 0; ladujDiagnoze(true).catch(() => {}); }
+
+function wierszDiagnozy(w) {
+  const co = String(w.co || ''), ok = w.ok;
+  const info = poLudzkuDiagnoza(w.info);
+  const link = (t, hash, glowny) => `<a class="btn btn-maly${glowny ? ' btn-glowny' : ''}" href="${esc(hash)}">${esc(t)}</a>`;
+  let nazwa = NAZWY_DIAGNOZY[co] || co, tekst = '', akcja = '';
+  let klasa = ok === true ? 'ok' : (ok === false ? 'zle' : 'opcja');
+  if (co.startsWith('persona ')) {
+    const slug = co.slice(8).trim();
+    nazwa = `Persona ${nazwaPersony(slug)}`;
+    if (ok) tekst = 'gotowa';
+    else {
+      tekst = info;
+      // najpierw zdjęcia (bez nich nic nie ruszy), potem prompt, potem model zdjęć
+      const hash = /zdjęć persony/i.test(info) ? '#ustawienia/persona'
+        : (/prompt/i.test(info) ? '#ustawienia/prompty' : (/modelu zdj/i.test(info) ? '#ustawienia/zdjecia' : '#ustawienia/persona'));
+      akcja = `<button class="btn btn-maly btn-glowny" type="button" data-akcja="pk-persona" data-slug="${esc(slug)}" data-hash="${esc(hash)}">Uzupełnij</button>`;
+    }
+  } else if (co === 'ffmpeg') {
+    tekst = ok ? 'zainstalowany' : 'Kliknij dwa razy instaluj.bat';
+  } else if (co === 'higgsfield') {
+    if (ok) tekst = 'zalogowany';
+    else { tekst = prostyBlad(w.info) || 'nie działa'; akcja = link('Otwórz Konta', '#ustawienia/konta', true); }
+  } else if (co === 'mediatool') {
+    if (ok) tekst = 'jest';
+    else { klasa = 'opcja'; tekst = 'Media Tool nie znaleziony — rolki zostaną bez prania'; }
+  } else if (co === 'telegram') {
+    if (ok === true) tekst = 'podłączony';
+    else if (ok === null || ok === undefined) { tekst = 'nie podłączony'; akcja = link('Podłącz telefon', '#ustawienia/konta', false); }
+    else { tekst = info; akcja = link('Otwórz Konta', '#ustawienia/konta', true); }
+  } else {
+    tekst = info;
+  }
+  const surowe = state.pelny && w.info && w.info !== tekst ? `<small>${esc(w.info)}</small>` : '';
+  return `<div class="pk-wiersz ${klasa}" data-co="${esc(co)}" data-ok="${ok === true ? '1' : (ok === false ? '0' : '')}">
+    <span class="pk-kropka" aria-hidden="true"></span>
+    <div class="pk-tekst"><b>${esc(nazwa)}${tekst ? ':' : ''}</b>${tekst ? `<span>${esc(tekst)}</span>` : ''}${klasa === 'opcja' ? '<span class="pk-opcja">opcjonalnie</span>' : ''}${surowe}</div>
+    <div class="pk-akcja">${akcja}</div>
+  </div>`;
+}
+
+function renderPierwszeKroki() {
+  const karta = $('#pierwsze-kroki');
+  if (!karta) return;
+  const lista = state.diagnoza || [];
+  if (!state.stan || !lista.length) { karta.hidden = true; return; }
+  // wymagane = wszystko poza „opcjonalnie” (ok: null) i brakującym Media Tool (nie blokuje – rolki będą tylko bez prania)
+  const wymagane = lista.filter(w => w.ok !== null && w.ok !== undefined && !(w.co === 'mediatool' && w.ok === false));
+  const gotowe = wymagane.filter(w => w.ok === true);
+  const komplet = wymagane.length > 0 && gotowe.length === wymagane.length;
+  // nowy problem -> karta sama się rozwija (reset ręcznego zwinięcia)
+  const klucz = lista.filter(w => w.ok === false).map(w => w.co).join('|');
+  if (klucz !== state.pkKlucz) { state.pkKlucz = klucz; state.pkOtwarte = null; }
+  const otwarte = state.pkOtwarte === null ? !komplet : state.pkOtwarte;
+  karta.hidden = false;
+  karta.classList.toggle('gotowe', komplet);
+  $('#pk-tytul').textContent = komplet ? 'Wszystko ustawione ✓' : 'Pierwsze kroki';
+  const opc = lista.length - wymagane.length;
+  $('#pk-licznik').textContent = `${gotowe.length} z ${wymagane.length} gotowe` + (opc ? ` · ${opc} ${odmiana(opc, 'opcjonalny', 'opcjonalne', 'opcjonalnych')}` : '');
+  const btn = $('#pk-przelacz');
+  btn.textContent = otwarte ? 'zwiń' : 'pokaż';
+  btn.setAttribute('aria-expanded', String(otwarte));
+  const html = lista.map(wierszDiagnozy).join('');
+  const ul = $('#pk-lista');
+  if (ul.innerHTML !== html) ul.innerHTML = html;
+  ul.hidden = !otwarte;
+}
+
+// ---------- Statystyki: ostatnie 14 dni (Start + Historia) ----------
+async function ladujStatystyki(wymus = false) {
+  if (state.statystyki && Date.now() - state.statystykiCzas < (wymus ? 2000 : 60000)) { renderStatystyki(); return; }
+  state.statystykiCzas = Date.now();
+  let d;
+  try { d = await api('/api/statystyki?dni=14'); }
+  catch (e) { if (!state.statystyki) renderStatystyki(e); return; }
+  state.statystyki = d;
+  renderStatystyki();
+}
+
+// Domyślnie: Start zwinięty w trybie prostym, rozwinięty w pełnym; Historia rozwinięta. Wybór użytkownika zostaje w localStorage.
+function zastosujDomyslneStaty() {
+  $$('details[data-staty]').forEach(det => {
+    let zap = null;
+    try { zap = localStorage.getItem(KLUCZ_STATY + det.dataset.staty); } catch (e) { /* prywatne okno */ }
+    const chce = zap === '1' || zap === '0' ? zap === '1' : (det.dataset.staty === 'historia' ? true : state.pelny);
+    if (det.open !== chce) det.open = chce;
+  });
+}
+
+function etykietaDnia(iso) {
+  const d = data(iso + 'T12:00:00');
+  return d ? `${dwaZnaki(d.getDate())}.${dwaZnaki(d.getMonth() + 1)}` : String(iso || '');
+}
+function dzisIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${dwaZnaki(d.getMonth() + 1)}-${dwaZnaki(d.getDate())}`;
+}
+// „ładna” górna granica osi: 1–5 bez zmian, wyżej zaokrąglone do 1 / 2 / 2,5 / 5 × 10^n
+function ladnyMax(v) {
+  v = Number(v) || 0;
+  if (v <= 0) return 1;
+  if (v <= 5) return Math.ceil(v);
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const k of [1, 2, 2.5, 5, 10]) if (v <= k * p) return k * p;
+  return 10 * p;
+}
+function opisDnia(d, dzis) {
+  const dt = data(d.dzien + 'T12:00:00');
+  const kr = d.kredyty || {};
+  const r = Number(d.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, z = Number(d.zdjecia) || 0, b = Number(d.bledy) || 0;
+  return `${dt ? DNI_TYGODNIA[dt.getDay()] + ' ' : ''}${etykietaDnia(d.dzien)}${dzis ? ' (dziś)' : ''}: ${r} ${odmiana(r, 'rolka', 'rolki', 'rolek')}, ${kredytow(hf)}${yap ? ` (+ ${liczba(yap)} yapper)` : ''}, ${z} ${odmiana(z, 'zdjęcie', 'zdjęcia', 'zdjęć')}, ${b} ${odmiana(b, 'problem', 'problemy', 'problemów')}`;
+}
+
+// Jeden SVG, dwa panele na wspólnej osi dni: słupki = rolki dziennie, pod nimi linia z kropkami = kredyty Higgsfield.
+// Bez bibliotek; podpowiedzi przez <title>; etykiety dni co drugi dzień, dziś wyróżnione.
+function rysujWykres(dni, W) {
+  const n = Math.max(1, dni.length);
+  const padL = 46, padR = 14, padT = 28, h1 = 104, przerwa = 44, h2 = 60, osX = 34;
+  const H = padT + h1 + przerwa + h2 + osX;
+  const sw = (W - padL - padR) / n;
+  const bw = Math.max(4, Math.min(24, Math.floor(sw) - 6));
+  const y0a = padT + h1, top2 = y0a + przerwa, y0b = top2 + h2;
+  const rolki = dni.map(d => Number(d.rolki) || 0);
+  const kredyty = dni.map(d => Number((d.kredyty || {}).higgsfield) || 0);
+  const maxR = ladnyMax(Math.max(0, ...rolki)), maxK = ladnyMax(Math.max(0, ...kredyty));
+  const idxMaxR = rolki.indexOf(Math.max(...rolki)), idxMaxK = kredyty.indexOf(Math.max(...kredyty));
+  const dzis = dzisIso();
+  const cx = i => padL + i * sw + sw / 2;
+  const yR = v => y0a - (v / maxR) * h1, yK = v => y0b - (v / maxK) * h2;
+  const f = v => liczba(v);
+  const out = [];
+  // siatka + osie Y (hairline, bez kresek)
+  const tickiR = Number.isInteger(maxR / 2) ? [0, maxR / 2, maxR] : [0, maxR];
+  tickiR.forEach(t => { out.push(`<line class="siatka" x1="${padL}" x2="${W - padR}" y1="${yR(t).toFixed(1)}" y2="${yR(t).toFixed(1)}"/><text class="os-tekst" x="${padL - 8}" y="${(yR(t) + 4).toFixed(1)}" text-anchor="end">${esc(f(t))}</text>`); });
+  [0, maxK].forEach(t => { out.push(`<line class="siatka" x1="${padL}" x2="${W - padR}" y1="${yK(t).toFixed(1)}" y2="${yK(t).toFixed(1)}"/><text class="os-tekst" x="${padL - 8}" y="${(yK(t) + 4).toFixed(1)}" text-anchor="end">${esc(f(t))}</text>`); });
+  out.push(`<text class="panel-tytul" x="${padL}" y="13">Rolki dziennie</text>`);
+  out.push(`<text class="panel-tytul" x="${padL}" y="${y0a + 18}">Kredyty Higgsfield dziennie</text>`);
+  // dziś – delikatne tło kolumny
+  const idxDzis = dni.findIndex(d => d.dzien === dzis);
+  if (idxDzis >= 0) out.push(`<rect class="dzis-tlo" x="${(padL + idxDzis * sw).toFixed(1)}" y="${padT - 6}" width="${sw.toFixed(1)}" height="${(y0b - padT + 6).toFixed(1)}" rx="6"/>`);
+  // słupki, kropki problemów, etykiety dni – jedna grupa na dzień (tooltip <title> z wszystkimi wartościami)
+  const linia = [];
+  dni.forEach((d, i) => {
+    const jestDzis = d.dzien === dzis;
+    const v = rolki[i], h = (v / maxR) * h1, x = cx(i) - bw / 2, y = y0a - h, r = Math.min(4, bw / 2, h);
+    let slupek = '';
+    if (v > 0) slupek = h > r
+      ? `<path class="slupek" d="M${x.toFixed(1)},${y0a} V${(y + r).toFixed(1)} Q${x.toFixed(1)},${y.toFixed(1)} ${(x + r).toFixed(1)},${y.toFixed(1)} H${(x + bw - r).toFixed(1)} Q${(x + bw).toFixed(1)},${y.toFixed(1)} ${(x + bw).toFixed(1)},${(y + r).toFixed(1)} V${y0a} Z"/>`
+      : `<rect class="slupek" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw}" height="${h.toFixed(1)}"/>`;
+    const k = kredyty[i];
+    linia.push(`${cx(i).toFixed(1)},${yK(k).toFixed(1)}`);
+    const problem = (Number(d.bledy) || 0) > 0 ? `<circle class="kropka-problem" cx="${cx(i).toFixed(1)}" cy="${y0b + 11}" r="3"/>` : '';
+    // etykieta dnia co drugi dzień, licząc od dziś (dziś zawsze podpisane)
+    const podpis = (n - 1 - i) % 2 === 0 ? `<text class="os-tekst${jestDzis ? ' dzis' : ''}" x="${cx(i).toFixed(1)}" y="${y0b + 26}" text-anchor="middle">${jestDzis ? 'dziś' : esc(etykietaDnia(d.dzien))}</text>` : '';
+    // etykiety wartości tylko tam, gdzie coś mówią: największy słupek i dziś
+    let etykieta = '';
+    if (v > 0 && (i === idxMaxR || jestDzis)) etykieta += `<text class="etykieta${i === idxMaxR ? '' : ' cicha'}" x="${cx(i).toFixed(1)}" y="${(y - 5).toFixed(1)}" text-anchor="middle">${esc(f(v))}</text>`;
+    if (k > 0 && i === idxMaxK) etykieta += `<text class="etykieta cicha" x="${cx(i).toFixed(1)}" y="${(yK(k) - 9).toFixed(1)}" text-anchor="middle">${esc(f(k))}</text>`;
+    out.push(`<g class="dzien"><title>${esc(opisDnia(d, jestDzis))}</title><rect class="hit" x="${(padL + i * sw).toFixed(1)}" y="${padT - 6}" width="${sw.toFixed(1)}" height="${(H - padT + 6 - 8).toFixed(1)}"/>${slupek}${problem}${podpis}${etykieta}</g>`);
+  });
+  // linia kredytów pod kropkami (kropki rysują się w grupach dni, więc linia idzie przed nimi w kolejności DOM – dlatego osobna warstwa)
+  out.push(`<polyline class="linia-kredyty" points="${linia.join(' ')}"/>`);
+  dni.forEach((d, i) => { if (kredyty[i] > 0) out.push(`<circle class="kropka-kredyty" cx="${cx(i).toFixed(1)}" cy="${yK(kredyty[i]).toFixed(1)}" r="4"><title>${esc(opisDnia(d, d.dzien === dzis))}</title></circle>`); });
+  out.push(`<line class="os" x1="${padL}" x2="${W - padR}" y1="${y0a}" y2="${y0a}"/><line class="os" x1="${padL}" x2="${W - padR}" y1="${y0b}" y2="${y0b}"/>`);
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Wykres: rolki i kredyty Higgsfield z ostatnich ${n} dni" preserveAspectRatio="xMinYMin meet">${out.join('')}</svg>`;
+}
+
+// Tabela-bliźniak wykresu (tryb pełny) – te same liczby bez kolorów.
+function tabelaStatystyk(dni) {
+  const wiersze = dni.slice().reverse().map(d => {
+    const kr = d.kredyty || {};
+    return `<tr><td class="czas">${esc(etykietaDnia(d.dzien))}</td><td>${esc(liczba(d.rolki || 0))}</td><td>${esc(liczba(d.zdjecia || 0))}</td><td>${esc(liczba(kr.higgsfield || 0))}</td><td>${esc(liczba(kr.yapper || 0))}</td><td>${esc(liczba(d.bledy || 0))}</td></tr>`;
+  }).join('');
+  return `<details class="zwijane cicho" data-zaawansowane><summary>${ikona('chevron-dol')}pokaż jako tabelę</summary><div class="tabela-wrap"><table class="tabela staty-tabela"><thead><tr><th>Dzień</th><th>Rolki</th><th>Zdjęcia</th><th>Kredyty HF</th><th>yapper</th><th>Problemy</th></tr></thead><tbody>${wiersze}</tbody></table></div></details>`;
+}
+
+function renderStatystyki(blad = null) {
+  const s = state.statystyki;
+  $$('details[data-staty]').forEach(det => {
+    const kont = det.querySelector('[data-staty-tresc]'), skrot = det.querySelector('[data-staty-skrot]');
+    if (!kont) return;
+    if (!s) {
+      kont.innerHTML = `<div class="staty-pusto">${blad ? 'Nie udało się pobrać statystyk: ' + esc(prostyBlad(blad)) : 'Liczę…'}</div>`;
+      det.dataset.klucz = '';
+      return;
+    }
+    const dni = s.dni || [], r = s.razem || {}, kr = r.kredyty || {};
+    const rolki = Number(r.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, bledy = Number(r.bledy) || 0;
+    if (skrot) skrot.textContent = `${rolki} ${odmiana(rolki, 'rolka', 'rolki', 'rolek')} · ${kredytow(hf)}${bledy ? ` · ${bledy} ${odmiana(bledy, 'problem', 'problemy', 'problemów')}` : ''}`;
+    // szerokość: gdy karta jest zwinięta, treść ma 0 px – bierzemy szerokość karty minus jej padding
+    const szer = Math.max(300, Math.round(kont.clientWidth || (det.clientWidth - 48) || 600));
+    const klucz = JSON.stringify([dni, r, szer, state.pelny]);
+    if (det.dataset.klucz === klucz) return;
+    det.dataset.klucz = klucz;
+    const liczby = `<div class="staty-liczby">
+      <div class="dzis-poz" data-staty-rolki><b>${esc(liczba(rolki))}</b><span>${esc(odmiana(rolki, 'rolka', 'rolki', 'rolek'))} razem</span></div>
+      <div class="dzis-poz" data-staty-kredyty><b>${esc(liczba(hf))}</b><span>${esc(odmiana(hf, 'kredyt', 'kredyty', 'kredytów'))} Higgsfield</span>${yap > 0 ? `<small>+ ${esc(liczba(yap))} yapper</small>` : ''}</div>
+      <div class="dzis-poz${bledy ? ' zle' : ''}" data-staty-problemy><b>${esc(liczba(bledy))}</b><span>${esc(odmiana(bledy, 'problem', 'problemy', 'problemów'))}</span></div>
+    </div>`;
+    const pusto = !dni.some(d => (Number(d.rolki) || 0) || (Number((d.kredyty || {}).higgsfield) || 0) || (Number(d.bledy) || 0) || (Number(d.zdjecia) || 0));
+    const wykres = pusto
+      ? '<div class="staty-pusto">Jeszcze nic tu nie ma. Zrób pierwszą rolkę na <a href="#start">Starcie</a> – wykres zacznie się rysować.</div>'
+      : `<div class="wykres-legenda"><span><i></i>rolki dziennie</span><span><i class="linia"></i>kredyty Higgsfield</span><span><i class="problem"></i>dni z problemami</span></div><div class="wykres">${rysujWykres(dni, szer)}</div>${tabelaStatystyk(dni)}`;
+    kont.innerHTML = liczby + wykres;
+  });
+}
+
+// ---------- Pomoc ----------
+function renderPomoc() {
+  const s = state.stan;
+  const brak = 'dodaj personę – wtedy pokażę ścieżkę';
+  $('#pomoc-wrzutnia').textContent = s && s.wrzutnia ? s.wrzutnia : brak;
+  $('#pomoc-gotowe').textContent = s && s.gotowe_dir ? s.gotowe_dir : brak;
+}
+
 // ---------- Rolki ----------
 async function ladujRolki(cicho) {
   let d;
@@ -1022,19 +1341,37 @@ function kartaRolki(p) {
   const promptOtwarty = state.otwartePrompty.has(id) || bezPromptu;
   const gra = state.odtwarzane.has(id) && p.wideo_url;
   const telefon = telefonGotowy() && !!p.wideo_url;
+  // tani podgląd (Seedance draft, ~21 kr): tylko Higgsfield i tylko rolki, które czekają
+  const u = (state.stan && state.stan.ustawienia) || {};
+  const podgladMozliwy = status === 'nowy' && (u.dostawca || 'higgsfield') === 'higgsfield';
+  const maPodglad = !!p.podglad_url;
+  const podgladGra = maPodglad && !gra && state.podglady.has(id);
+  if (p.podglad_koszt !== null && p.podglad_koszt !== undefined) fakty.push(`podgląd: ${esc(kredytow(p.podglad_koszt))}`);
+  else if (maPodglad) fakty.push('jest tani podgląd');
   const mini = miniaturaRolki(p);
   const obraz = mini ? `<img src="${esc(mini)}" alt="" loading="lazy">` : ikona('film');
-  // miniatura gotowej rolki = przycisk „Odtwórz” (klik otwiera film na karcie)
-  const miniatura = p.wideo_url
-    ? `<button class="rolka-miniatura klik" type="button" data-akcja="odtworz" data-id="${id}" title="${gra ? 'Ukryj film' : 'Odtwórz'}" aria-label="${gra ? 'Ukryj film' : 'Odtwórz'} ${esc(nazwa)}">${obraz}<span class="rolka-play">${ikona(gra ? 'stop' : 'play')}</span></button>`
-    : `<div class="rolka-miniatura">${obraz}</div>`;
+  // miniatura gotowej rolki = przycisk „Odtwórz” (klik otwiera film na karcie); rolki z tanim podglądem = przycisk „Zobacz podgląd”
+  let miniatura;
+  if (p.wideo_url) {
+    miniatura = `<button class="rolka-miniatura klik" type="button" data-akcja="odtworz" data-id="${id}" title="${gra ? 'Ukryj film' : 'Odtwórz'}" aria-label="${gra ? 'Ukryj film' : 'Odtwórz'} ${esc(nazwa)}">${obraz}<span class="rolka-play">${ikona(gra ? 'stop' : 'play')}</span></button>`;
+  } else if (maPodglad) {
+    const obrazPodgladu = p.podglad_miniatura_url ? `<img src="${esc(p.podglad_miniatura_url)}" alt="" loading="lazy">` : obraz;
+    miniatura = `<button class="rolka-miniatura klik" type="button" data-akcja="podglad-pokaz" data-id="${id}" title="${podgladGra ? 'Ukryj podgląd' : 'Zobacz tani podgląd'}" aria-label="${podgladGra ? 'Ukryj podgląd' : 'Zobacz tani podgląd'} ${esc(nazwa)}"><span class="rolka-tag">podgląd</span>${obrazPodgladu}<span class="rolka-play">${ikona(podgladGra ? 'stop' : 'play')}</span></button>`;
+  } else {
+    miniatura = `<div class="rolka-miniatura">${obraz}</div>`;
+  }
   let glowny = '', drugi = '';
   if (status === 'nowy') glowny = przyciskRolki('generuj-pomysl', id, 'Zrób tę rolkę', 'btn-glowny');
   else if (status === 'blad') glowny = przyciskRolki('ponow', id, 'Spróbuj jeszcze raz', 'btn-glowny');
   else if (p.wideo_url) glowny = przyciskRolki('odtworz', id, gra ? 'Ukryj film' : `${ikona('play')}Odtwórz`, 'btn-glowny');
-  if (telefon && !p.telegram_wyslano) drugi = przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon`);
+  // drugi przycisk: tani podgląd (oszczędza kredyty, więc widoczny także w trybie prostym) albo wysyłka na telefon
+  if (status === 'nowy' && maPodglad) drugi += przyciskRolki('podglad-pokaz', id, `${ikona(podgladGra ? 'stop' : 'play')}${podgladGra ? 'Ukryj podgląd' : 'Zobacz podgląd'}`);
+  else if (podgladMozliwy) drugi += przyciskRolki('podglad', id, `Tani podgląd (~${KOSZT_PODGLADU} kr)`);
+  if (telefon && !p.telegram_wyslano) drugi += przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon`);
   const menu = [przyciskRolki('prompt-pokaz', id, p.prompt_higgsfield ? 'Pokaż / zmień prompt' : 'Wpisz prompt')];
   if (status === 'nowy') menu.push(przyciskRolki('koszt-pomysl', id, 'Ile kosztuje?'));
+  if (podgladMozliwy && maPodglad) menu.push(przyciskRolki('podglad', id, `Tani podgląd jeszcze raz (~${KOSZT_PODGLADU} kr)`));
+  if (maPodglad && status !== 'nowy') menu.push(`<a class="btn btn-maly" href="${esc(p.podglad_url)}" target="_blank" rel="noopener">Zobacz tani podgląd</a>`);
   if (['wygenerowany', 'postprodukcja', 'gotowe'].includes(status)) {
     menu.push(przyciskRolki('pierz', id, 'Wypierz w Media Tool'));
     menu.push(przyciskRolki('lipsync-pomysl', id, 'Dopasuj usta (lipsync)'));
@@ -1057,6 +1394,7 @@ function kartaRolki(p) {
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
       ${promptOtwarty ? `<div class="rolka-prompt"><label for="prompt-${id}">Prompt – opis dla AI, co zrobić z tym filmikiem</label><textarea id="prompt-${id}" data-prompt="${id}" spellcheck="false" placeholder="Wklej prompt persony albo własny…">${esc(p.prompt_higgsfield || '')}</textarea><div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="zapisz-prompt" data-id="${id}">Zapisz prompt</button>${bezPromptu ? '' : `<button class="btn btn-maly" type="button" data-akcja="prompt-pokaz" data-id="${id}">Zwiń</button>`}</div></div>` : ''}
       ${gra ? `<video controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}
+      ${podgladGra ? `<video class="rolka-podglad-wideo" controls autoplay preload="metadata" src="${esc(p.podglad_url)}"></video><div class="rolka-podglad-info">To tylko tani podgląd (gorsza jakość). Jeśli persona wygląda dobrze – kliknij „Zrób tę rolkę”.</div>` : ''}
       <div class="rolka-akcje">${glowny}${drugi}<details class="menu"><summary class="btn btn-maly">więcej ${ikona('chevron-dol')}</summary><div class="menu-lista">${menu.join('')}</div></details></div>
     </div>
   </article>`;
@@ -1101,6 +1439,20 @@ async function generujPomysl(id) {
   const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc: trescKosztu(koszt, 1, koszt === null ? 0 : 0), ok: 'Zrób' });
   if (!w) return;
   await akcja({ typ: 'generuj', ids: [id] }, 'robię rolkę');
+}
+
+// Tani podgląd: Seedance draft (~21 kr) tym samym promptem – rolka dalej „czeka”, a Ty widzisz, czy prompt działa.
+async function taniPodglad(id) {
+  const p = state.pomysly.find(x => Number(x.id) === id);
+  if (p && !p.prompt_higgsfield) { toast('Ta rolka nie ma promptu – wpisz go (więcej → Wpisz prompt) i zapisz.', 'uwaga'); return; }
+  if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
+  const w = await potwierdz({
+    tytul: 'Tani podgląd rolki',
+    tresc: `<p>Zrobię szybką, tanią wersję (gorsza jakość), żebyś zobaczył, czy prompt działa. Koszt ~${KOSZT_PODGLADU} kredytów. Robić?</p><p class="dialog-uwaga">To wyda kredyty.</p>`,
+    ok: 'Zrób podgląd',
+  });
+  if (!w) return;
+  await akcja({ typ: 'podglad', id }, 'robię tani podgląd');
 }
 
 async function ponowPomysl(id) {
@@ -1176,7 +1528,8 @@ function renderZdjecia() {
   const kont = $('#zdjecia-galeria');
   const lista = state.zdjecia.slice().sort((a, b) => b.id - a.id);
   if (!lista.length) {
-    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>Kliknij „Zrób zdjęcie”. Autopilot też może robić zdjęcia sam – ustaw „Ile zdjęć dziennie” w Ustawienia → Zdjęcia.</span></div>`;
+    const u = (state.stan && state.stan.ustawienia) || {};
+    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>${u.zdjecia_model ? 'Wpisz, jakie zdjęcie chcesz, i kliknij „Zrób zdjęcie”.' : 'Najpierw wybierz model zdjęć w Ustawieniach – potem kliknij „Zrób zdjęcie”.'} Autopilot też może robić zdjęcia sam – ustaw „Ile zdjęć dziennie” w Ustawienia → Zdjęcia.</span>${u.zdjecia_model ? '<button class="btn btn-maly btn-glowny" type="button" data-akcja="fokus-zdjecia">Zrób pierwsze zdjęcie</button>' : '<a class="btn btn-maly btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>'}</div>`;
     return;
   }
   kont.innerHTML = lista.map(z => `<figure class="zdjecie" data-id="${Number(z.id)}">
@@ -1502,10 +1855,12 @@ async function ladujUstawienia() {
   renderReferencje(d);
   renderFoldery(d);
   renderPromptyInfo();
-  // profil: API nie ma GET profilu – nazwa z listy person, reszta pól (instagram, cechy, styl) tylko do zapisu
-  const prof = (state.stan && state.stan.profil) || {};
+  // profil przychodzi z /api/ustawienia (pole profil); po zapisie trzymamy świeższą kopię w state.profile
+  if (d.profil && !state.profile[state.aktywna]) state.profile[state.aktywna] = d.profil;
+  const prof = state.profile[state.aktywna] || d.profil || {};
   wypelnijFormularz($('#form-profil'), {
     nazwa: prof.nazwa || nazwaPersony(state.aktywna) || '', instagram: prof.instagram || '', opis_stylu: prof.opis_stylu || '',
+    hashtagi: prof.hashtagi || '',
     cechy: Array.isArray(prof.cechy) ? prof.cechy.join(', ') : (prof.cechy || ''),
   });
   try {
@@ -1595,6 +1950,7 @@ async function zapiszUstawienia(f) {
       state.ustawieniaPelne.prompty = Object.assign({}, state.ustawieniaPelne.prompty, { zdjecia: dane.zdjecia_prompty_tekst });
     }
     toast('Zapisane.', 'ok');
+    odswiezDiagnoze();
     odswiez();
   } finally {
     if (btn) btn.disabled = false;
@@ -1603,9 +1959,16 @@ async function zapiszUstawienia(f) {
 
 async function zapiszProfil(f) {
   const dane = zbierzFormularz(f);
-  const d = await api('/api/profil', 'POST', { nazwa: dane.nazwa || '', instagram: dane.instagram || '', opis_stylu: dane.opis_stylu || '', cechy: dane.cechy || '' });
-  if (state.stan && d.profil) state.stan.profil = d.profil;
+  const znany = !!state.profile[state.aktywna];   // profil znamy tylko po zapisie w tej sesji (API nie ma GET profilu)
+  const payload = { nazwa: dane.nazwa || '' };
+  for (const k of ['instagram', 'opis_stylu', 'cechy', 'hashtagi']) {
+    const v = String(dane[k] === undefined || dane[k] === null ? '' : dane[k]).trim();
+    if (v || znany) payload[k] = v;   // puste pole kasuje wartość tylko wtedy, gdy ją widzieliśmy – inaczej zostawiamy to, co zapisane
+  }
+  const d = await api('/api/profil', 'POST', payload);
+  if (d.profil) state.profile[state.aktywna] = d.profil;
   toast('Zapisane.', 'ok');
+  odswiezDiagnoze();
   odswiez();
 }
 
@@ -1617,6 +1980,7 @@ async function usunPlik(typ, nazwa) {
   toast(`Usunięto ${nazwa}.`, 'ok');
   if (state.strona === 'ustawienia') await ladujUstawienia();
   else if (state.strona === 'lipsync') { state.ustawieniaPelne = null; await ladujLipsync(); }
+  if (typ === 'referencja') odswiezDiagnoze();
   odswiez();
 }
 
@@ -1722,6 +2086,7 @@ async function zapiszKlucz(dostawca, klucz) {
   delete state.testyKont[dostawca];
   toast('Klucz zapisany. Kliknij „Sprawdź”, żeby zobaczyć, czy działa.', 'ok');
   renderKonta();
+  odswiezDiagnoze();
   odswiez();
 }
 
@@ -1738,6 +2103,7 @@ async function usunKlucz(dostawca) {
   delete state.testyKont[dostawca];
   toast(telefon ? 'Token usunięty.' : 'Klucz usunięty.', 'ok');
   renderKonta();
+  odswiezDiagnoze();
   odswiez();
 }
 
@@ -1756,6 +2122,7 @@ async function testujKonto(dostawca, btn) {
   } finally {
     if (btn) btn.disabled = false;
     try { await ladujKonta(); } catch (e) { renderKonta(); }
+    odswiezDiagnoze();
     odswiez(true);
   }
 }
@@ -1820,6 +2187,7 @@ async function usunSzablon(nazwa) {
 
 // ---------- Historia ----------
 async function ladujHistoria() {
+  ladujStatystyki(!state.timery.dziennik).catch(() => {});   // karta „Ostatnie 14 dni” nad listą
   const q = new URLSearchParams({ ile: '200' });
   if (state.pelny) { const typ = $('#dz-typ').value; if (typ) q.set('typ', typ); }
   const d = await api('/api/dziennik?' + q.toString());
@@ -2005,6 +2373,7 @@ async function wyslijPliki(typ, pliki) {
     }
     if ((typ === 'referencja' || typ === 'stroj') && state.strona === 'ustawienia') ladujUstawienia().catch(bladToast);
     if (typ === 'audio') { state.ustawieniaPelne = null; if (state.strona === 'lipsync') ladujLipsync().catch(bladToast); }
+    if (typ === 'referencja') odswiezDiagnoze();
     odswiez();
   } catch (e) {
     bladToast(e);
@@ -2026,6 +2395,7 @@ async function nowaPersona() {
   $('#dlg-persona').close();
   toast(`Jest persona „${nazwa}”. Teraz dodaj jej zdjęcia i prompt.`, 'ok');
   wyczyscCachePersony();
+  odswiezDiagnoze();
   await odswiez();
   if (location.hash === '#ustawienia/persona') { state.sekcja = 'persona'; ladujStrone('ustawienia'); otworzSekcje('persona'); }
   else location.hash = '#ustawienia/persona';
@@ -2067,12 +2437,24 @@ document.addEventListener('click', async e => {
       case 'autopilot-raz': await akcja({ typ: 'autopilot_raz' }, 'przebieg autopilota'); break;
       case 'autopilot-wznow': await wznowAutopilot(el); break;
       case 'telegram-wyslij': await wyslijNaTelefon(id); break;
+      case 'fokus-wrzuc': wybierzPliki('zrodlo'); break;
+      case 'persona-wybierz': await zmienPersone(el.dataset.slug); break;
+      case 'pk-persona': {
+        // „Uzupełnij” przy personie z listy kontrolnej: przełącz na nią i otwórz właściwą sekcję Ustawień
+        const slug = el.dataset.slug, hash = el.dataset.hash || '#ustawienia/persona';
+        if (slug && slug !== state.aktywna) await zmienPersone(slug);
+        if (location.hash === hash) zastosujHash(); else location.hash = hash;
+        break;
+      }
+      case 'kroki-przelacz': state.pkOtwarte = $('#pk-lista').hidden; renderPierwszeKroki(); break;
       // rolki
       case 'filtr': state.filtr = el.dataset.filtr || 'wszystkie'; renderRolki(); break;
       case 'koszt-pomysl': await akcja({ typ: 'koszt', ids: [id] }, 'liczę koszt'); break;
       case 'generuj-pomysl': await generujPomysl(id); break;
       case 'ponow': await ponowPomysl(id); break;
       case 'odtworz': if (state.odtwarzane.has(id)) state.odtwarzane.delete(id); else state.odtwarzane.add(id); if (state.strona === 'start') renderOdbierz(); else renderRolki(); break;
+      case 'podglad': await taniPodglad(id); break;
+      case 'podglad-pokaz': if (state.podglady.has(id)) state.podglady.delete(id); else state.podglady.add(id); renderRolki(); break;
       case 'prompt-pokaz': if (state.otwartePrompty.has(id)) state.otwartePrompty.delete(id); else state.otwartePrompty.add(id); renderRolki(); { const ta = $(`textarea[data-prompt="${id}"]`); if (ta) ta.focus(); } break;
       case 'pierz': await akcja({ typ: 'pierz', id }, 'pranie w Media Tool'); break;
       case 'lipsync-pomysl': await otworzLipsyncDialog(id); break;
@@ -2080,6 +2462,7 @@ document.addEventListener('click', async e => {
       case 'usun-pomysl': await usunPomysl(id); break;
       case 'zapisz-prompt': await zapiszPrompt(id); break;
       // zdjęcia, lipsync
+      case 'fokus-zdjecia': { const inp = $('#zd-prompt'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } break; }
       case 'usun-zdjecie': await usunZdjecie(id); break;
       case 'usun-lipsync': await usunLipsync(id); break;
       case 'tts': await startTts(); break;
@@ -2148,11 +2531,51 @@ document.addEventListener('click', e => {
   if (s && !e.target.closest('button')) wybierzPliki(s.dataset.upload);
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { zamknijMenu(null); return; }
+  if (e.key === 'Escape') {
+    // Escape zamyka menu „więcej” i otwarte okienka (dialog modalny i tak reaguje na Escape – to dla pewności)
+    zamknijMenu(null);
+    $$('dialog[open]').forEach(d => d.close());
+    return;
+  }
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const s = e.target.closest && e.target.closest('.strefa[data-upload]');
   if (s) { e.preventDefault(); wybierzPliki(s.dataset.upload); }
 });
+
+// zdjęcie persony nie chce się wczytać (uszkodzony plik, zły format) -> w awatarze zostaje pierwsza litera nazwy
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof Element) || img.tagName !== 'IMG' || img.dataset.litera === undefined) return;
+  const wrap = img.closest('.avatar, #persona-avatar');
+  if (!wrap) return;
+  wrap.classList.add('litera');
+  wrap.textContent = img.dataset.litera;
+}, true);
+
+// karta „Ostatnie 14 dni”: klik w nagłówek zapamiętuje, czy ma być rozwinięta (osobno Start / Historia); po rozwinięciu
+// rysujemy wykres jeszcze raz, bo zwinięta karta nie zna swojej szerokości
+document.addEventListener('click', e => {
+  const sum = e.target.closest && e.target.closest('details[data-staty] > summary');
+  if (!sum) return;
+  const det = sum.parentElement;
+  const bedzie = !det.open;
+  try { localStorage.setItem(KLUCZ_STATY + det.dataset.staty, bedzie ? '1' : '0'); } catch (err) { /* prywatne okno */ }
+  if (bedzie) setTimeout(() => { det.dataset.klucz = ''; renderStatystyki(); }, 0);
+});
+
+// zmiana szerokości okna -> wykres rysuje się od nowa (tylko gdy szerokość faktycznie się zmieniła)
+let timerRozmiaru = null;
+window.addEventListener('resize', () => { clearTimeout(timerRozmiaru); timerRozmiaru = setTimeout(() => renderStatystyki(), 200); });
+
+// Pasek „Co się dzieje” jest przyklejony do dołu – mierzymy jego wysokość, żeby treść miała pod sobą tyle miejsca i nic nie zasłaniał.
+function obserwujKonsole() {
+  const k = $('#konsola');
+  if (!k) return;
+  const ustaw = () => document.documentElement.style.setProperty('--konsola-wys', `${k.offsetHeight}px`);
+  if (window.ResizeObserver) new window.ResizeObserver(ustaw).observe(k);
+  else window.addEventListener('resize', ustaw);
+  ustaw();
+}
 document.addEventListener('dragover', e => {
   e.preventDefault(); // bez tego przeglądarka otwiera upuszczony plik
   const s = e.target.closest && e.target.closest('.strefa[data-upload]');
@@ -2174,6 +2597,7 @@ window.addEventListener('hashchange', zastosujHash);
 async function start() {
   wstawIkony();
   wczytajTryb();
+  obserwujKonsole();
   await odswiez();
   zastosujHash();
   setInterval(() => { odswiez(false); }, 5000);
