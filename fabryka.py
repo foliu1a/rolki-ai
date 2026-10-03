@@ -631,6 +631,18 @@ SLOWA_RYZYKOWNE = ("sexy", "seductive", "sensual", "erotic", "erotica", "lingeri
                    "shower", "bath", "lap dance", "pole dance", "hot girl", "curvy", "curves", "tight dress", "mini skirt", "skimpy")
 
 
+def _odmiana(n, jeden, kilka, duzo):
+    """'1 rolke', '3 rolki', '7 rolek' - polska liczba mnoga."""
+    n = int(n)
+    if n == 1:
+        forma = jeden
+    elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        forma = kilka
+    else:
+        forma = duzo
+    return f"{n} {forma}"
+
+
 def wskazowki_nsfw(slug, dni=14):
     """Czemu Higgsfield odrzuca rolki persony jako NSFW: ile odrzucen (w ogole / ostatnie `dni`), ryzykowne slowa w promptach
     A/B/zdjec i proste wskazowki po polsku. Zwraca {"odrzucone", "odrzucone_ostatnio", "slowa": {A,B,zdjecia}, "wskazowki": [...]}."""
@@ -647,7 +659,8 @@ def wskazowki_nsfw(slug, dni=14):
         slowa[nazwa] = [s for s in SLOWA_RYZYKOWNE if f" {s} " in t or f" {s}s " in t]
     wskazowki = []
     if ostatnio:
-        wskazowki.append(f"Filtr odrzucil {len(ostatnio)} rolek w ostatnich {dni} dniach (razem {len(odrzucone)}). Kredyty za odrzucone wracaja.")
+        wskazowki.append(f"Filtr odrzucil {_odmiana(len(ostatnio), 'rolke', 'rolki', 'rolek')} w ostatnich {dni} dniach "
+                         f"(razem {_odmiana(len(odrzucone), 'rolke', 'rolki', 'rolek')}). Kredyty za odrzucone wracaja.")
     for nazwa, lista in slowa.items():
         if lista:
             gdzie = {"A": "prompcie A (stroj z filmu)", "B": "prompcie B (stroj ze zdjecia)", "zdjecia": "promptach zdjec"}[nazwa]

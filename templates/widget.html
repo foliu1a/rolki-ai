@@ -4,24 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23000%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2720%27 font-family=%27Segoe UI,system-ui,sans-serif%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27%23c8ff4a%27%3Er%3C/text%3E%3C/svg%3E">
-<title>rolki-ai widget</title>
+<link rel="icon" href="/static/rolki.png">
+<title>Rolki AI – widget</title>
 <style>
-  :root { --tlo: #000; --karta: #0f0f0f; --linia: #262626; --tekst: #f2f2f2; --szary: #9a9a9a;
-          --akcent: #c8ff4a; --ok: #4ade80; --uwaga: #fbbf24; --zle: #f87171; }
+  /* ta sama paleta co panel: prawie czarne tło z nutą fioletu, akcent fiolet */
+  :root { --tlo: #0b0a10; --karta: #14121c; --linia: #2f2942; --tekst: #f3f0f8; --szary: #aba4bd;
+          --akcent: #a855f7; --akcent-jasny: #c084fc; --ok: #3ddc84; --uwaga: #ffb454; --zle: #ff5c7a; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: var(--tlo); color: var(--tekst); font: 13px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; height: 100%; }
-  body { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
-  .gora { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .gora b { font-size: 14px; letter-spacing: .3px; }
+  body { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 300px;
+         background-image: radial-gradient(360px 200px at 0% 0%, rgba(124, 58, 237, .18), transparent 70%); }
+  .gora { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .gora b { font-size: 14px; font-family: Georgia, "Times New Roman", serif; display: inline-flex; align-items: center; gap: 7px; }
+  .gora b img { width: 18px; height: 18px; border-radius: 5px; }
   .gora a { color: var(--szary); text-decoration: none; font-size: 12px; }
-  .gora a:hover { color: var(--akcent); }
+  .gora a:hover { color: var(--akcent-jasny); }
   .saldo { display: flex; align-items: baseline; gap: 8px; }
   .saldo .liczba { font-size: 34px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
   .saldo .liczba.uwaga { color: var(--uwaga); } .saldo .liczba.zle { color: var(--zle); }
   .saldo small { color: var(--szary); }
   .pasek { height: 6px; background: var(--karta); border: 1px solid var(--linia); border-radius: 4px; overflow: hidden; }
-  .pasek > div { height: 100%; width: 0; background: var(--akcent); transition: width .4s; }
+  .pasek > div { height: 100%; width: 0; background: linear-gradient(90deg, #7c3aed, var(--akcent)); box-shadow: 0 0 8px rgba(168, 85, 247, .5); transition: width .4s; }
   .pasek > div.uwaga { background: var(--uwaga); } .pasek > div.zle { background: var(--zle); }
   .dzis { display: flex; justify-content: space-between; color: var(--szary); font-size: 12px; margin-top: 4px; }
   .kafle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -39,7 +42,8 @@
 </style>
 </head>
 <body>
-  <div class="gora"><b id="persona">rolki-ai</b><a href="/" target="_blank" rel="noopener">otwórz panel →</a></div>
+  <div class="gora"><b><img src="/static/rolki.png" alt=""><span id="persona">Rolki AI</span></b><a href="/" target="_blank" rel="noopener">otwórz panel →</a></div>
+  <div class="blad-polaczenia" id="offline" hidden>Panel nie odpowiada — uruchom go skrótem Rolki AI</div>
   <div>
     <div class="saldo"><span class="liczba" id="saldo">—</span><small id="saldo-etykieta">kr Higgsfield</small></div>
     <div class="pasek" style="margin-top:8px"><div id="pasek"></div></div>
@@ -53,7 +57,6 @@
   <div class="stopka"><span class="kropka" id="kropka"></span><span id="autopilot">autopilot —</span></div>
   <div class="hamulec" id="hamulec" hidden></div>
   <div class="ostatni" id="ostatni"></div>
-  <div class="blad-polaczenia" id="offline" hidden>Panel nie odpowiada — włącz panel.bat</div>
 <script>
 const $ = s => document.querySelector(s);
 function odstep(sek) { if (sek == null) return ''; const m = Math.max(0, Math.round(sek / 60)); return m < 1 ? 'za chwilę' : `za ${m} min`; }
@@ -63,7 +66,7 @@ async function odswiez() {
   $('#offline').hidden = true;
   if (!d.ok) return;
   const s = d.stan, hf = (d.saldo || {}).higgsfield || {};
-  $('#persona').textContent = s ? `rolki-ai · ${s.modelka}` : 'rolki-ai · brak persony';
+  $('#persona').textContent = s ? `Rolki AI · ${s.modelka}` : 'Rolki AI · brak persony';
   const dost = s ? s.dostawca : 'higgsfield';
   const saldo = dost === 'yapper' ? ((d.saldo || {}).yapper || {}) : hf;
   $('#saldo-etykieta').textContent = dost === 'yapper' ? 'kr yapper' : 'kr Higgsfield';

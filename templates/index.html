@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>rolki-ai</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%23000%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2720%27 font-family=%27Segoe UI,system-ui,sans-serif%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27%23c8ff4a%27%3Er%3C/text%3E%3C/svg%3E">
+<title>Rolki AI</title>
+<meta name="theme-color" content="#0b0a10">
+<link rel="icon" href="/static/rolki.png">
+<link rel="apple-touch-icon" href="/static/rolki.png">
 <link rel="stylesheet" href="/static/style.css?v={{ wersja }}">
 </head>
 <body>
@@ -27,6 +29,7 @@
         <span class="tryb-tekst"><b id="tryb-nazwa">Tryb prosty</b><small id="tryb-opis">tylko to, co potrzebne</small></span>
         <span class="przelacznik"><input type="checkbox" id="tryb-przelacznik" aria-label="Tryb pełny (wszystkie ustawienia i logi)"><span class="suwak"></span></span>
       </label>
+      <button class="btn btn-maly btn-tekst bok-zamknij" type="button" data-akcja="zamknij-panel" title="Zamknij program (panel i autopilot przestaną działać)"><span class="ikona" data-ikona="zasilanie"></span><span class="etykieta">Zamknij program</span></button>
       <div class="wersja" id="wersja"></div>
     </div>
   </aside>
@@ -34,7 +37,7 @@
   <!-- ===================== GŁÓWNA ===================== -->
   <div class="glowna">
     <header class="gora">
-      <div class="marka"><span class="logo">r</span><span>rolki-ai</span></div>
+      <a class="marka" href="#start" title="Rolki AI – Start"><img class="logo" src="/static/rolki.png" alt="" width="32" height="32"><span class="marka-nazwa">Rolki<i>·</i>AI</span></a>
       <div class="persona-wybor">
         <span class="persona-avatar" id="persona-avatar" aria-hidden="true" hidden></span>
         <label class="sr-only" for="wybor-modelki">Persona</label>
@@ -48,7 +51,7 @@
       </div>
     </header>
 
-    <div class="offline" id="offline" hidden>Panel nie odpowiada. Sprawdź, czy okno <b>panel.bat</b> jest otwarte.</div>
+    <div class="offline" id="offline" hidden>Panel nie odpowiada. Uruchom go skrótem <b>Rolki AI</b> na pulpicie (albo plikiem <b>panel.bat</b>).</div>
 
     <main class="tresc">
 
@@ -77,13 +80,45 @@
             <div class="banner-akcja" id="banner-akcja"></div>
           </div>
 
-          <!-- pierwsze kroki (lista kontrolna z /api/diagnoza) -->
-          <section class="karta pierwsze-kroki" id="pierwsze-kroki" aria-labelledby="pk-tytul" hidden>
+          <!-- pierwsze kroki (lista kontrolna z /api/diagnoza) – widoczna od razu, nagłówek zawsze „Pierwsze kroki” + pigułka stanu -->
+          <section class="karta pierwsze-kroki" id="pierwsze-kroki" aria-labelledby="pk-tytul">
             <div class="pk-gora">
-              <div class="pk-tytul-wrap"><span class="ikona" data-ikona="tarcza"></span><h2 id="pk-tytul">Pierwsze kroki</h2><span class="pk-licznik" id="pk-licznik"></span></div>
-              <button class="btn btn-maly btn-tekst" type="button" data-akcja="kroki-przelacz" id="pk-przelacz" aria-controls="pk-lista" aria-expanded="true">zwiń</button>
+              <div class="pk-tytul-wrap"><span class="ikona" data-ikona="tarcza"></span><h2 id="pk-tytul">Pierwsze kroki</h2><span class="pk-pill czekam" id="pk-pill">sprawdzam…</span><span class="pk-licznik" id="pk-licznik"></span></div>
+              <button class="btn btn-maly btn-tekst" type="button" data-akcja="kroki-przelacz" id="pk-przelacz" aria-controls="pk-lista" aria-expanded="true" hidden>zwiń</button>
             </div>
-            <div class="pk-lista" id="pk-lista"></div>
+            <p class="pk-opis" id="pk-opis">To, co trzeba ustawić raz, żeby fabryka działała. Zielona kropka = gotowe, czerwona = kliknij i uzupełnij.</p>
+            <div class="pk-lista" id="pk-lista"><div class="pk-wiersz czekam"><span class="pk-kropka" aria-hidden="true"></span><div class="pk-tekst"><span>Sprawdzam, czy wszystko jest na miejscu (programy, konto, zdjęcia persony, foldery)…</span></div></div></div>
+          </section>
+
+          <!-- gdzie wrzucam, gdzie odbieram (ścieżki z /api/stan -> foldery) -->
+          <section class="karta gdzie" id="gdzie" aria-labelledby="gdzie-tytul">
+            <div class="karta-naglowek"><div><h2 id="gdzie-tytul">Gdzie wrzucam, gdzie odbieram</h2><p>Dwa foldery na pulpicie, w <span class="mono" id="gdzie-pulpit">ROLKI AI</span>. Nic więcej nie musisz pamiętać.</p></div></div>
+            <div class="gdzie-siatka">
+              <div class="gdzie-box wrzuc">
+                <span class="gdzie-etykieta">Tu wrzucasz</span>
+                <span class="gdzie-tytul"><span class="ikona" data-ikona="upload"></span>filmiki</span>
+                <span class="sciezka" id="gdzie-wrzutnia">—</span>
+                <div class="gdzie-akcje">
+                  <button class="btn btn-glowny btn-maly" type="button" data-akcja="otworz-folder" data-co="wrzutnia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#gdzie-wrzutnia"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                </div>
+              </div>
+              <div class="gdzie-box odbierz">
+                <span class="gdzie-etykieta">Tu odbierasz</span>
+                <span class="gdzie-tytul"><span class="ikona" data-ikona="film"></span>gotowe rolki</span>
+                <span class="sciezka" id="gdzie-gotowe">—</span>
+                <div class="gdzie-akcje">
+                  <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#gdzie-gotowe"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                </div>
+              </div>
+              <div class="gdzie-box mala">
+                <span class="gdzie-etykieta">Zdjęcia persony lądują tu</span>
+                <span class="sciezka" id="gdzie-zdjecia">—</span>
+                <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="zdjecia"><span class="ikona" data-ikona="folder"></span>Otwórz</button>
+              </div>
+            </div>
+            <p class="gdzie-opis">Wrzuć filmik do folderu → fabryka zrobi rolkę sama (<b>autopilot</b>) albo kliknij <b>Zrób rolki</b>. Gotowa rolka pojawi się w folderze <b>„tu rolki zrobione”</b> i na Telegramie.</p>
           </section>
 
           <div class="kroki">
@@ -96,9 +131,12 @@
               </div>
               <p class="krok-info" id="krok1-info">—</p>
               <div class="folder">
-                <span class="etykieta">Albo wrzuć je do folderu:</span>
+                <span class="etykieta">Albo wrzuć je do folderu „tu wrzucasz rolki”:</span>
                 <span class="sciezka" id="folder-wrzutnia">—</span>
-                <button class="btn btn-maly" type="button" data-akcja="kopiuj" data-cel="#folder-wrzutnia"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                <div class="folder-przyciski">
+                  <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="wrzutnia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-wrzutnia"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                </div>
               </div>
             </section>
 
@@ -124,9 +162,12 @@
               <header class="krok-naglowek"><span class="krok-numer">3</span><h2 id="krok3-tytul">Odbierz</h2></header>
               <div class="odbierz" id="odbierz-lista"></div>
               <div class="folder">
-                <span class="etykieta">Gotowe rolki leżą w folderze:</span>
+                <span class="etykieta">Gotowe rolki leżą w folderze „tu rolki zrobione”:</span>
                 <span class="sciezka" id="folder-gotowe">—</span>
-                <button class="btn btn-maly" type="button" data-akcja="kopiuj" data-cel="#folder-gotowe"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                <div class="folder-przyciski">
+                  <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+                  <button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-cel="#folder-gotowe"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
+                </div>
               </div>
               <a class="link-dalej" href="#rolki">wszystkie rolki →</a>
             </section>
@@ -137,7 +178,7 @@
               <div class="autopilot-gora">
                 <div>
                   <h2>Rób wszystko sam (autopilot)</h2>
-                  <p id="autopilot-opis">Co 15 min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, dopasuje usta, jeśli jest głos, i zrobi zdjęcia. Pilnuje limitów kredytów.</p>
+                  <p id="autopilot-opis">Co 15 min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, zrobi zdjęcia, dobierze podpisy i wyśle gotowe na Telegram. Pilnuje limitów kredytów. Ust nie dopasowuje – lipsync robisz ręcznie.</p>
                 </div>
                 <label class="przelacznik duzy" title="Włącza autopilota w tle i zaznacza tę personę do obsługi (ustawienie „autopilot” persony). Wyłączenie odznacza personę; pętla gaśnie, gdy żadna persona jej nie potrzebuje.">
                   <input type="checkbox" id="autopilot-przelacznik" aria-label="Autopilot włączony">
@@ -218,6 +259,13 @@
             <div class="rzad rzad-pola">
               <div class="pole waskie"><label for="zd-ile">Ile zdjęć</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
               <div class="pole rosnie"><label for="zd-prompt">Jakie (puste = kolejne z listy w Ustawieniach)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
+            </div>
+            <div class="rzad rzad-pola">
+              <div class="stroj-wybor">
+                <div class="pole"><label for="zd-stroj">Strój (zdjęcia z folderu Stroje w Ustawieniach)</label><select id="zd-stroj" name="stroj"><option value="">Automatycznie</option></select></div>
+                <img class="stroj-mini" id="zd-stroj-mini" alt="" hidden>
+              </div>
+              <small class="pole-info" id="zd-stroj-info"></small>
             </div>
             <div class="karta-stopka"><span class="muted" id="zdjecia-dzis"></span><button class="btn btn-glowny btn-duzy" type="submit">Zrób zdjęcie</button></div>
           </form>
@@ -318,6 +366,7 @@
                   <div class="pole"><label for="p-nazwa">Nazwa</label><input type="text" id="p-nazwa" name="nazwa" placeholder="np. Noemi"></div>
                   <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
                   <div class="pole szerokie"><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
+                  <div class="pole szerokie"><label for="p-telegram">Konto Telegram tej persony</label><input type="text" id="p-telegram" name="telegram_czat" placeholder="@huy7128" autocomplete="off"><small class="pole-info">np. <span class="mono">@huy7128</span> — gotowe rolki tej persony polecą tam. To konto musi raz napisać <span class="mono">/start</span> do bota (Telegram nie pozwala botom pisać pierwszym). Puste = Twój główny czat.</small><small class="pole-info" id="p-telegram-stan"></small></div>
                   <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
                 </div>
@@ -449,17 +498,17 @@
           <details class="sekcja" id="sekcja-autopilot">
             <summary><span class="ikona" data-ikona="bolt"></span><span class="sekcja-tytul">Autopilot</span><span class="sekcja-opis">Co ile minut sprawdzać folder i co robić samemu.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
             <form class="sekcja-tresc" data-ustawienia novalidate id="form-autopilot-ust">
-              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki → pierze → dopasowuje usta → robi zdjęcia → dobiera podpisy</small></span></label>
+              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki (Higgsfield / yapper) → pierze w Media Tool → robi zdjęcia → dobiera podpisy → wysyła na Telegram</small></span></label>
               <div class="pola-siatka">
                 <div class="pole"><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
               </div>
-              <label class="check"><input type="checkbox" name="lipsync_auto"><span>Jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, dopasuj usta automatycznie</span></label>
-              <label class="check"><input type="checkbox" name="telegram_wysylaj"><span>Wysyłaj gotowe rolki na telefon (Telegram)<small>bot odsyła każdą gotową rolkę z podpisem – telefon podłączasz w <a href="#ustawienia/konta">Konta</a></small></span></label>
+              <label class="check"><input type="checkbox" name="lipsync_auto"><span>Przy ręcznym „Zrób rolkę”: jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, od razu dopasuj usta<small>Autopilot nigdy nie robi lipsyncu — usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a>.</small></span></label>
+              <label class="check"><input type="checkbox" name="telegram_wysylaj"><span>Wysyłaj gotowe rolki na telefon (Telegram)<small>bot odsyła każdą gotową rolkę z podpisem – na Twój główny czat albo na konto persony (<a href="#ustawienia/persona">Persona → Konto Telegram</a>). Telefon podłączasz w <a href="#ustawienia/konta">Konta</a>.</small></span></label>
               <label class="check"><input type="checkbox" name="dziel_dlugie"><span>Filmik dłuższy niż 30 s potnij na kawałki po 30 s<small>Seedance robi najwyżej 30 s naraz – każdy kawałek stanie się osobną rolką</small></span></label>
               <div class="pola-siatka">
                 <div class="pole"><label for="u-stop-bledy">Zatrzymaj autopilot po … nieudanych rolkach z rzędu</label><input type="number" id="u-stop-bledy" name="autopilot_stop_po_bledach" min="0" max="100" data-domyslne="3"><small class="pole-info">0 = nigdy. Po zatrzymaniu na Starcie pojawi się czerwony pasek z przyciskiem „Wznów”.</small></div>
               </div>
-              <div class="callout info" id="autostart-info"><span class="ikona" data-ikona="info"></span><span>Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy w plik <b>autostart.bat</b> (w folderze programu rolki-ai). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
+              <div class="callout info" id="autostart-info"><span class="ikona" data-ikona="info"></span><span>Na pulpicie masz skrót <b>„Rolki AI”</b> (tworzy go <b>aktualizuj.bat</b>; jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b>). Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
           </details>
@@ -479,6 +528,8 @@
                 <div class="pole" data-zaawansowane><label for="u-soul">Soul ID (modele *soul*)</label><input type="text" id="u-soul" name="soul_id" placeholder="puste = bez Soul"></div>
               </div>
               <div class="pole"><label for="u-zdjecia-prompty">Jakie zdjęcia robić (jedna linia = jedno zdjęcie, po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
+              <label class="check"><input type="checkbox" name="zdjecia_stroje"><span>Co drugie zdjęcie w stroju z folderu Stroje (po kolei)<small>zdjęcie stroju leci do modelu jako ostatni obraz; stroje dodajesz w <a href="#ustawienia/persona">Persona → Stroje</a>. Na stronie Zdjęcia możesz wybrać strój ręcznie.</small></span></label>
+              <div class="pole" data-zaawansowane><label for="u-zdjecia-prompt-stroj">Dopisek do promptu przy stroju</label><textarea id="u-zdjecia-prompt-stroj" name="zdjecia_prompt_stroj" class="mono" rows="2" placeholder="She is wearing exactly the outfit from the last reference image…"></textarea><small class="pole-info">Doklejany na końcu promptu zdjęcia, gdy dołączamy zdjęcie stroju.</small></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
           </details>
@@ -583,14 +634,30 @@
         <div class="callout info pomoc-zglos"><span class="ikona" data-ikona="info"></span><span><b>Coś nie działa albo nie wiesz, co kliknąć?</b> Zrób zrzut ekranu (klawisz <span class="mono">PrtScn</span> albo <span class="mono">Win + Shift + S</span>) i wyślij go Claude'owi – napisz, co chciałeś zrobić. Dostaniesz gotową odpowiedź.</span></div>
 
         <div class="pomoc-lista" id="pomoc-lista">
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-gdzie">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Gdzie wrzucam filmiki i gdzie odbieram gotowe rolki?</summary>
+            <div class="pomoc-tresc">
+              <p>Na pulpicie jest folder <b>ROLKI AI</b>, a w nim trzy foldery z nazwą Twojej persony. Program tworzy je sam.</p>
+              <p><b>Tu wrzucasz</b> swoje filmiki (folder „tu wrzucasz rolki”):</p>
+              <span class="sciezka" id="pomoc-wrzutnia">—</span>
+              <div class="folder-przyciski"><button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="wrzutnia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button></div>
+              <p><b>Tu odbierasz</b> gotowe rolki (folder „tu rolki zrobione”) – stąd bierzesz je do publikacji:</p>
+              <span class="sciezka" id="pomoc-gotowe">—</span>
+              <div class="folder-przyciski"><button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button></div>
+              <p><b>Zdjęcia persony</b> lądują w folderze „tu zdjęcia zrobione”:</p>
+              <span class="sciezka" id="pomoc-zdjecia">—</span>
+              <p>Wrzuć filmik do folderu → fabryka zrobi rolkę sama (autopilot) albo kliknij <b>Zrób rolki</b> na Starcie. Gotowa rolka pojawi się w folderze „tu rolki zrobione” i na Telegramie.</p>
+              <p class="muted">Każda persona ma swoje foldery. Zmienisz je w <a href="#ustawienia/foldery">Ustawienia → Foldery</a>. Nagrania głosu do lipsyncu leżą w folderze audio persony (wrzucasz je w zakładce Lipsync).</p>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc" id="pomoc-rolka">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to jest rolka i skąd ją bierze program?</summary>
             <div class="pomoc-tresc">
               <p>Rolka to krótki pionowy filmik (jak na Instagramie czy TikToku). Program bierze <b>Twój filmik źródłowy</b> z wrzutni (krok 1 na Starcie) i wstawia do niego personę – jej twarz i sylwetkę ze zdjęć z Ustawień. Ruch, scena i ubranie zostają z filmiku, a osoba jest już Twoją personą.</p>
               <p>Każdy filmik w folderze to <b>jedna rolka</b>. Gotowa rolka trafia do folderu gotowych (krok 3) i – jeśli podłączysz telefon – od razu na Telegram.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-kredyty">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to są kredyty i ile kosztuje rolka?</summary>
             <div class="pomoc-tresc">
               <p>Kredyty to waluta Higgsfield – usługi, która robi rolki i zdjęcia. Kupujesz je w abonamencie, a program wydaje je za każdą rolkę. Ile masz, widzisz zawsze w prawym górnym rogu.</p>
@@ -603,18 +670,25 @@
               <p>Program zawsze <b>zapyta, zanim wyda kredyty</b>, i pilnuje bezpiecznika z Ustawień → Limity: nie wyda więcej niż dzienny limit i zostawi na koncie minimum.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-niewyszla">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Co zrobić, gdy rolka nie wyszła?</summary>
             <div class="pomoc-tresc">
               <ol>
-                <li>Wejdź w <a href="#rolki?status=blad">Rolki → nie wyszły</a>. Pod rolką jest napisane <b>dlaczego</b> (np. Higgsfield odrzucił filmik).</li>
+                <li>Wejdź w <a href="#rolki?status=blad">Rolki → nie wyszły</a>. Pod rolką jest napisane <b>dlaczego</b> (np. odrzucił ją filtr treści).</li>
                 <li>Kliknij <b>Spróbuj jeszcze raz</b>. Często druga próba wychodzi – za odrzuconą rolkę Higgsfield oddaje kredyty.</li>
-                <li>Jeśli znów nie wyjdzie: sprawdź prompt (więcej → Pokaż / zmień prompt), zrób <b>tani podgląd</b>, albo wrzuć inny filmik. Filmiki z logo, znakami towarowymi i nagością są odrzucane.</li>
+                <li>Jeśli znów nie wyjdzie: sprawdź prompt (więcej → Pokaż / zmień prompt), zrób <b>tani podgląd</b>, albo wrzuć inny filmik. Filmiki z logo, znakami towarowymi i nagością są odrzucane – więcej w <a href="#pomoc/nsfw">„Filtr NSFW”</a> poniżej.</li>
               </ol>
               <p>Gdy kilka rolek z rzędu nie wyjdzie, autopilot zatrzymuje się sam (hamulec) – na Starcie zobaczysz czerwony pasek z przyciskiem <b>Wznów</b>.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-nsfw">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Filtr NSFW — czemu odrzuca niewinne rolki?</summary>
+            <div class="pomoc-tresc">
+              <p>Higgsfield ma automatyczny <b>filtr treści</b>. Patrzy na filmik, zdjęcia persony, zdjęcia strojów i słowa w prompcie – bez kontekstu. Dlatego potrafi odrzucić zupełnie niewinną rolkę (siatka na zdjęciu stroju, taniec, plaża). Odrzucona rolka = <b>kredyty wracają</b>, ale rolki nie ma.</p>
+              <div id="nsfw-tresc"><p class="muted">Sprawdzam odrzucone rolki tej persony…</p></div>
+            </div>
+          </details>
+          <details class="karta zwijane pomoc" id="pomoc-telefon">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak podłączyć telefon?</summary>
             <div class="pomoc-tresc">
               <ol>
@@ -622,34 +696,27 @@
                 <li>Wejdź w <a href="#ustawienia/konta">Ustawienia → Konta → Telefon (Telegram)</a>, wklej token i kliknij <b>Zapisz</b>.</li>
                 <li>Na telefonie napisz do swojego bota <span class="mono">/start</span>. Gotowe – od teraz wysyłasz mu filmiki, a on odsyła gotowe rolki z podpisem.</li>
               </ol>
-              <p>Komendy bota: <span class="mono">/status</span>, <span class="mono">/raport</span>, <span class="mono">/stop</span>, <span class="mono">/wznow</span>.</p>
+              <p><b>Osobne konto dla persony:</b> w <a href="#ustawienia/persona">Ustawienia → Persona</a> wpisz „Konto Telegram tej persony” (np. <span class="mono">@huy7128</span>). To konto też musi raz napisać <span class="mono">/start</span> do bota – Telegram nie pozwala botom pisać pierwszym. Od tej chwili gotowe rolki tej persony lecą tam.</p>
+              <p>Komendy bota: <span class="mono">/status</span>, <span class="mono">/raport</span>, <span class="mono">/stop</span>, <span class="mono">/wznow</span>, <span class="mono">/zdjecie</span>.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-autopilot">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak działa autopilot i hamulec?</summary>
             <div class="pomoc-tresc">
-              <p><b>Autopilot</b> to przełącznik na Starcie. Gdy jest włączony, program co kilkanaście minut sam sprawdza wrzutnię, robi rolki z nowych filmików, pierze je w Media Tool, dopasowuje usta (jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>), robi zdjęcia i dobiera podpisy. Pilnuje limitów kredytów i liczby rolek dziennie.</p>
+              <p><b>Autopilot</b> to przełącznik na Starcie. Gdy jest włączony, program co kilkanaście minut sam sprawdza wrzutnię, robi rolki z nowych filmików (Higgsfield albo yapper), pierze je w Media Tool, robi zdjęcia, dobiera podpisy i wysyła gotowe rolki na Telegram. Pilnuje limitów kredytów i liczby rolek dziennie.</p>
+              <p><b>Autopilot nigdy nie robi lipsyncu.</b> Usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a> (albo przy ręcznym „Zrób rolkę”, jeśli włączysz to w Ustawienia → Autopilot i obok filmiku leży <span class="mono">nazwa.audio.mp3</span>).</p>
               <p><b>Hamulec</b> chroni kredyty: gdy kilka rolek z rzędu nie wyjdzie (liczbę ustawiasz w Ustawienia → Autopilot), autopilot zatrzymuje się. Na Starcie pojawia się czerwony pasek – sprawdź rolki, które nie wyszły, i kliknij <b>Wznów</b>.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
-            <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak włączyć autostart z Windows?</summary>
+          <details class="karta zwijane pomoc" id="pomoc-autostart">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Skrót na pulpicie, autostart i zamykanie programu</summary>
             <div class="pomoc-tresc">
-              <p>W folderze programu (rolki-ai) kliknij dwa razy w plik <b>autostart.bat</b>. Od tej chwili panel z autopilotem włącza się sam po zalogowaniu do Windows.</p>
-              <p>Żeby to wyłączyć, kliknij dwa razy <b>autostart-usun.bat</b>.</p>
+              <p>Na pulpicie masz skrót <b>„Rolki AI”</b> – tworzy go <b>aktualizuj.bat</b>. Jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b> w folderze programu. Skrót uruchamia panel w tle (bez czarnego okna) i otwiera go w przeglądarce.</p>
+              <p>Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</p>
+              <p>Program działa w tle nawet po zamknięciu karty przeglądarki. Żeby go wyłączyć, kliknij <b>Zamknij program</b> w lewym dolnym rogu panelu. Włączysz go ponownie skrótem Rolki AI.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
-            <summary><span class="ikona" data-ikona="chevron-dol"></span>Gdzie są moje pliki?</summary>
-            <div class="pomoc-tresc">
-              <p><b>Filmiki do zrobienia</b> (wrzutnia) – tu wrzucasz swoje nagrania:</p>
-              <span class="sciezka" id="pomoc-wrzutnia">—</span>
-              <p><b>Gotowe rolki</b> – stąd je bierzesz do publikacji:</p>
-              <span class="sciezka" id="pomoc-gotowe">—</span>
-              <p class="muted">Każda persona ma swoje foldery. Zmienisz je w <a href="#ustawienia/foldery">Ustawienia → Foldery</a>. Zdjęcia persony lądują w folderze zdjęć, a nagrania głosu w folderze audio persony.</p>
-            </div>
-          </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-persona">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak dodać nową personę?</summary>
             <div class="pomoc-tresc">
               <ol>
@@ -660,13 +727,13 @@
               <p>Między personami przełączasz się listą u góry ekranu albo kafelkami na Starcie. Każda ma własną wrzutnię i folder gotowych.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-aktualizacja">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak zaktualizować program?</summary>
             <div class="pomoc-tresc">
-              <p>Kliknij dwa razy w plik <b>aktualizuj.bat</b> w folderze programu. Panel sam się zamknie, pobierze nową wersję i włączy się ponownie. Twoje persony, filmiki, klucze i ustawienia zostają.</p>
+              <p>Kliknij dwa razy w plik <b>aktualizuj.bat</b> w folderze programu. Panel sam się zamknie, pobierze nową wersję, odświeży skrót na pulpicie i włączy się ponownie. Twoje persony, filmiki, klucze i ustawienia zostają.</p>
             </div>
           </details>
-          <details class="karta zwijane pomoc">
+          <details class="karta zwijane pomoc" id="pomoc-tryb">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Co to jest Tryb pełny?</summary>
             <div class="pomoc-tresc">
               <p>Przełącznik w lewym dolnym rogu. <b>Tryb prosty</b> pokazuje tylko to, co potrzebne na co dzień. <b>Tryb pełny</b> odsłania wszystkie ustawienia (modele, parametry, yapper.so, lipsync), surowe komunikaty błędów, numery rolek i pełny log w pasku „Co się dzieje”.</p>

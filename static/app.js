@@ -58,6 +58,13 @@ function kredytow(n) {
   return `${liczba(v)} ${odmiana(v, 'kredyt', 'kredyty', 'kredytów')}`;
 }
 function nazwaPliku(s) { return s ? String(s).split(/[\\/]/).pop() : ''; }
+// „…\ROLKI AI\tu wrzucasz rolki\Noemi” – ostatnie n członów ścieżki (pełna ścieżka idzie do title)
+function krotkaSciezka(s, n = 3) {
+  s = String(s || '');
+  const sep = s.includes('\\') ? '\\' : '/';
+  const cz = s.split(/[\\/]/).filter(Boolean);
+  return cz.length > n ? '…' + sep + cz.slice(-n).join(sep) : s;
+}
 function bezRozszerzenia(s) { return String(s || '').replace(/\.[^.]+$/, ''); }
 function skroc(t, n = 160) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
 function dwaZnaki(n) { return String(n).padStart(2, '0'); }
@@ -140,6 +147,10 @@ const IKONY = {
   podpis: '<path d="M4 20h16"/><path d="m5 16 10-10 3 3-10 10H5v-3z"/>',
   telefon: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
   pomoc: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.6a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.2 1-1.2 1.8"/><path d="M12 17h.01"/>',
+  zasilanie: '<path d="M12 3v9"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/>',
+  ksiezyc: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  filtr: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+  stroj: '<path d="M9 4 6 6 3 11l3 1.5V20h12v-7.5L21 11l-3-5-3-2a3 3 0 0 1-6 0z"/>',
 };
 function ikona(nazwa) {
   const p = IKONY[nazwa];
@@ -176,8 +187,9 @@ const SLOWNIK_BLEDOW = [
   [/min_kredyty/i, 'Za mało kredytów na koncie, żeby bezpiecznik pozwolił.'],
   [/limit dzienny/i, 'Dzisiejszy limit kredytów wyczerpany.'],
   [/max\/rolka/i, 'Ta rolka kosztowałaby więcej niż dozwolone na jedną rolkę.'],
-  [/nsfw/i, 'Higgsfield odrzucił ten filmik (zasady treści).'],
-  [/ip_detected/i, 'Higgsfield odrzucił (znak towarowy / prawa autorskie).'],
+  [/nsfw/i, 'Odrzucone przez filtr treści (NSFW) – kredyty wróciły.'],
+  [/ip_detected/i, 'Model wykrył znaną postać albo markę (znak towarowy / prawa autorskie).'],
+  [/tylko na windows/i, 'Otwieranie folderu działa tylko na Windows – skopiuj ścieżkę i wklej ją w Eksploratorze.'],
   [/brak klucza/i, 'Brak klucza — wpisz go w Ustawienia → Konta.'],
   [/brak referencji|brak zdjec persony|brak zdjęć persony/i, 'Dodaj zdjęcia persony w Ustawieniach.'],
   [/mode_bez_zrodla/i, 'Ten pomysł nie ma filmiku. Włącz tryb „bez filmiku” w Ustawieniach (zaawansowane) albo wrzuć filmik.'],
@@ -367,10 +379,14 @@ const state = {
   stan: null,            // /api/stan -> "stan" (null = brak aktywnej persony)
   modelki: [], aktywna: null, saldo: {}, autopilot: {}, zadanie: {}, konta: {}, dziennikOstatni: null, wersja: '',
   autopilotStan: {},     // hamulec aktywnej persony: {bledy_z_rzedu, pauza, pauza_od}
-  telegram: {},          // bot Telegram: {skonfigurowany, sparowany, czat}
+  telegram: {},          // bot Telegram: {skonfigurowany, sparowany, czat, czaty: [{nazwa, glowny}]}
   dzis: null,            // podsumowanie dnia: {rolki, zdjecia, bledy, kredyty{...}}
+  foldery: null, pulpit: '',   // foldery aktywnej persony na pulpicie {wrzutnia, gotowe, zdjecia} + folder ROLKI AI
+  stroje: [],            // zdjęcia strojów persony (z /api/ustawienia) – wybór stroju na stronie Zdjęcia
+  nsfw: null,            // /api/nsfw aktywnej persony (Pomoc → Filtr NSFW)
+  zamkniety: false,      // panel zamknięty z panelu („Zamknij program”)
   strona: 'start', sekcja: null,
-  diagnoza: [], diagnozaCzas: 0, pkOtwarte: null, pkKlucz: '',   // „Pierwsze kroki” (/api/diagnoza); pkOtwarte: null = automatycznie
+  diagnoza: [], diagnozaCzas: 0, diagnozaStan: 'czekam', pkOtwarte: null, pkKlucz: '',   // „Pierwsze kroki” (/api/diagnoza); pkOtwarte: null = automatycznie
   statystyki: null, statystykiCzas: 0,                            // /api/statystyki?dni=14 (Start + Historia)
   profile: {},           // slug -> profil zapisany w tej sesji (API nie ma GET profilu)
   personyHtml: '',
@@ -393,6 +409,7 @@ const state = {
 function wyczyscCachePersony() {
   state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear(); state.podglady.clear();
   state.zdjecia = []; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
+  state.stroje = []; state.nsfw = null;
   state.lancuch.wynik = null;
 }
 
@@ -448,6 +465,15 @@ function pokazStrone(nazwa) {
   $('#brak-persony').hidden = !!state.stan || nazwa === 'pomoc';
   if (state.stan || nazwa === 'pomoc') ladujStrone(nazwa);
   if (nazwa === 'ustawienia' && state.sekcja) otworzSekcje(state.sekcja);
+  if (nazwa === 'pomoc' && state.sekcja) otworzPomoc(state.sekcja);
+}
+
+// #pomoc/<id> otwiera jedno pytanie Pomocy (np. #pomoc/nsfw z karty odrzuconej rolki)
+function otworzPomoc(id) {
+  const d = $('#pomoc-' + id);
+  if (!d) return;
+  d.open = true;
+  requestAnimationFrame(() => d.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function otworzSekcje(id) {
@@ -484,10 +510,14 @@ async function odswiez(wymusSaldo = false) {
     state.autopilotStan = d.autopilot_stan || {};
     state.telegram = d.telegram || {};
     state.dzis = d.dzis || null;
+    state.foldery = d.foldery || null;
+    state.pulpit = d.pulpit || '';
     state.dziennikOstatni = d.dziennik_ostatni || null;
     state.wersja = d.wersja || '';
     renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan(); renderHamulecRolek();
-    $('#wersja').textContent = state.wersja ? `rolki-ai v${state.wersja}` : '';
+    const wer = $('#wersja');
+    const werHtml = state.wersja ? `<span class="ikona">${ikona('ksiezyc')}</span><span>Rolki AI v${esc(state.wersja)}</span>` : '';
+    if (wer.innerHTML !== werHtml) wer.innerHTML = werHtml;
     const jest = !!state.stan;
     $('#brak-persony').hidden = jest || state.strona === 'pomoc';
     $('#strony').hidden = !jest;
@@ -503,7 +533,30 @@ async function odswiez(wymusSaldo = false) {
     state.odswiezanie = false;
   }
 }
-function polaczenie(ok) { $('#offline').hidden = ok; }
+function polaczenie(ok) {
+  // po „Zamknij program” pasek u góry mówi, jak włączyć panel ponownie – nie nadpisujemy go zwykłym „nie odpowiada”
+  if (state.zamkniety) { $('#offline').hidden = false; return; }
+  $('#offline').hidden = ok;
+}
+
+// Lewy dolny róg: „Zamknij program” – panel może działać w tle (skrót Rolki AI bez okna konsoli), więc trzeba go móc wyłączyć stąd.
+async function zamknijPanel() {
+  const w = await potwierdz({
+    tytul: 'Zamknąć program?',
+    tresc: '<p>Panel i autopilot przestaną działać, dopóki nie uruchomisz programu ponownie – skrótem <b>Rolki AI</b> na pulpicie.</p>' + (state.zadanie && state.zadanie.trwa ? '<p class="dialog-uwaga">Coś się jeszcze robi – zamknięcie to przerwie.</p>' : ''),
+    ok: 'Zamknij program', klasa: 'btn-zly',
+  });
+  if (!w) return;
+  try { await api('/api/zamknij', 'POST', {}); }
+  catch (e) { if (e.status !== 0) { bladToast(e); return; } }
+  state.zamkniety = true;
+  stopKonsoli();
+  const off = $('#offline');
+  off.innerHTML = 'Panel zamknięty. Uruchom ponownie skrótem <b>Rolki AI</b> na pulpicie.';
+  off.hidden = false;
+  toast('Panel zamknięty. Uruchom ponownie skrótem Rolki AI.', 'info');
+  window.scrollTo({ top: 0 });
+}
 function nazwaPersony(slug) { const m = state.modelki.find(x => x.slug === slug); return m ? (m.nazwa || m.slug) : slug; }
 
 function renderPersonaSelect() {
@@ -734,11 +787,38 @@ function renderStart() {
   $('#folder-gotowe').textContent = s.gotowe_dir || '—';
   // tani podgląd (Seedance draft) jest tylko u Higgsfield
   $('#krok2-podglad-link').hidden = (u.dostawca || 'higgsfield') !== 'higgsfield';
+  renderGdzie();
   renderPersony();
   renderPierwszeKroki();
   renderKrok2();
   renderAutopilot();
   renderDzis();
+}
+
+// Foldery aktywnej persony (pulpit): /api/stan -> foldery {wrzutnia, gotowe, zdjecia}; gdy ich nie ma – ścieżki ze stanu persony.
+function folderyPersony() {
+  const s = state.stan || {};
+  const f = state.foldery || {};
+  return { wrzutnia: f.wrzutnia || s.wrzutnia || '', gotowe: f.gotowe || s.gotowe_dir || '', zdjecia: f.zdjecia || '' };
+}
+
+// Karta „Gdzie wrzucam, gdzie odbieram” na Starcie.
+function renderGdzie() {
+  const f = folderyPersony();
+  const ust = (el, v) => { if (el && el.textContent !== (v || '—')) el.textContent = v || '—'; };
+  ust($('#gdzie-wrzutnia'), f.wrzutnia);
+  ust($('#gdzie-gotowe'), f.gotowe);
+  ust($('#gdzie-zdjecia'), f.zdjecia);
+  ust($('#gdzie-pulpit'), state.pulpit || 'ROLKI AI');
+}
+
+const NAZWY_FOLDEROW = { wrzutnia: 'tu wrzucasz rolki', gotowe: 'tu rolki zrobione', zdjecia: 'tu zdjęcia zrobione', pulpit: 'ROLKI AI (pulpit)' };
+// „Otwórz folder” -> POST /api/folder/otworz (Eksplorator Windows). Folder innej persony: najpierw przełączamy personę.
+async function otworzFolder(co, slug) {
+  co = co || 'wrzutnia';
+  if (slug && slug !== state.aktywna) await zmienPersone(slug);
+  const d = await api('/api/folder/otworz', 'POST', { co });
+  toast(`Otwieram folder „${NAZWY_FOLDEROW[co] || co}”${d.sciezka ? `: ${nazwaPliku(d.sciezka)}` : ''}.`, 'info');
 }
 
 // Sygnalizator na Starcie: czerwony = coś blokuje robienie rolek, pomarańczowy = coś wymaga uwagi, zielony = wszystko gra.
@@ -931,7 +1011,7 @@ function renderAutopilot() {
   const chk = $('#autopilot-przelacznik');
   const dlaPersony = !!a.wlaczony && !!u.autopilot;
   if (document.activeElement !== chk) chk.checked = dlaPersony;
-  $('#autopilot-opis').textContent = `Co ${u.autopilot_co_minut || 15} min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, dopasuje usta, jeśli jest głos, i zrobi zdjęcia. Pilnuje limitów kredytów.`;
+  $('#autopilot-opis').textContent = `Co ${u.autopilot_co_minut || 15} min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, zrobi zdjęcia, dobierze podpisy i wyśle gotowe na Telegram. Pilnuje limitów kredytów. Ust nie dopasowuje – lipsync robisz ręcznie.`;
   let txt, klasa = '';
   if (a.trwa) {
     txt = `teraz pracuje: ${ETAPY_AUTOPILOTA[a.etap] || 'sprawdza, co jest do zrobienia'}${a.modelka ? ` (${a.modelka})` : ''}`; klasa = 'praca';
@@ -951,9 +1031,10 @@ function renderAutopilot() {
   const t = state.telegram || {};
   const tel = $('#autopilot-telefon');
   if (t.skonfigurowany && t.sparowany) {
+    const konto = kontoTelegram(u.telegram_czat);
     tel.innerHTML = u.telegram_wysylaj === false
       ? `${ikona('telefon')}<span>Telefon podłączony — wysyłanie gotowych rolek jest wyłączone (<a href="#ustawienia/autopilot">Ustawienia → Autopilot</a>)</span>`
-      : `${ikona('telefon')}<span>Telefon podłączony — gotowe rolki lecą na Telegram</span>`;
+      : `${ikona('telefon')}<span>Telefon podłączony — gotowe rolki lecą na Telegram${konto ? ` (konto <b>${esc(konto)}</b>)` : ''}</span>`;
     tel.className = 'autopilot-telefon ok';
   } else if (t.skonfigurowany) {
     tel.innerHTML = `${ikona('telefon')}<a href="#ustawienia/konta">Telefon: napisz /start do bota</a>`;
@@ -997,6 +1078,13 @@ function renderWpisy(ul, wpisy, pusty = 'Jeszcze nic się nie wydarzyło.') {
     : `<li class="wpis"><span class="kropka"></span><span class="wpis-czas"></span><span class="wpis-tekst muted">${esc(pusty)}</span></li>`;
 }
 
+// „@huy7128” z ustawienia telegram_czat (dodaje @, gdy user wpisał samą nazwę; id liczbowe zostaje bez @)
+function kontoTelegram(v) {
+  const k = String(v || '').trim();
+  if (!k) return '';
+  return k.startsWith('@') || /^-?\d+$/.test(k) ? k : '@' + k;
+}
+
 // ---------- Start: pasek person (gdy jest więcej niż jedna) ----------
 function renderPersony() {
   const el = $('#persony-pasek');
@@ -1008,8 +1096,10 @@ function renderPersony() {
     const aktywna = m.slug === state.aktywna;
     const nazwa = m.nazwa || m.slug;
     const dzis = Number(m.rolki_dzis) || 0;
+    const konto = kontoTelegram(m.telegram_czat);
     const odznaki = (m.autopilot ? '<span class="persona-odznaka" title="Autopilot obsługuje tę personę">autopilot</span>' : '')
-      + (ap.pauza ? `<span class="persona-odznaka stop" title="${esc('Autopilot zatrzymał się: ' + ap.pauza)}">STOP</span>` : '');
+      + (ap.pauza ? `<span class="persona-odznaka stop" title="${esc('Autopilot zatrzymał się: ' + ap.pauza)}">STOP</span>` : '')
+      + (konto ? `<span class="persona-odznaka tg" title="${esc('Gotowe rolki tej persony lecą na konto Telegram ' + konto)}">→ ${esc(konto)}</span>` : '');
     return `<button type="button" class="persona-karta${aktywna ? ' aktywna' : ''}" data-akcja="persona-wybierz" data-slug="${esc(m.slug)}" aria-pressed="${aktywna ? 'true' : 'false'}" title="${aktywna ? 'To jest aktywna persona' : 'Przełącz na ' + esc(nazwa)}">
       ${avatarHtml(m, 'persona-karta-avatar')}
       <span class="persona-karta-tresc">
@@ -1033,6 +1123,9 @@ const TLUMACZENIA_DIAGNOZY = [
   [/najwyzszy numer musi byc rowny liczbie zdjec/g, 'najwyższy numer musi być równy liczbie zdjęć'],
   [/nie podlaczony \(opcjonalnie\)/g, 'nie podłączony'],
   [/token jest, napisz \/start do bota/g, 'token jest – napisz /start do bota na telefonie'],
+  [/nie napisal jeszcze \/start do bota/g, 'musi najpierw napisać /start do bota (Telegram nie pozwala botom pisać pierwszym)'],
+  [/bot Telegram nie jest podlaczony/g, 'bot Telegram nie jest podłączony – wklej token w Ustawienia → Konta'],
+  [/nie moge utworzyc folderow/g, 'nie mogę utworzyć folderów'],
 ];
 function poLudzkuDiagnoza(t) {
   t = String(t || '');
@@ -1045,8 +1138,13 @@ async function ladujDiagnoze(wymus = false) {
   state.diagnozaCzas = Date.now();
   let d;
   try { d = await api('/api/diagnoza'); }
-  catch (e) { return; }   // lista kontrolna to dodatek – Start działa bez niej
+  catch (e) {
+    // lista kontrolna to dodatek – Start działa bez niej; karta mówi tylko, że nie udało się sprawdzić
+    if (!state.diagnoza.length) { state.diagnozaStan = 'blad'; if (state.strona === 'start') renderPierwszeKroki(); }
+    return;
+  }
   state.diagnoza = Array.isArray(d.diagnoza) ? d.diagnoza : [];
+  state.diagnozaStan = 'ok';
   if (state.strona === 'start') renderPierwszeKroki();
 }
 // Po zapisie ustawień / kluczy / zdjęć persony lista kontrolna ma się odświeżyć od razu.
@@ -1081,22 +1179,63 @@ function wierszDiagnozy(w) {
     if (ok === true) tekst = 'podłączony';
     else if (ok === null || ok === undefined) { tekst = 'nie podłączony'; akcja = link('Podłącz telefon', '#ustawienia/konta', false); }
     else { tekst = info; akcja = link('Otwórz Konta', '#ustawienia/konta', true); }
+  } else if (co.startsWith('foldery ')) {
+    // foldery persony na pulpicie: „wrzucasz tu … / gotowe tu …” + „Otwórz” (folder innej persony = najpierw przełącz personę)
+    const slug = co.slice(8).trim();
+    nazwa = `Foldery ${nazwaPersony(slug)}`;
+    if (ok && w.wrzutnia) {
+      const dodatek = `<span class="pk-foldery"><span><em>wrzucasz tu:</em> <code title="${esc(w.wrzutnia)}">${esc(krotkaSciezka(w.wrzutnia))}</code></span><span><em>gotowe tu:</em> <code title="${esc(w.gotowe || '')}">${esc(krotkaSciezka(w.gotowe || ''))}</code></span></span>`;
+      akcja = `<button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="wrzutnia" data-slug="${esc(slug)}">${ikona('folder')}Otwórz „wrzucasz”</button>`
+        + `<button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe" data-slug="${esc(slug)}">${ikona('folder')}Otwórz „gotowe”</button>`;
+      return wierszHtml(co, ok, 'ok', nazwa, '', dodatek, akcja, '');
+    }
+    tekst = info || 'nie udało się utworzyć folderów';
+    akcja = `<button class="btn btn-maly btn-glowny" type="button" data-akcja="pk-persona" data-slug="${esc(slug)}" data-hash="#ustawienia/foldery">Sprawdź foldery</button>`;
+  } else if (co.startsWith('telefon ')) {
+    // osobne konto Telegram persony (ustawienie telegram_czat) – musi raz napisać /start do bota
+    const slug = co.slice(8).trim();
+    nazwa = `Telegram ${nazwaPersony(slug)}`;
+    const m = String(w.info || '').match(/->\s*(\S+)/);
+    if (ok) tekst = `gotowe rolki lecą na ${m ? m[1] : 'osobne konto'}`;
+    else {
+      tekst = info;
+      akcja = `<button class="btn btn-maly btn-glowny" type="button" data-akcja="pk-persona" data-slug="${esc(slug)}" data-hash="#ustawienia/persona">Zobacz konto</button>`;
+    }
   } else {
     tekst = info;
   }
   const surowe = state.pelny && w.info && w.info !== tekst ? `<small>${esc(w.info)}</small>` : '';
+  return wierszHtml(co, ok, klasa, nazwa, tekst, '', akcja, surowe);
+}
+
+function wierszHtml(co, ok, klasa, nazwa, tekst, dodatek, akcja, surowe) {
   return `<div class="pk-wiersz ${klasa}" data-co="${esc(co)}" data-ok="${ok === true ? '1' : (ok === false ? '0' : '')}">
     <span class="pk-kropka" aria-hidden="true"></span>
-    <div class="pk-tekst"><b>${esc(nazwa)}${tekst ? ':' : ''}</b>${tekst ? `<span>${esc(tekst)}</span>` : ''}${klasa === 'opcja' ? '<span class="pk-opcja">opcjonalnie</span>' : ''}${surowe}</div>
+    <div class="pk-tekst"><b>${esc(nazwa)}${tekst ? ':' : ''}</b>${tekst ? `<span>${esc(tekst)}</span>` : ''}${klasa === 'opcja' ? '<span class="pk-opcja">opcjonalnie</span>' : ''}${dodatek || ''}${surowe}</div>
     <div class="pk-akcja">${akcja}</div>
   </div>`;
 }
 
+// Karta jest widoczna od razu (nagłówek zawsze „Pierwsze kroki”); pigułka obok mówi: sprawdzam… / N z M gotowe / wszystko gotowe ✓.
 function renderPierwszeKroki() {
   const karta = $('#pierwsze-kroki');
   if (!karta) return;
+  if (!state.stan) { karta.hidden = true; return; }
+  karta.hidden = false;
   const lista = state.diagnoza || [];
-  if (!state.stan || !lista.length) { karta.hidden = true; return; }
+  const pill = $('#pk-pill'), licznik = $('#pk-licznik'), ul = $('#pk-lista'), btn = $('#pk-przelacz'), opis = $('#pk-opis');
+  if (!lista.length) {
+    const blad = state.diagnozaStan === 'blad';
+    pill.textContent = blad ? 'nie udało się sprawdzić' : 'sprawdzam…';
+    pill.className = 'pk-pill ' + (blad ? 'uwaga' : 'czekam');
+    licznik.textContent = '';
+    karta.classList.remove('gotowe');
+    btn.hidden = true; opis.hidden = false;
+    const html = `<div class="pk-wiersz ${blad ? 'zle' : 'czekam'}"><span class="pk-kropka" aria-hidden="true"></span><div class="pk-tekst"><span>${blad ? 'Nie udało się sprawdzić, czy wszystko jest na miejscu. Spróbuję za chwilę – jeśli to nie minie, zrób zrzut ekranu i wyślij go Claude\'owi.' : 'Sprawdzam, czy wszystko jest na miejscu (programy, konto, zdjęcia persony, foldery)…'}</span></div></div>`;
+    if (ul.innerHTML !== html) ul.innerHTML = html;
+    ul.hidden = false;
+    return;
+  }
   // wymagane = wszystko poza „opcjonalnie” (ok: null) i brakującym Media Tool (nie blokuje – rolki będą tylko bez prania)
   const wymagane = lista.filter(w => w.ok !== null && w.ok !== undefined && !(w.co === 'mediatool' && w.ok === false));
   const gotowe = wymagane.filter(w => w.ok === true);
@@ -1105,16 +1244,16 @@ function renderPierwszeKroki() {
   const klucz = lista.filter(w => w.ok === false).map(w => w.co).join('|');
   if (klucz !== state.pkKlucz) { state.pkKlucz = klucz; state.pkOtwarte = null; }
   const otwarte = state.pkOtwarte === null ? !komplet : state.pkOtwarte;
-  karta.hidden = false;
   karta.classList.toggle('gotowe', komplet);
-  $('#pk-tytul').textContent = komplet ? 'Wszystko ustawione ✓' : 'Pierwsze kroki';
+  pill.textContent = komplet ? 'wszystko gotowe ✓' : `${gotowe.length} z ${wymagane.length} gotowe`;
+  pill.className = 'pk-pill ' + (komplet ? 'ok' : 'uwaga');
   const opc = lista.length - wymagane.length;
-  $('#pk-licznik').textContent = `${gotowe.length} z ${wymagane.length} gotowe` + (opc ? ` · ${opc} ${odmiana(opc, 'opcjonalny', 'opcjonalne', 'opcjonalnych')}` : '');
-  const btn = $('#pk-przelacz');
+  licznik.textContent = opc ? `· ${opc} ${odmiana(opc, 'opcjonalny', 'opcjonalne', 'opcjonalnych')}` : '';
+  opis.hidden = komplet;
+  btn.hidden = false;
   btn.textContent = otwarte ? 'zwiń' : 'pokaż';
   btn.setAttribute('aria-expanded', String(otwarte));
   const html = lista.map(wierszDiagnozy).join('');
-  const ul = $('#pk-lista');
   if (ul.innerHTML !== html) ul.innerHTML = html;
   ul.hidden = !otwarte;
 }
@@ -1238,8 +1377,8 @@ function renderStatystyki(blad = null) {
       return;
     }
     const dni = s.dni || [], r = s.razem || {}, kr = r.kredyty || {};
-    const rolki = Number(r.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, bledy = Number(r.bledy) || 0;
-    if (skrot) skrot.textContent = `${rolki} ${odmiana(rolki, 'rolka', 'rolki', 'rolek')} · ${kredytow(hf)}${bledy ? ` · ${bledy} ${odmiana(bledy, 'problem', 'problemy', 'problemów')}` : ''}`;
+    const rolki = Number(r.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, bledy = Number(r.bledy) || 0, nsfw = Number(r.nsfw) || 0;
+    if (skrot) skrot.textContent = `${rolki} ${odmiana(rolki, 'rolka', 'rolki', 'rolek')} · ${kredytow(hf)}${bledy ? ` · ${bledy} ${odmiana(bledy, 'problem', 'problemy', 'problemów')}` : ''}${nsfw ? ` · filtr NSFW: ${nsfw}` : ''}`;
     // szerokość: gdy karta jest zwinięta, treść ma 0 px – bierzemy szerokość karty minus jej padding
     const szer = Math.max(300, Math.round(kont.clientWidth || (det.clientWidth - 48) || 600));
     const klucz = JSON.stringify([dni, r, szer, state.pelny]);
@@ -1248,7 +1387,7 @@ function renderStatystyki(blad = null) {
     const liczby = `<div class="staty-liczby">
       <div class="dzis-poz" data-staty-rolki><b>${esc(liczba(rolki))}</b><span>${esc(odmiana(rolki, 'rolka', 'rolki', 'rolek'))} razem</span></div>
       <div class="dzis-poz" data-staty-kredyty><b>${esc(liczba(hf))}</b><span>${esc(odmiana(hf, 'kredyt', 'kredyty', 'kredytów'))} Higgsfield</span>${yap > 0 ? `<small>+ ${esc(liczba(yap))} yapper</small>` : ''}</div>
-      <div class="dzis-poz${bledy ? ' zle' : ''}" data-staty-problemy><b>${esc(liczba(bledy))}</b><span>${esc(odmiana(bledy, 'problem', 'problemy', 'problemów'))}</span></div>
+      <div class="dzis-poz${bledy ? ' zle' : ''}" data-staty-problemy><b>${esc(liczba(bledy))}</b><span>${esc(odmiana(bledy, 'problem', 'problemy', 'problemów'))}</span>${nsfw ? `<small title="Rolki odrzucone przez filtr treści (NSFW) w ostatnich 14 dniach – kredyty wróciły">odrzucone przez filtr: ${esc(liczba(nsfw))}</small>` : ''}</div>
     </div>`;
     const pusto = !dni.some(d => (Number(d.rolki) || 0) || (Number((d.kredyty || {}).higgsfield) || 0) || (Number(d.bledy) || 0) || (Number(d.zdjecia) || 0));
     const wykres = pusto
@@ -1262,8 +1401,64 @@ function renderStatystyki(blad = null) {
 function renderPomoc() {
   const s = state.stan;
   const brak = 'dodaj personę – wtedy pokażę ścieżkę';
-  $('#pomoc-wrzutnia').textContent = s && s.wrzutnia ? s.wrzutnia : brak;
-  $('#pomoc-gotowe').textContent = s && s.gotowe_dir ? s.gotowe_dir : brak;
+  const f = folderyPersony();
+  $('#pomoc-wrzutnia').textContent = s && f.wrzutnia ? f.wrzutnia : brak;
+  $('#pomoc-gotowe').textContent = s && f.gotowe ? f.gotowe : brak;
+  $('#pomoc-zdjecia').textContent = s && f.zdjecia ? f.zdjecia : brak;
+  $$('#pomoc-gdzie [data-akcja="otworz-folder"]').forEach(b => { b.disabled = !s; });
+  renderNsfw();
+  if (s) ladujNsfw().catch(() => {});
+}
+
+// Pomoc → „Filtr NSFW”: /api/nsfw aktywnej persony (ile odrzuceń, ryzykowne słowa w promptach, wskazówki).
+async function ladujNsfw() {
+  const d = await api('/api/nsfw');
+  state.nsfw = d;
+  renderNsfw();
+}
+
+const NAZWY_PROMPTOW_NSFW = { A: 'Prompt A (strój z filmu)', B: 'Prompt B (strój ze zdjęcia)', zdjecia: 'Prompty zdjęć' };
+// Wskazówki z /api/nsfw przychodzą bez polskich znaków (backend) – tu dopisujemy ogonki. Kolejność ma znaczenie (zdjecia przed zdjec).
+const POLSKIE_WSKAZOWKI = [
+  [/odrzucil/g, 'odrzucił'], [/wracaja/g, 'wracają'], [/\bsa\b/g, 'są'], [/ktore/g, 'które'], [/blokowac/g, 'blokować'],
+  [/Zamien/g, 'Zamień'], [/materialu/g, 'materiału'], [/zdjecia/g, 'zdjęcia'], [/zdjeciu/g, 'zdjęciu'], [/zdjec\b/g, 'zdjęć'],
+  [/strojow/g, 'strojów'], [/stroj z filmu/g, 'strój z filmu'], [/stroj ze zdj/g, 'strój ze zdj'], [/skapy stroj/g, 'skąpy strój'],
+  [/przeswity/g, 'prześwity'], [/duzo skory/g, 'dużo skóry'], [/odrzucaja/g, 'odrzucają'], [/CALA rolke/g, 'CAŁĄ rolkę'],
+  [/odwazniejsze/g, 'odważniejsze'], [/zwyklym/g, 'zwykłym'], [/kapielowego/g, 'kąpielowego'], [/ida do kazdej/g, 'idą do każdej'],
+  [/wiecej/g, 'więcej'], [/\bwiec\b/g, 'więc'], [/zrodlowy/g, 'źródłowy'], [/lozko/g, 'łóżko'], [/\bbron\b/g, 'broń'],
+  [/Sprobuj/g, 'Spróbuj'], [/krotszego ujecia/g, 'krótszego ujęcia'], [/\(potnij w panelu: dziel_dlugie\)/g, '(Ustawienia → Autopilot → „potnij na kawałki po 30 s”)'],
+  [/Jesli masz pewnosc/g, 'Jeśli masz pewność'], [/pomylka/g, 'pomyłka'], [/oddaja/g, 'oddają'], [/cofaja/g, 'cofają'], [/zglos/g, 'zgłoś'],
+  [/dwoch odrzuceniach z rzedu/g, 'dwóch odrzuceniach z rzędu'], [/probowac/g, 'próbować'], [/jedna powtorka/g, 'jedna powtórka'],
+  [/\bslowa\b/g, 'słowa'], [/tresci/g, 'treści'], [/\bWYNIKU\b/g, 'WYNIKU'],
+];
+function poLudzkuWskazowka(t) {
+  t = String(t || '');
+  POLSKIE_WSKAZOWKI.forEach(([re, z]) => { t = t.replace(re, z); });
+  return t;
+}
+
+function renderNsfw() {
+  const el = $('#nsfw-tresc');
+  if (!el) return;
+  if (!state.stan) { el.innerHTML = '<p class="muted">Dodaj personę – wtedy sprawdzę jej prompty i odrzucone rolki.</p>'; return; }
+  const n = state.nsfw;
+  if (!n) { el.innerHTML = '<p class="muted">Sprawdzam odrzucone rolki tej persony…</p>'; return; }
+  const slowa = n.slowa || {};
+  const razem = Number(n.odrzucone) || 0, ostatnio = Number(n.odrzucone_ostatnio) || 0, dni = Number(n.dni) || 14;
+  const liczby = `<div class="nsfw-liczby">
+    <div class="dzis-poz${ostatnio ? ' zle' : ''}"><b>${esc(liczba(ostatnio))}</b><span>${esc(odmiana(ostatnio, 'odrzucona', 'odrzucone', 'odrzuconych'))} w ${dni} dni</span></div>
+    <div class="dzis-poz"><b>${esc(liczba(razem))}</b><span>razem (${esc(nazwaPersony(state.aktywna) || 'persona')})</span></div>
+  </div>`;
+  const wiersze = ['A', 'B', 'zdjecia'].map(k => {
+    const lista = Array.isArray(slowa[k]) ? slowa[k] : [];
+    return `<div class="nsfw-slowa-wiersz"><b>${esc(NAZWY_PROMPTOW_NSFW[k])}:</b>${lista.length ? lista.map(s => `<span class="slowo">${esc(s)}</span>`).join('') : '<span class="slowo czyste">bez ryzykownych słów ✓</span>'}</div>`;
+  }).join('');
+  const wsk = Array.isArray(n.wskazowki) ? n.wskazowki : [];
+  el.innerHTML = `${liczby}
+    <p><b>Ryzykowne słowa w Twoich promptach</b> (filtr lubi je blokować – zamień na neutralne, np. „black top” zamiast „mesh top”):</p>
+    <div class="nsfw-slowa">${wiersze}</div>
+    ${wsk.length ? `<p><b>Co pomaga:</b></p><ul class="nsfw-wskazowki">${wsk.map(w => `<li>${esc(poLudzkuWskazowka(w))}</li>`).join('')}</ul>` : ''}
+    <p class="muted">Prompty zmienisz w <a href="#ustawienia/prompty">Ustawienia → Prompty</a>, zdjęcia strojów w <a href="#ustawienia/persona">Ustawienia → Persona</a>. Odrzucone rolki znajdziesz w <a href="#rolki?status=blad">Rolki → nie wyszły</a>.</p>`;
 }
 
 // ---------- Rolki ----------
@@ -1381,7 +1576,13 @@ function kartaRolki(p) {
   if (telefon && p.telegram_wyslano) menu.push(przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon jeszcze raz`));
   menu.push(przyciskRolki('usun-pomysl', id, 'Usuń', 'btn-zly'));
   let powod = '';
-  if (status === 'blad' && p.notatki) powod = `<div class="rolka-powod"><b>Dlaczego:</b> ${esc(prostyBlad(p.notatki))}${state.pelny ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
+  const filtr = status === 'blad' ? (p.powod === 'nsfw' || p.powod === 'ip' ? p.powod : (p.powod ? null : (/nsfw/i.test(p.notatki || '') ? 'nsfw' : (/ip_detected/i.test(p.notatki || '') ? 'ip' : null)))) : null;
+  if (filtr === 'nsfw') {
+    // odrzucone przez filtr treści: wyraźna plakietka + jedno zdanie + link do Pomocy (czemu i co z tym zrobić)
+    powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}odrzucone przez filtr treści (NSFW)</span><span>Filtr Higgsfield uznał filmik, zdjęcie stroju albo słowo w prompcie za ryzykowne – nie patrzy na kontekst. Kredyty wróciły. <a href="#pomoc/nsfw">Dlaczego? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
+  } else if (filtr === 'ip') {
+    powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}model wykrył znaną postać/markę</span><span>W filmiku, na zdjęciu albo w prompcie jest coś, co wygląda jak znana osoba, logo albo marka. Wrzuć inny fragment albo zasłoń logo. <a href="#pomoc/niewyszla">Co zrobić? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
+  } else if (status === 'blad' && p.notatki) powod = `<div class="rolka-powod"><b>Dlaczego:</b> ${esc(prostyBlad(p.notatki))}${state.pelny ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
   else if (p.notatki && state.pelny) powod = `<div class="rolka-meta">${esc(p.notatki)}</div>`;
   return `<article class="rolka" data-id="${id}">
     ${miniatura}
@@ -1519,9 +1720,36 @@ async function ladujZdjecia() {
   $('#form-zdjecia').hidden = !u.zdjecia_model;
   $('#zdjecia-opis-modelu').textContent = u.zdjecia_model ? `Każde zdjęcie kosztuje kredyty Higgsfield (model: ${u.zdjecia_model}).` : 'Każde zdjęcie kosztuje kredyty Higgsfield.';
   $('#zdjecia-dzis').textContent = `dziś zrobione: ${s.zdjecia_dzis !== undefined ? s.zdjecia_dzis : 0}${u.zdjecia_dziennie ? ` z ${u.zdjecia_dziennie} (autopilot)` : ''}`;
-  const d = await api('/api/zdjecia');
-  state.zdjecia = d.zdjecia || [];
+  const [d, ust] = await Promise.allSettled([api('/api/zdjecia'), state.ustawieniaPelne ? Promise.resolve(state.ustawieniaPelne) : api('/api/ustawienia')]);
+  if (ust.status === 'fulfilled') { state.ustawieniaPelne = ust.value; state.stroje = ust.value.stroje || []; }
+  renderStrojWybor();
+  if (d.status === 'rejected') throw d.reason;
+  state.zdjecia = d.value.zdjecia || [];
   renderZdjecia();
+}
+
+// Zdjęcia → „Strój”: Automatycznie (wg ustawienia zdjecia_stroje) / Bez stroju / Następny strój / konkretny plik ze stroje/.
+function renderStrojWybor() {
+  const sel = $('#zd-stroj');
+  if (!sel) return;
+  const u = (state.stan && state.stan.ustawienia) || {};
+  const biez = sel.value;
+  const auto = state.stroje.length && u.zdjecia_stroje !== false ? 'Automatycznie (co drugie zdjęcie w stroju)' : 'Automatycznie (bez stroju)';
+  sel.innerHTML = `<option value="">${esc(auto)}</option><option value="bez">Bez stroju</option>`
+    + (state.stroje.length ? '<option value="auto">Następny strój z listy</option>' + state.stroje.map(s => `<option value="${esc(s.nazwa)}">strój: ${esc(s.nazwa)}</option>`).join('') : '');
+  if (biez && Array.from(sel.options).some(o => o.value === biez)) sel.value = biez;
+  $('#zd-stroj-info').textContent = state.stroje.length
+    ? `${state.stroje.length} ${odmiana(state.stroje.length, 'strój', 'stroje', 'strojów')} w folderze Stroje. Zdjęcie stroju leci do modelu jako ostatni obraz.`
+    : 'Nie masz jeszcze zdjęć strojów – dodasz je w Ustawienia → Persona → Stroje.';
+  renderStrojMini();
+}
+
+function renderStrojMini() {
+  const sel = $('#zd-stroj'), img = $('#zd-stroj-mini');
+  if (!sel || !img) return;
+  const s = state.stroje.find(x => x.nazwa === sel.value);
+  img.hidden = !s;
+  if (s) { img.src = s.url || ''; img.alt = s.nazwa; img.title = s.nazwa; }
 }
 
 function renderZdjecia() {
@@ -1537,6 +1765,7 @@ function renderZdjecia() {
     <figcaption class="zdjecie-tresc">
       <div class="zdjecie-stopka"><span class="status ${kolorStatusu(z.status)}"><span class="kropka ${kolorStatusu(z.status)}"></span>${esc(slowoStatusu(z.status, 'zdjecie'))}</span><span class="muted">${z.koszt !== null && z.koszt !== undefined ? esc(kredytow(z.koszt)) : ''}</span></div>
       <div class="zdjecie-prompt" title="${esc(z.prompt)}">${esc(z.prompt || '')}</div>
+      ${z.stroj ? `<span class="zdjecie-stroj" title="${esc(z.stroj)}">${ikona('stroj')}<span>strój: ${esc(bezRozszerzenia(nazwaPliku(z.stroj)))}</span></span>` : ''}
       ${z.notatki ? `<div class="muted">${esc(state.pelny ? z.notatki : prostyBlad(z.notatki))}</div>` : ''}
       <div class="zdjecie-stopka"><span class="muted">${esc(formatCzas(z.utworzono))}${state.pelny ? ` · #${Number(z.id)}` : ''}</span><span class="rzad" style="gap:4px">${z.prompt ? `<button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(z.prompt)}" title="kopiuj opis">${ikona('kopiuj')}</button>` : ''}<button class="btn btn-maly btn-zly" type="button" data-akcja="usun-zdjecie" data-id="${Number(z.id)}">Usuń</button></span></div>
     </figcaption>
@@ -1548,14 +1777,17 @@ async function zrobZdjecia() {
   if (!u.zdjecia_model) { toast('Najpierw wybierz model zdjęć w Ustawienia → Zdjęcia.', 'uwaga'); return; }
   const ile = Math.max(1, Math.min(20, Number($('#zd-ile').value) || 1));
   const prompt = $('#zd-prompt').value.trim();
+  const stroj = ($('#zd-stroj') && $('#zd-stroj').value) || '';
+  const opisStroju = stroj === 'bez' ? 'Bez stroju.' : (stroj === 'auto' ? 'W następnym stroju z listy.' : (stroj ? `W stroju <b>${esc(stroj)}</b>.` : ''));
   const w = await potwierdz({
     tytul: `Zrobić ${ile} ${odmiana(ile, 'zdjęcie', 'zdjęcia', 'zdjęć')}?`,
-    tresc: `<p>${prompt ? `Opis: „${esc(prompt)}”.` : 'Opis weźmie się po kolei z listy w Ustawienia → Zdjęcia.'}${state.pelny ? ` Model: <b>${esc(u.zdjecia_model)}</b>.` : ''}</p><p class="dialog-uwaga">To kosztuje kredyty.</p>`,
+    tresc: `<p>${prompt ? `Opis: „${esc(prompt)}”.` : 'Opis weźmie się po kolei z listy w Ustawienia → Zdjęcia.'} ${opisStroju}${state.pelny ? ` Model: <b>${esc(u.zdjecia_model)}</b>.` : ''}</p><p class="dialog-uwaga">To kosztuje kredyty.</p>`,
     ok: 'Zrób',
   });
   if (!w) return;
   const dane = { typ: 'zdjecia', ile };
   if (prompt) dane.prompt = prompt;
+  if (stroj) dane.stroj = stroj;   // puste = automatycznie (wg ustawienia zdjecia_stroje)
   await akcja(dane, 'robię zdjęcia');
 }
 
@@ -1633,7 +1865,7 @@ function renderLipsyncHistoria() {
   const kont = $('#lipsync-historia');
   const lista = state.lipsync.slice().sort((a, b) => b.id - a.id);
   if (!lista.length) {
-    kont.innerHTML = '<div class="pusto cicho"><b>Jeszcze nic nie dopasowywałem</b><span>Wybierz rolkę i głos powyżej. Autopilot zrobi to sam, gdy obok filmiku w folderze położysz <span class="mono">nazwa.audio.mp3</span>.</span></div>';
+    kont.innerHTML = '<div class="pusto cicho"><b>Jeszcze nic nie dopasowywałem</b><span>Wybierz rolkę i głos powyżej. Autopilot nie robi lipsyncu – usta dopasowujesz tutaj ręcznie (albo przy ręcznym „Zrób rolkę”, gdy obok filmiku leży <span class="mono">nazwa.audio.mp3</span> i włączysz to w Ustawienia → Autopilot).</span></div>';
     return;
   }
   kont.innerHTML = `<div class="tabela-wrap"><table class="tabela"><thead><tr><th>Kiedy</th><th>Rolka</th><th>Głos</th>${state.pelny ? '<th>Model</th>' : ''}<th>Stan</th><th>Koszt</th><th></th></tr></thead><tbody>${lista.map(l => `<tr>
@@ -1862,7 +2094,10 @@ async function ladujUstawienia() {
     nazwa: prof.nazwa || nazwaPersony(state.aktywna) || '', instagram: prof.instagram || '', opis_stylu: prof.opis_stylu || '',
     hashtagi: prof.hashtagi || '',
     cechy: Array.isArray(prof.cechy) ? prof.cechy.join(', ') : (prof.cechy || ''),
+    telegram_czat: u.telegram_czat || '',   // ustawienie persony (nie profil) – zapis w zapiszProfil idzie do /api/ustawienia
   });
+  renderStanKontaTelegram(u.telegram_czat);
+  state.stroje = d.stroje || [];
   try {
     const b = await api('/api/budzet');
     state.budzet = b;
@@ -1957,6 +2192,20 @@ async function zapiszUstawienia(f) {
   }
 }
 
+// Pod polem „Konto Telegram tej persony”: czy to konto już napisało /start do bota (lista sparowanych czatów z /api/stan).
+function renderStanKontaTelegram(v) {
+  const el = $('#p-telegram-stan');
+  if (!el) return;
+  const konto = kontoTelegram(v);
+  const t = state.telegram || {};
+  if (!konto) { el.textContent = t.sparowany ? `Rolki tej persony lecą na Twój główny czat${t.czat ? ` (${t.czat})` : ''}.` : ''; el.className = 'pole-info'; return; }
+  const czaty = Array.isArray(t.czaty) ? t.czaty : [];
+  const jest = czaty.some(c => kontoTelegram(c.nazwa).toLowerCase() === konto.toLowerCase());
+  if (!t.skonfigurowany) { el.textContent = 'Bot Telegram nie jest jeszcze podłączony – wklej token w Ustawienia → Konta.'; el.className = 'pole-info zle'; }
+  else if (jest) { el.textContent = `${konto} jest sparowane z botem ✓ – gotowe rolki tej persony polecą tam.`; el.className = 'pole-info ok'; }
+  else { el.textContent = `${konto} nie napisało jeszcze /start do bota – do tego czasu rolki polecą na Twój główny czat.`; el.className = 'pole-info zle'; }
+}
+
 async function zapiszProfil(f) {
   const dane = zbierzFormularz(f);
   const znany = !!state.profile[state.aktywna];   // profil znamy tylko po zapisie w tej sesji (API nie ma GET profilu)
@@ -1967,6 +2216,17 @@ async function zapiszProfil(f) {
   }
   const d = await api('/api/profil', 'POST', payload);
   if (d.profil) state.profile[state.aktywna] = d.profil;
+  // konto Telegram persony to ustawienie (telegram_czat), nie profil
+  const czat = String(dane.telegram_czat || '').trim();
+  const u = (state.stan && state.stan.ustawienia) || {};
+  if (czat !== String(u.telegram_czat || '')) {
+    const du = await api('/api/ustawienia', 'POST', { telegram_czat: czat });
+    if (du.ustawienia) {
+      if (state.ustawieniaPelne) state.ustawieniaPelne.ustawienia = du.ustawienia;
+      if (state.stan) state.stan.ustawienia = du.ustawienia;
+    }
+  }
+  renderStanKontaTelegram(czat);
   toast('Zapisane.', 'ok');
   odswiezDiagnoze();
   odswiez();
@@ -2043,7 +2303,12 @@ function kartaKonta(id, k) {
     if (k.sparowany) { stanKlasa = 'ok'; stanTekst = `Sparowany z: ${k.czat || 'telefon'}`; }
     else if (k.jest) { stanKlasa = 'uwaga'; stanTekst = 'Token jest. Teraz na telefonie napisz do swojego bota: /start'; }
     else { stanKlasa = ''; stanTekst = 'nie podłączony'; }
-    srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}
+    // wszystkie konta, które napisały /start do bota (główny czat + konta person z ustawienia telegram_czat)
+    const czaty = Array.isArray((state.telegram || {}).czaty) ? state.telegram.czaty : [];
+    const sparowane = czaty.length
+      ? `<div class="konto-czaty">sparowane konta: ${czaty.map(c => `<b>${esc(kontoTelegram(c.nazwa) || c.nazwa)}</b>${c.glowny ? ' (główny)' : ''}`).join(', ')}.<br>Osobne konto dla persony wpisujesz w <a href="#ustawienia/persona">Persona → Konto Telegram</a> – też musi raz napisać /start.</div>`
+      : '';
+    srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}${sparowane}
       <ol class="kroki-lista">
         <li>W Telegramie napisz do <b>@BotFather</b>: <span class="mono">/newbot</span>, nadaj nazwę – dostaniesz <b>token</b>.</li>
         <li>Wklej token poniżej i kliknij <b>Zapisz</b>.</li>
@@ -2438,6 +2703,8 @@ document.addEventListener('click', async e => {
       case 'autopilot-wznow': await wznowAutopilot(el); break;
       case 'telegram-wyslij': await wyslijNaTelefon(id); break;
       case 'fokus-wrzuc': wybierzPliki('zrodlo'); break;
+      case 'otworz-folder': el.disabled = true; try { await otworzFolder(el.dataset.co, el.dataset.slug); } finally { el.disabled = false; } break;
+      case 'zamknij-panel': await zamknijPanel(); break;
       case 'persona-wybierz': await zmienPersone(el.dataset.slug); break;
       case 'pk-persona': {
         // „Uzupełnij” przy personie z listy kontrolnej: przełącz na nią i otwórz właściwą sekcję Ustawień
@@ -2515,6 +2782,8 @@ document.addEventListener('change', e => {
   else if (el.id === 'ls-wideo') { $('#ls-wideo-sciezka-wrap').hidden = el.value !== '__inny'; if (el.value === '__inny') $('#ls-wideo-sciezka').focus(); }
   else if (el.id === 'ls-audio') { $('#ls-audio-sciezka-wrap').hidden = el.value !== '__inny'; if (el.value === '__inny') $('#ls-audio-sciezka').focus(); }
   else if (el.id === 'ls-dlg-audio') $('#ls-dlg-sciezka').hidden = !!el.value;
+  else if (el.id === 'zd-stroj') renderStrojMini();
+  else if (el.id === 'p-telegram') renderStanKontaTelegram(el.value);
   else if (el.id === 'dz-typ') ladujHistoria().catch(bladToast);
   else if (el.id === 'dz-modelka') renderHistoria();
   else if (el.id === 'plik-ukryty') { if (state.uploadTyp && el.files.length) wyslijPliki(state.uploadTyp, el.files); }
