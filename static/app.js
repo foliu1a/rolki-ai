@@ -2546,8 +2546,8 @@ function kartaKonta(id, k) {
       <div class="rzad"><button class="btn btn-maly" type="button" data-akcja="konto-test" data-dostawca="${esc(id)}"${k.jest ? '' : ' disabled'}>Sprawdź</button>${k.jest && !k.z_env ? `<button class="btn btn-maly btn-zly" type="button" data-akcja="konto-usun" data-dostawca="${esc(id)}">Usuń klucz</button>` : ''}${wynikHtml}</div>`;
   }
   const opis = OPISY_KONT[id] || k.opis || '';
-  // tryb prosty: tylko Higgsfield i telefon – yapper (dostawca do wyboru w „Jak robić rolki”) i sync (Lipsync) są tam niedostępne
-  const zaawansowane = ['yapper', 'sync', 'elevenlabs'].includes(id);
+  // tryb prosty: Higgsfield, telefon i sync.so (klucz do lipsyncu – user go wkleja); yapper i ElevenLabs tylko w pełnym
+  const zaawansowane = ['yapper', 'elevenlabs'].includes(id);
   return `<div class="karta konto" data-konto="${esc(id)}"${zaawansowane ? ' data-zaawansowane' : ''}>
     <div class="karta-naglowek"><div><h2>${esc(nazwa)}</h2>${opis ? `<p>${esc(opis)}</p>` : ''}</div></div>
     <div class="konto-stan ${stanKlasa}"><span class="kropka ${stanKlasa}"></span>${esc(stanTekst)}</div>

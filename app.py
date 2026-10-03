@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.3"
+WERSJA = "2.4"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
