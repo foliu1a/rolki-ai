@@ -201,7 +201,9 @@ def zapisz_ustawienia(slug, **pola):
 
 
 def _sciezka_w_modelce(slug, wartosc):
-    return wartosc if os.path.isabs(wartosc) else os.path.join(folder_modelki(slug), wartosc)
+    """Ustawienie 'prompty/x.txt' albo 'stroje/mesh.png' -> pelna sciezka. normpath: na Windows ukosnik z ustawienia
+    zamienia sie na backslash, zeby sciezki dalo sie porownywac (i zeby wygladaly normalnie w panelu)."""
+    return os.path.normpath(wartosc if os.path.isabs(wartosc) else os.path.join(folder_modelki(slug), wartosc))
 
 
 def _czytaj_prompt(slug, wartosc):
@@ -461,7 +463,7 @@ def sciezki_referencji(slug):
     folder = folder_modelki(slug)
     wynik = []
     for r in ust.get("referencje") or []:
-        p = r if os.path.isabs(r) else os.path.join(folder, r)
+        p = os.path.normpath(r if os.path.isabs(r) else os.path.join(folder, r))
         if os.path.isfile(p):
             wynik.append(p)
     if not wynik:

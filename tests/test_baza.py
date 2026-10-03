@@ -93,7 +93,16 @@ def test_stroj_domyslny(modelka):
     assert baza.stroj_domyslny(modelka) is None  # pliku jeszcze nie ma
     sciezka = os.path.join(baza.folder_strojow(modelka), "mesh.png")
     open(sciezka, "wb").close()
-    assert baza.stroj_domyslny(modelka) == sciezka
+    # na Windows ukosnik z ustawienia ma wyjsc jako backslash (normpath) - inaczej sciezki sie nie zgadzaja
+    assert baza.stroj_domyslny(modelka) == os.path.normpath(sciezka)
+
+
+def test_sciezka_w_modelce_normalizuje(modelka, monkeypatch):
+    import ntpath
+    monkeypatch.setattr(baza.os, "path", ntpath)
+    monkeypatch.setattr(baza, "folder_modelki", lambda slug: r"C:\rolki\modelki\noemi")
+    assert baza._sciezka_w_modelce(modelka, "stroje/mesh.png") == r"C:\rolki\modelki\noemi\stroje\mesh.png"
+    assert baza._sciezka_w_modelce(modelka, r"D:\inne\x.png") == r"D:\inne\x.png"
 
 
 # ---------------- pomysly ----------------

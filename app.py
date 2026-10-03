@@ -987,10 +987,25 @@ def api_losuj_tekst():
 
 # ---------------- start ----------------
 
+def _otworz_przegladarke():
+    """Otwiera panel w przegladarce dopiero, gdy serwer odpowiada (panel.bat otwieral za wczesnie -> bialy blad)."""
+    import urllib.request
+    import webbrowser
+    for _ in range(40):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/stan", timeout=2).read(1)
+            break
+        except Exception:
+            time.sleep(0.5)
+    webbrowser.open(f"http://localhost:{PORT}")
+
+
 def main():
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     if "--autopilot" in sys.argv:
         autopilot_start()
+    if "--bez-przegladarki" not in sys.argv:
+        threading.Thread(target=_otworz_przegladarke, daemon=True).start()
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)
 
 
