@@ -130,6 +130,35 @@ def cmd_glosy(args):
     return 0
 
 
+# ---------------- sprawdzanie promptow ----------------
+
+_WZORZEC_IMAGE = re.compile(r"@\[Image\s*(\d+)\]\(image_\d+\)|@Image\s*(\d+)", re.I)
+
+
+def sprawdz_prompt(slug, ust=None):
+    """Ostrzezenia o promptach persony (nie blokuja generacji): liczba @[Image N] vs liczba zdjec,
+    brak promptu B przy strojach, pusty prompt. Zwraca liste zdan po polsku."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    uwagi = []
+    refs = len(baza.sciezki_referencji(slug))
+    a, b = baza.prompt_bazowy(slug), baza.prompt_stroj(slug)
+    if not a:
+        uwagi.append("brak promptu A (stroj z filmu) - rolki z filmiku beda bez promptu")
+    for nazwa, prompt, oczekiwane in (("A", a, refs), ("B", b, refs + 1)):
+        if not prompt:
+            continue
+        numery = sorted({int(m.group(1) or m.group(2)) for m in _WZORZEC_IMAGE.finditer(prompt)})
+        if not numery:
+            continue
+        if max(numery) != oczekiwane or len(numery) != oczekiwane:
+            uwagi.append(f"prompt {nazwa}: odwoluje sie do @Image {numery}, a zdjec jest {oczekiwane} "
+                         f"({'referencje' if nazwa == 'A' else 'referencje + stroj'}) - numery musza sie zgadzac")
+    stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
+    if (stroje or baza.stroj_domyslny(slug)) and not b:
+        uwagi.append("sa zdjecia strojow, ale prompt B (stroj ze zdjecia) jest pusty")
+    return uwagi
+
+
 # ---------------- diagnoza ----------------
 
 def diagnoza():
@@ -167,8 +196,23 @@ def diagnoza():
         ust = baza.ustawienia_modelki(slug)
         if ust.get("zdjecia_dziennie") and not ust.get("zdjecia_model"):
             braki.append("zdjecia_dziennie bez modelu zdjec")
+        braki += [u for u in sprawdz_prompt(slug, ust) if not u.startswith("brak promptu A")]
         wynik.append({"co": f"persona {slug}", "ok": not braki, "info": ", ".join(braki) or "gotowa"})
     return wynik
+
+
+def zapisz_diagnoze_w_dzienniku(skad="start"):
+    """Jedna linia w dzienniku przy starcie panelu/autopilota: co dziala, czego brakuje."""
+    try:
+        d = diagnoza()
+    except Exception as e:
+        baza.dziennik_zapisz("uwaga", f"{skad}: diagnoza nie wyszla ({e})")
+        return None
+    zle = [f"{w['co']}: {w['info']}" for w in d if w["ok"] is False]
+    ok = [w["co"] for w in d if w["ok"]]
+    baza.dziennik_zapisz("uwaga" if zle else "info", f"{skad}: " + (("brakuje -> " + "; ".join(zle) + " | ") if zle else "")
+                         + "ok: " + (", ".join(ok) or "nic"))
+    return d
 
 
 def cmd_diagnoza(args):
@@ -569,6 +613,9 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
             "Wrzuc zdjecia albo dodaj --bez-referencji, jesli tak ma byc.")
         wynik["stop"] = "brak referencji"
         return wynik
+
+    for uwaga in sprawdz_prompt(slug, ust):
+        log(f"[UWAGA] {uwaga}")
 
     if dry_run:
         for p in lista:

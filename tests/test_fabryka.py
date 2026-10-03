@@ -468,3 +468,27 @@ def test_tani_podglad_draft(bez_mediatool, cli):
     cli.saldo = 210
     with pytest.raises(ValueError, match="min_kredyty"):
         fabryka.podglad(slug, 1)
+
+
+def test_sprawdz_prompt(modelka):
+    # fixture: 2 referencje; prompt A ma @Image 1 i 2 (ok), prompt B ma 1 i 3 (ok: 2 ref + stroj = 3)
+    assert fabryka.sprawdz_prompt(modelka) == []
+    baza.zapisz_prompt(modelka, "stroj_z_filmu.txt", "tylko @[Image 1](image_1)")
+    uwagi = fabryka.sprawdz_prompt(modelka)
+    assert len(uwagi) == 1 and "prompt A" in uwagi[0] and "[1]" in uwagi[0] and "zdjec jest 2" in uwagi[0]
+    baza.zapisz_prompt(modelka, "stroj_z_filmu.txt", "bez numerow")      # bez @Image -> nie czepiamy sie
+    baza.zapisz_prompt(modelka, "stroj_ze_zdjecia.txt", "")
+    open(os.path.join(baza.folder_strojow(modelka), "mesh.png"), "wb").close()
+    uwagi = fabryka.sprawdz_prompt(modelka)
+    assert uwagi == ["sa zdjecia strojow, ale prompt B (stroj ze zdjecia) jest pusty"]
+    baza.zapisz_ustawienia(modelka, prompt_bazowy="prompty/nie_ma.txt")
+    assert any(u.startswith("brak promptu A") for u in fabryka.sprawdz_prompt(modelka))
+
+
+def test_diagnoza_w_dzienniku(modelka, cli, monkeypatch):
+    import higgsfield_cli
+    monkeypatch.setattr(higgsfield_cli, "sciezka_cli", lambda: "/udawane/hf")
+    monkeypatch.setattr(higgsfield_cli, "konto", lambda: {"credits": 1000})
+    fabryka.zapisz_diagnoze_w_dzienniku("test")
+    w = baza.dziennik_ostatnie(1)[-1]
+    assert w["tekst"].startswith("test:") and "higgsfield" in w["tekst"]

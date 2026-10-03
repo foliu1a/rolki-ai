@@ -1145,6 +1145,7 @@ def main():
             webbrowser.open(f"http://localhost:{PORT}")
         return 0
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
+    threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
     if "--autopilot" in sys.argv:
         autopilot_start()
     if "--bez-przegladarki" not in sys.argv:
