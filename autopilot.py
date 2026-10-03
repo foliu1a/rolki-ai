@@ -615,6 +615,10 @@ def main(argv=None):
         for w in przebieg_wszystkich(args.modelka):
             print(w)
         return 0
+    try:
+        baza.przygotuj_foldery_pulpitu_wszystkich()     # Pulpit\ROLKI AI\tu wrzucasz rolki\<persona> itd. (jak panel)
+    except Exception as e:
+        _log(f"foldery na pulpicie: {e}")
     fabryka.zapisz_diagnoze_w_dzienniku("start autopilota")
     try:
         petla(args.modelka, co_minut=args.co_minut)
