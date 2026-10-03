@@ -18,7 +18,7 @@ python -m pip install -q flask pytest
 python -m pytest -q
 echo.
 echo Odswiezam skrot "Rolki AI" na pulpicie...
-wscript.exe //nologo "%~dp0skroty.vbs" pulpit
+cscript.exe //nologo "%~dp0skroty.vbs" pulpit
 echo.
 echo Gotowe. Uruchamiam panel...
 call panel.bat

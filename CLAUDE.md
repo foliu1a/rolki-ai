@@ -10,12 +10,15 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   odpala fabryke, ocenia wyniki. Komenda uzytkownika: `/rolki` (`~/.claude/skills/rolki/SKILL.md`).
 - Ty (glowna sesja / tom) - kod fabryki, panel, integracje.
 
-## Foldery usera (2026-10-01)
+## Foldery usera (2026-10-03)
 
-- Wrzutnia: `C:\Users\yux\Desktop\ROLKI AI\przed\<noemi|alicja|bianka>\` (ustawienie `zrodla_dir`).
-- Gotowe:   `C:\Users\yux\Desktop\ROLKI AI\po\<persona>\NNN_nazwa.mp4` (ustawienie `wyniki_dir`) - PO Media Tool.
+- Panel przy starcie (`app._foldery_na_pulpicie` -> `baza.przygotuj_foldery_pulpitu_wszystkich`) i `POST /api/modelki` tworza na pulpicie
+  `ROLKI AI\tu wrzucasz rolki\<Nazwa>` (`zrodla_dir`), `ROLKI AI\tu rolki zrobione\<Nazwa>` (`wyniki_dir`, PO Media Tool),
+  `ROLKI AI\tu zdjecia zrobione\<Nazwa>` (`zdjecia_dir`). Nazwa folderu = nazwa z profilu (Noemi, Alicja, Bianka).
+  Stare `ROLKI AI\przed\<slug>` / `po\<slug>` sa przenoszone (rename) razem ze sciezkami w pomysly/zdjecia/lipsync.json.
+  Wlasny folder usera (inny) zostaje. `ROLKI_PULPIT` w env nadpisuje korzen (testy: tmp). `python fabryka.py foldery`.
 - Surowy wynik zostaje w `modelki/<slug>/wyniki/NNN_nazwa.raw.mp4`, klatki w `modelki/<slug>/klatki/`,
-  lipsync w `wyniki_dir/NNN_nazwa_lipsync.mp4`, zdjecia w `zdjecia_dir` (albo `modelki/<slug>/zdjecia/`).
+  lipsync w `wyniki_dir/NNN_nazwa_lipsync.mp4`.
 - Zdjecia person (zrodlo): `Desktop\ROLKI AI\<persona>\` - skopiowane do `referencje/` z numeracja.
 
 ## Budzet i powtorki
@@ -28,6 +31,11 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   najpierw doczytuje `generate get <id>` 5x (0 kr, `hf.doczytaj_url`), a gdy dalej nic - status blad BEZ powtorki.
 - `min_kredyty` (200) i `max_kredyty_na_rolke` (150) = Higgsfield; yapper ma wlasne `yapper.min_kredyty` /
   `yapper.max_kredyty_na_rolke` (inna skala kredytow). Zmienia tylko user. Autopilot dodatkowo `autopilot_max_rolek_dziennie`.
+- Filtr tresci (status `nsfw` / `ip_detected`): `fabryka.powod_odrzucenia` -> pomysl dostaje `powod` (nsfw|ip|inny); po DWOCH
+  odrzuceniach NSFW z rzedu petla powtorek konczy (kredyty wracaja, ale czas nie). `fabryka.wskazowki_nsfw(slug)` / `GET /api/nsfw` /
+  `python fabryka.py nsfw`: ryzykowne slowa w promptach (`SLOWA_RYZYKOWNE`), liczba odrzucen, wskazowki. Filtr Higgsfield+Seedance
+  sprawdza naraz filmik, referencje, stroj i prompt - user mial odrzucenia "mimo niewinnego filmiku" najpewniej przez zdjecia strojow
+  (siatka/koronka/przeswity) i slowa typu mesh/sheer/lingerie w promptach.
 
 ## Postprodukcja
 
@@ -35,6 +43,10 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   env MEDIA_FFMPEG/FFPROBE/EXIFTOOL/ASSETS_DIR jak w main.cjs). ~4 s/klip, h264_amf, iPhone 17 Pro Max + GPS.
   Wlaczone `mediatool=true`; recznie `python fabryka.py pierz <id>` albo `--plik x.mp4`.
 - Zdjecia: Suczkowatka (osobna apka, [[suczkowatka-synthid]]) - fabryka robi zdjecia (zdjecia.py), ale ich nie "pierze".
+  Stroje (character elements) z `stroje/`: `zdjecia_stroje=true` -> co drugie zdjecie w kolejnym stroju (strój = OSTATNI obraz +
+  `zdjecia_prompt_stroj` doklejony do promptu); recznie `stroj=auto|bez|<plik>` (API/CLI `--stroj`). Modele *soul* bez strojow.
+- Lipsync TYLKO recznie (panel -> Lipsync / CLI). Autopilot wola `fabryka.generuj(lipsync=False)`; `lipsync_auto` (domyslnie False)
+  dziala wylacznie przy recznym "Zrob rolke". Glos z Telegrama z podpisem = nazwa filmiku -> `pomysl.audio` (do recznego lipsyncu).
 - VideoRemixer (`warianty`) wylaczony (0) - user go nie uzywa.
 
 ## Pliki
@@ -47,15 +59,18 @@ fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, gener
                     ostrzezenia o @Image vs liczba zdjec (nie blokuje). diagnoza() = ffmpeg/Higgsfield/Media Tool/Telegram/persony.
                     skanuj: zrodlo > 30 s -> klatki.potnij na kawalki (dziel_dlugie), _klatki_wyniku po generacji.
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
-                    -> lipsync -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na telefon -> raport dnia po 20:00.
+                    -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
+                    glowny; `czat_persony`) -> raport dnia po 20:00. BEZ lipsyncu.
                     Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
-                    Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc.
+                    Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
+                    (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
 zdjecia.py          zdjecia persony: zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt w kolko
 lipsync.py          zrob(slug, wideo, audio) -> sync.so (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield; tts_z_tekstu
 dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobierz): higgsfield.py (CLI), yapper.py (REST),
-                    sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz/pobierz_plik/wyslij_wideo, parowanie pierwszego
-                    czatu w telegram.json obok stan.json, limity 20 MB pobieranie / 50 MB wysylka), http.py (urllib: JSON,
-                    multipart, PUT, pobierz, powtorki)
+                    sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
+                    telegram.json obok stan.json: chat_id = czat glowny (pierwszy, ktory napisal), `czaty` = sparowane konta person
+                    (tylko te z ustawien telegram_czat; obce ignorowane); `czat_dla(konto)`; limity 20 MB pobieranie / 50 MB
+                    wysylka), http.py (urllib: JSON, multipart, PUT, pobierz, powtorki)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
                     env (YAPPER_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
 mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
@@ -72,14 +87,15 @@ modelki/<slug>/
   ustawienia.json   patrz baza.USTAWIENIA_DOMYSLNE (komentarze = dokumentacja): dostawca, model/mode/aspect/resolution/duration,
                     mode_bez_zrodla, yapper{model,resolution,duration,prompt,min_kredyty,max_kredyty_na_rolke}, prompty A/B,
                     stroj_domyslny, prompt_auto, soul_id, min_kredyty, max_kredyty_na_rolke, powtorki, zrodla_dir, wyniki_dir,
-                    mediatool, autopilot*, zdjecia_*, lipsync_*, tts_*
+                    mediatool, autopilot*, telegram_wysylaj, telegram_czat, zdjecia_* (+zdjecia_stroje, zdjecia_prompt_stroj),
+                    lipsync_* (lipsync_auto domyslnie False), tts_*
   prompty/          stroj_z_filmu.txt (A), stroj_ze_zdjecia.txt (B), zdjecia.txt - PROMPTY USERA, nie zmieniaj tresci
   zrodla/           WRZUTNIA (gdy zrodla_dir puste); <nazwa>.stroj.png = wariant B, <nazwa>.audio.mp3 = lipsync po generacji
   referencje/       zdjecia persony, 01_, 02_... = kolejnosc @[Image N] w prompcie (-> --image)
   stroje/ audio/    stroje do wariantu B; glosy do lipsyncu (panel: upload)
   wyniki/ zdjecia/  surowe rolki NNN_nazwa.raw.mp4, NNN_podpis.txt; zdjecia NNN_data.png
   pomysly.json      kolejka; statusy: nowy -> wygenerowany -> postprodukcja -> gotowe (+ blad); pola dostawca, audio, lipsync_plik,
-                    podpis, klatki_wyniku (siatka klatek GOTOWEJ rolki), telegram_wyslano
+                    podpis, klatki_wyniku (siatka klatek GOTOWEJ rolki), telegram_wyslano, powod (nsfw|ip|inny przy bledzie)
   pociete.json      dlugie zrodla (>30 s) juz pociete na modelki/<slug>/zrodla_ciete/ (skanuj je pomija; dziel_dlugie)
   autopilot_stan.json  hamulec: bledy_z_rzedu, pauza, pauza_od
   zdjecia.json / lipsync.json / uploady.json / uploady_yapper.json / profil.json / szablony.json / teksty.json / uzyte_tekstow.json
@@ -88,9 +104,12 @@ modelki/<slug>/
 Zmienna `ROLKI_MODELKI` przenosi folder modelek gdzie indziej (testy, dysk D:); stan.json, budzet.json, dziennik.jsonl, klucze.json
 i telegram.json leza wtedy obok tego folderu.
 
-Pliki .bat dla usera (nietechniczny - komunikuj sie z nim przez "kliknij dwa razy w X.bat"): panel.bat (panel), aktualizuj.bat
-(git pull z main-mj7alw + testy + panel), autostart.bat / autostart-usun.bat (Harmonogram zadan: start-cicho.vbs ->
-`python app.py --autopilot --bez-przegladarki` w tle), zaloguj-higgsfield.bat, instaluj.bat, widget.bat, autopilot.bat.
+Pliki .bat dla usera (nietechniczny - komunikuj sie z nim przez "kliknij dwa razy w X.bat"): skrot "Rolki AI" na pulpicie
+(skroty.vbs pulpit -> rolki.vbs: panel w tle `python app.py --autopilot --bez-przegladarki` + przegladarka; ikona static/rolki.ico,
+generator w scratchpadzie), panel.bat (panel z oknem - do ogladania bledow), aktualizuj.bat (git pull z main-mj7alw + testy +
+odswiezenie skrotu + panel), autostart.bat / autostart-usun.bat (skrot w folderze Autostart -> start-cicho.vbs; BEZ schtasks, bo
+user dostawal "Odmowa dostepu"), skrot-na-pulpit.bat, zaloguj-higgsfield.bat, instaluj.bat, widget.bat, autopilot.bat.
+Statyczne pliki panelu maja `?v=WERSJA` (app.WERSJA) - podbij przy zmianach w static/, inaczej przegladarka usera trzyma stary app.js.
 
 ## Testy
 

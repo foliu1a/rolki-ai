@@ -34,19 +34,43 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
            "sync": {"jest": true, "ok": null, "komunikat": ""}},
  "dziennik_ostatni": {"czas": "...", "typ": "ok", "modelka": "noemi", "tekst": "#5: GOTOWE -> ..."},
  "autopilot_stan": {"bledy_z_rzedu": 0, "pauza": null, "pauza_od": null},   // hamulec aktywnej persony; pauza = powód (tekst) gdy zatrzymany
- "telegram": {"skonfigurowany": true, "sparowany": false, "czat": ""},         // bot Telegram: token jest? czat sparowany (/start)?
+ "telegram": {"skonfigurowany": true, "sparowany": false, "czat": "", "czaty": [{"nazwa": "yux", "glowny": true}, {"nazwa": "huy7128", "glowny": false}]},
  "dzis": {"rolki": 3, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 135, "yapper": 0, "sync": 0}, "rolki_persony": 2},
- "wersja": "2.0"}
+ "foldery": {"wrzutnia": "C:\\Users\\yux\\Desktop\\ROLKI AI\\tu wrzucasz rolki\\Noemi", "gotowe": "...\\tu rolki zrobione\\Noemi", "zdjecia": "...\\tu zdjecia zrobione\\Noemi"},
+ "pulpit": "C:\\Users\\yux\\Desktop\\ROLKI AI",
+ "wersja": "2.1"}
 ```
+- Foldery na pulpicie (2.1): panel przy starcie (i `POST /api/modelki`) tworzy `Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>`,
+  `...\tu rolki zrobione\<Persona>`, `...\tu zdjecia zrobione\<Persona>` i wpisuje je w `zrodla_dir` / `wyniki_dir` / `zdjecia_dir`
+  (puste albo stare `przed`/`po` – te są przenoszone). Własny folder usera zostaje. `modelki[]` mają `foldery {wrzutnia, gotowe, zdjecia}` i `telegram_czat`.
+- `POST /api/folder/otworz` `{"co": "wrzutnia"|"gotowe"|"zdjecia"|"pulpit"|"modelka"|"referencje"|"stroje"|"audio"}` → otwiera folder w Eksploratorze
+  (Windows; `{"sciezka": "..."}`; poza Windows 400 z komunikatem i ścieżką).
+- `GET /api/nsfw` → `{"odrzucone": 3, "odrzucone_ostatnio": 1, "dni": 14, "slowa": {"A": ["mesh"], "B": [], "zdjecia": []}, "wskazowki": ["..."]}`
+  – czemu filtr treści Higgsfield/Seedance odrzuca rolki aktywnej persony. Pomysł ze statusem `blad` ma `powod`: `"nsfw"` (filtr treści),
+  `"ip"` (znana postać/marka), `"inny"` albo `null`. Po dwóch odrzuceniach NSFW z rzędu fabryka nie próbuje dalej.
+- `GET /api/statystyki` → `razem.nsfw` = odrzucone przez filtr w tym okresie.
+- Telegram per persona: ustawienie `telegram_czat` (`"@huy7128"`, `""` = czat główny). Takie konto musi raz napisać `/start` do bota
+  (bot paruje tylko czat główny i konta z `telegram_czat`; obce ignoruje). Gotowe rolki/zdjęcia persony lecą na jej konto;
+  alarmy i raport – na czat główny. `/stop`, `/wznow` tylko z czatu głównego. Akcja `telegram_wyslij` wysyła na konto persony
+  (400, gdy to konto nie napisało jeszcze `/start`). `telegram.czaty` w `/api/stan` = sparowane konta.
+- Autopilot NIE robi lipsyncu (`fabryka.generuj(lipsync=False)`); `lipsync_auto` (domyślnie false) działa tylko przy ręcznym „Zrób rolkę”.
+- Zdjęcia ze strojów: ustawienia `zdjecia_stroje` (bool, co drugie zdjęcie w kolejnym stroju ze `stroje/`) i `zdjecia_prompt_stroj`
+  (dopisek do promptu, strój = ostatni obraz). Akcja `{"typ": "zdjecia", "stroj": "auto"|"bez"|"<plik ze stroje/>"}` (brak = automatycznie).
+  Wpis w `/api/zdjecia` ma `stroj` (ścieżka albo null).
+- Skrót na pulpit i autostart bez admina: `skroty.vbs pulpit|autostart|autostart-usun` (wołane przez `skrot-na-pulpit.bat`, `autostart.bat`,
+  `autostart-usun.bat`, `aktualizuj.bat`, `instaluj.bat`); skrót „Rolki AI” uruchamia `rolki.vbs` (panel w tle + przeglądarka).
+  Ikona: `static/rolki.ico` / `static/rolki.png`. Statyczne pliki: `?v=<wersja>` + `SEND_FILE_MAX_AGE_DEFAULT=0` (bez cache po aktualizacji).
 - `POST /api/autopilot/wznow` `{"slug"?: "noemi"}` → zdejmuje hamulec (pauzę) z aktywnej/wskazanej persony → `{"autopilot_stan": {...}}`
 - Pomysł ma dodatkowo `wynik_miniatura_url` (siatka klatek GOTOWEJ rolki, albo null) i `telegram_wyslano` (bool).
 - Akcja `{"typ": "telegram_wyslij", "id": 5}` wysyła gotową rolkę na telefon (wymaga sparowanego bota).
 - Konta: `konta.telegram` = karta tokena bota (`jest`, `maska`, `jak`) + `sparowany`, `czat`; `POST /api/konta/test {"dostawca": "telegram"}`
   sprawdza bota i, gdy sparowany, wysyła testową wiadomość.
 - Nowe ustawienia persony: `autopilot_stop_po_bledach` (int, 0 = nigdy), `telegram_wysylaj` (bool), `dziel_dlugie` (bool – filmik > 30 s tnij na kawałki).
-- Autostart (Windows): plik `autostart.bat` rejestruje start panelu z autopilotem przy logowaniu; `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
+- Autostart (Windows): `autostart.bat` kładzie skrót w folderze Autostart (bez praw administratora); `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
 - `modelki[]` w `/api/stan` mają dodatkowo `autopilot_stan` (hamulec tej persony), `rolki_dzis` (int) i `avatar_url` (pierwsze zdjęcie persony albo null).
-- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"persona <slug>", "ok": true|false|null, "info": "..."}]}` (null = opcjonalne, nie skonfigurowane). Lista kontrolna „pierwsze kroki”.
+- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"persona <slug>"|"foldery <slug>"|"telefon <slug>", "ok": true|false|null, "info": "..."}]}`
+  (null = opcjonalne, nie skonfigurowane). Lista kontrolna „pierwsze kroki”. `foldery <slug>` ma też `wrzutnia`, `gotowe` (ścieżki);
+  `telefon <slug>` tylko gdy persona ma `telegram_czat` (ok = to konto napisało /start).
 - `GET /api/statystyki?dni=14` → `{"dni": [{"dzien": "2026-10-03", "rolki": 2, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 90, "yapper": 0, "sync": 0}}, ...], "razem": {...}}` (od najstarszego do dziś).
 - Akcja `{"typ": "podglad", "id": 5}` = tani podgląd rolki (Seedance draft, ~21 kr): pomysł zostaje „nowy”, dostaje `podglad_url` (wideo) i `podglad_miniatura_url` (siatka klatek) oraz `podglad_koszt`. Tylko dostawca Higgsfield.
 - `POST /api/zamknij` zamyka panel (używa go `aktualizuj.bat`).
@@ -76,7 +100,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 {"typ": "generuj", "ids": [5], "limit": 3, "dry_run": false}
 {"typ": "pierz", "id": 5}                    // Media Tool na wyniku pomysłu
 {"typ": "lipsync", "id": 5, "audio": "C:\\...\\glos.mp3"}       // albo {"wideo": "...", "audio": "..."}
-{"typ": "zdjecia", "ile": 2, "prompt": "opcjonalny prompt"}
+{"typ": "zdjecia", "ile": 2, "prompt": "opcjonalny prompt", "stroj": "auto"}   // stroj: brak = automatycznie, "bez", "auto", "plik.png"
 {"typ": "podpis", "id": 5}
 {"typ": "tts", "tekst": "Cześć!", "voice_id": "EXAVITQu4vr4xnSDxMaL", "nazwa": "intro"}   // sync.so -> audio/<nazwa>.mp3
 {"typ": "autopilot_raz"}                     // jeden przebieg autopilota dla aktywnej modelki
@@ -101,9 +125,9 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   `dostawca` (higgsfield|yapper), `model`, `mode`, `mode_bez_zrodla`, `aspect_ratio`, `resolution`, `duration`,
   `yapper.model`, `yapper.resolution`, `yapper.duration`, `prompt_auto`, `stroj_domyslny`, `min_kredyty`,
   `max_kredyty_na_rolke`, `powtorki`, `zrodla_dir`, `wyniki_dir`, `mediatool`, `autopilot`, `autopilot_co_minut`,
-  `autopilot_max_rolek_dziennie`, `zdjecia_model`, `zdjecia_dziennie`, `zdjecia_parametry`, `zdjecia_dir`,
-  `lipsync_dostawca` (sync|higgsfield), `lipsync_model`, `lipsync_auto`, `lipsync_parametry.sync_mode`,
-  `tts_model`, `tts_glos`, `tts_glos_typ`.
+  `autopilot_max_rolek_dziennie`, `telegram_wysylaj`, `telegram_czat`, `zdjecia_model`, `zdjecia_dziennie`, `zdjecia_parametry`, `zdjecia_dir`,
+  `zdjecia_stroje`, `zdjecia_prompt_stroj`, `lipsync_dostawca` (sync|higgsfield), `lipsync_model`, `lipsync_auto` (tylko ręczne „Zrób rolkę”),
+  `lipsync_parametry.sync_mode`, `tts_model`, `tts_glos`, `tts_glos_typ`.
 - `POST /api/upload` multipart: pole `typ` ∈ `referencja | stroj | audio | zrodlo`, pliki w polu `pliki` (wiele) → `{"zapisane": ["01_x.png"]}`
   (referencje dostają numer 01_, 02_... na początku nazwy, jeśli go nie mają)
 - `POST /api/pliki/usun` `{"typ": "referencja"|"stroj"|"audio", "nazwa": "01_x.png"}`
@@ -128,7 +152,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   Gdy dostawca nie jest zalogowany/brak klucza: `{"ok": false, "blad": "..."}` (400) – GUI pokazuje komunikat, nie wywala się.
 
 ## Zdjęcia, lipsync, dziennik, budżet, autopilot
-- `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki"}]}`
+- `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki", "stroj"}]}`
 - `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik)
 - `GET /api/lipsync` → `{"lipsync": [{"id", "wideo", "audio", "dostawca", "model", "pomysl_id", "status", "plik_wynikowy", "url", "koszt", "notatki", "utworzono"}]}`
 - `DELETE /api/lipsync/<id>`

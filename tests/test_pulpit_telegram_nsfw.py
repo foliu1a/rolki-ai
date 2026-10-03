@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
 """Foldery na pulpicie, osobne konto Telegram per persona, filtr NSFW (powod + wskazowki), zdjecia ze strojow, nowe API."""
-import json
 import os
-
-import pytest
 
 import autopilot
 import baza
 import fabryka
-import higgsfield_cli
 import zdjecia
 from dostawcy import telegram
-from test_telegram_autopilot import UdawanyTelegram, bez_ffmpeg, tg  # noqa: F401 - fixtures
+from test_telegram_autopilot import bez_ffmpeg, tg  # noqa: F401 - fixtury (udawany Telegram, bez ffmpeg)
 
 
 # ---------------- foldery na pulpicie ----------------
