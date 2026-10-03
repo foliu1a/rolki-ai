@@ -45,6 +45,12 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   sprawdza bota i, gdy sparowany, wysyła testową wiadomość.
 - Nowe ustawienia persony: `autopilot_stop_po_bledach` (int, 0 = nigdy), `telegram_wysylaj` (bool), `dziel_dlugie` (bool – filmik > 30 s tnij na kawałki).
 - Autostart (Windows): plik `autostart.bat` rejestruje start panelu z autopilotem przy logowaniu; `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
+- `modelki[]` w `/api/stan` mają dodatkowo `autopilot_stan` (hamulec tej persony), `rolki_dzis` (int) i `avatar_url` (pierwsze zdjęcie persony albo null).
+- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"persona <slug>", "ok": true|false|null, "info": "..."}]}` (null = opcjonalne, nie skonfigurowane). Lista kontrolna „pierwsze kroki”.
+- `GET /api/statystyki?dni=14` → `{"dni": [{"dzien": "2026-10-03", "rolki": 2, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 90, "yapper": 0, "sync": 0}}, ...], "razem": {...}}` (od najstarszego do dziś).
+- Akcja `{"typ": "podglad", "id": 5}` = tani podgląd rolki (Seedance draft, ~21 kr): pomysł zostaje „nowy”, dostaje `podglad_url` (wideo) i `podglad_miniatura_url` (siatka klatek) oraz `podglad_koszt`. Tylko dostawca Higgsfield.
+- `POST /api/zamknij` zamyka panel (używa go `aktualizuj.bat`).
+- Profil persony ma pole `hashtagi` (tekst doklejany do każdego podpisu) – zapis przez `POST /api/profil`.
 
 ## Modelki (persony)
 - `POST /api/modelki` `{"nazwa": "Noemi", "instagram": "@uroczanoemi"}` → `{"slug": "noemi"}` (ustawia jako aktywną)
