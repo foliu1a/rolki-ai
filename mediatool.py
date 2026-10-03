@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Most do Media Tool (Electron, Desktop\\Media Tool) - "pranie" filmikow bez klikania w GUI.
+"""Most do Media Tool (Electron, C:\\claude programy\\Media Tool) - "pranie" filmikow bez klikania w GUI.
 
 Media Tool forkuje desktop/worker.cjs z zadaniem w argv[1] (JSON) i srodowiskiem z narzedziami.
 Robimy dokladnie to samo, tylko przez ELECTRON_RUN_AS_NODE=1 (Electron jako zwykly Node, zeby
@@ -13,7 +13,12 @@ import shutil
 import subprocess
 import sys
 
-MT_DIR = os.environ.get("MEDIA_TOOL_DIR") or os.path.join(os.path.expanduser("~"), "Desktop", "Media Tool")
+MT_DIR = os.environ.get("MEDIA_TOOL_DIR") or next(
+    (d for d in (r"C:\claude programy\Media Tool",  # od 2026-10-03; wczesniej lezal na pulpicie
+                 os.path.join(os.path.expanduser("~"), "Desktop", "Media Tool"))
+     if os.path.isfile(os.path.join(d, "Media Tool.exe"))),
+    r"C:\claude programy\Media Tool",
+)
 
 
 class BrakMediaTool(Exception):

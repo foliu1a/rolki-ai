@@ -38,7 +38,7 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 ```
 fabryka.py          automat (status, skanuj, prompt, koszt, generuj, pierz, ocen, warianty, podpis, ustaw, budzet, model, konto)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
-mediatool.py        most do Media Tool (Desktop\Media Tool) - pranie wideo bez GUI
+mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
 klatki.py           ffprobe/ffmpeg: info, klatki PNG, arkusz.jpg (siatka do ogladania)
 baza.py             warstwa danych (modelki/<slug>/*.json) - zawsze przez nia, nie edytuj JSON-ow recznie
 postprocess.py      most do ..\VideoRemixer (NIE modyfikowac VideoRemixera)
