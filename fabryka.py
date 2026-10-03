@@ -130,6 +130,53 @@ def cmd_glosy(args):
     return 0
 
 
+# ---------------- diagnoza ----------------
+
+def diagnoza():
+    """Szybki przeglad: ffmpeg, Higgsfield, Media Tool, Telegram, persony. Lista {co, ok, info} dla panelu i dziennika."""
+    import shutil
+    wynik = []
+    wynik.append({"co": "ffmpeg", "ok": bool(shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                  "info": "jest" if shutil.which("ffmpeg") else "brak w PATH - zainstaluj ffmpeg (winget install Gyan.FFmpeg)"})
+    try:
+        import dostawcy.higgsfield as dh
+        ok, info = dh.gotowy()
+    except Exception as e:
+        ok, info = False, str(e)
+    wynik.append({"co": "higgsfield", "ok": ok, "info": info})
+    try:
+        import mediatool
+        ok = mediatool.dostepny()
+        wynik.append({"co": "mediatool", "ok": ok, "info": "jest" if ok else f"nie znaleziono w {mediatool.MT_DIR} (pranie wylaczone -> surowe pliki)"})
+    except Exception as e:
+        wynik.append({"co": "mediatool", "ok": False, "info": str(e)})
+    try:
+        from dostawcy import telegram
+        if telegram.skonfigurowany():
+            wynik.append({"co": "telegram", "ok": telegram.sparowany(), "info": "sparowany" if telegram.sparowany() else "token jest, napisz /start do bota"})
+        else:
+            wynik.append({"co": "telegram", "ok": None, "info": "nie podlaczony (opcjonalnie)"})
+    except Exception as e:
+        wynik.append({"co": "telegram", "ok": False, "info": str(e)})
+    for slug in baza.lista_modelek():
+        braki = []
+        if not baza.sciezki_referencji(slug):
+            braki.append("brak zdjec persony")
+        if not baza.prompt_bazowy(slug):
+            braki.append("brak promptu A")
+        ust = baza.ustawienia_modelki(slug)
+        if ust.get("zdjecia_dziennie") and not ust.get("zdjecia_model"):
+            braki.append("zdjecia_dziennie bez modelu zdjec")
+        wynik.append({"co": f"persona {slug}", "ok": not braki, "info": ", ".join(braki) or "gotowa"})
+    return wynik
+
+
+def cmd_diagnoza(args):
+    for w in diagnoza():
+        print(f"{'OK ' if w['ok'] else ('-- ' if w['ok'] is None else 'ZLE')} {w['co']:18} {w['info']}")
+    return 0
+
+
 # ---------------- status ----------------
 
 def stan_modelki(slug):
@@ -910,6 +957,7 @@ def main(argv=None):
     s = sub.add_parser("modele", help="lista modeli dostawcy"); s.add_argument("--dostawca", default="higgsfield", choices=dostawcy.NAZWY); s.add_argument("--typ", choices=("image", "video", "audio", "text")); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_modele)
     s = sub.add_parser("glosy", help="glosy Higgsfield do TTS (voices list)"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_glosy)
     s = sub.add_parser("status", help="co w kolejce, co czeka na prompt, saldo"); s.set_defaults(f=cmd_status)
+    s = sub.add_parser("diagnoza", help="czy wszystko jest na miejscu (ffmpeg, Higgsfield, Media Tool, Telegram, persony)"); s.set_defaults(f=cmd_diagnoza)
     s = sub.add_parser("skanuj", help="nowe filmiki z wrzutni -> pomysly + klatki"); s.add_argument("--ile", type=int, default=4); s.set_defaults(f=cmd_skanuj)
     s = sub.add_parser("prompt", help="wpisz prompt do pomyslu ('-' = ze stdin)"); s.add_argument("id", type=int); s.add_argument("tekst"); s.set_defaults(f=cmd_prompt)
     s = sub.add_parser("koszt", help="szacunek kredytow (bez generacji)"); s.add_argument("--id", type=int); s.add_argument("--limit", type=int); s.set_defaults(f=cmd_koszt)

@@ -251,3 +251,40 @@ def test_api_test_telegram_i_wyslij(klient, modelka, tg):
     assert baza.pomysl(modelka, pid)["telegram_wyslano"] is True
     p = klient.get("/api/pomysly").get_json()["pomysly"][0]
     assert p["telegram_wyslano"] is True and p["wynik_miniatura_url"] is None
+
+
+def test_porzadki_usuwa_stare_raw_i_robi_kopie(modelka, cli, bez_ffmpeg):
+    import time as _t
+    baza.zapisz_ustawienia(modelka, mediatool=False, sprzataj_po_dniach=14)
+    open(os.path.join(baza.folder_zrodel(modelka), "a.mp4"), "wb").write(b"v")
+    autopilot.przebieg(modelka)
+    p = baza.pomysl(modelka, 1)
+    raw = os.path.join(baza.folder_wynikow(modelka), "001_a.raw.mp4")
+    assert os.path.isfile(raw) and os.path.isfile(p["plik_wynikowy"])
+    assert autopilot.porzadki()["usuniete"] == 0            # swiezy - zostaje
+    stary = _t.time() - 20 * 86400
+    os.utime(raw, (stary, stary))
+    w = autopilot.porzadki()
+    assert w["usuniete"] == 1 and not os.path.isfile(raw) and os.path.isfile(p["plik_wynikowy"])
+    assert w["kopie"] >= 3
+    kopie = os.path.join(baza.KATALOG_MODELEK, "_kopie")
+    assert os.path.isfile(os.path.join(kopie, sorted(os.listdir(kopie))[-1], modelka, "pomysly.json"))
+    assert modelka in baza.lista_modelek() and "_kopie" not in baza.lista_modelek()   # folder kopii to nie persona
+
+
+def test_diagnoza(modelka, cli, monkeypatch):
+    import higgsfield_cli
+    monkeypatch.setattr(higgsfield_cli, "sciezka_cli", lambda: "/udawane/hf")
+    monkeypatch.setattr(higgsfield_cli, "konto", lambda: {"credits": 1000})
+    d = {w["co"]: w for w in fabryka.diagnoza()}
+    assert d["higgsfield"]["ok"] is True and d["telegram"]["ok"] is None
+    assert d[f"persona {modelka}"]["ok"] is True
+    for n in os.listdir(baza.folder_referencji(modelka)):
+        os.remove(os.path.join(baza.folder_referencji(modelka), n))
+    d = {w["co"]: w for w in fabryka.diagnoza()}
+    assert d[f"persona {modelka}"]["ok"] is False and "zdjec" in d[f"persona {modelka}"]["info"]
+
+
+def test_api_diagnoza(klient):
+    d = klient.get("/api/diagnoza").get_json()
+    assert d["ok"] and any(w["co"] == "ffmpeg" for w in d["diagnoza"])

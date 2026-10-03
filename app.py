@@ -779,6 +779,12 @@ def api_konta():
     return _ok(konta=_konta_pelne())
 
 
+@app.route("/api/diagnoza")
+def api_diagnoza():
+    """Czy wszystko jest na miejscu (ffmpeg, Higgsfield, Media Tool, Telegram, persony) - panel pokazuje w Ustawienia -> Konta."""
+    return _ok(diagnoza=fabryka.diagnoza())
+
+
 @app.route("/api/konta", methods=["POST"])
 def api_zapisz_klucz():
     dane = request.json or {}

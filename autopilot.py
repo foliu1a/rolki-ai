@@ -291,6 +291,73 @@ def wyslij_gotowe(slug, log=None):
     return ile
 
 
+def porzadki(log=None):
+    """Raz dziennie: kasuje surowe .raw.mp4 starsze niz sprzataj_po_dniach (gdy gotowy plik istnieje) i robi kopie
+    plikow .json persony do modelki/_kopie/<data>/ (7 dni). Zwraca {"usuniete": n, "kopie": n}."""
+    import shutil
+    log = log or _log
+    wynik = {"usuniete": 0, "kopie": 0}
+    dzis = datetime.now().strftime("%Y-%m-%d")
+    kopie_dir = os.path.join(baza.KATALOG_MODELEK, "_kopie")
+    for slug in baza.lista_modelek():
+        ust = baza.ustawienia_modelki(slug)
+        dni = int(ust.get("sprzataj_po_dniach") or 0)
+        if dni:
+            granica = time.time() - dni * 86400
+            for p in baza.lista_pomyslow(slug):
+                if p["status"] != "gotowe":
+                    continue
+                gotowy = p.get("plik_wynikowy")
+                for kandydat in {os.path.join(baza.folder_wynikow(slug), n) for n in os.listdir(baza.folder_wynikow(slug))
+                                 if n.startswith(f"{p['id']:03d}_") and n.endswith(".raw.mp4")}:
+                    if gotowy and os.path.isfile(gotowy) and os.path.abspath(gotowy) != os.path.abspath(kandydat) \
+                            and os.path.getmtime(kandydat) < granica:
+                        try:
+                            os.remove(kandydat)
+                            wynik["usuniete"] += 1
+                        except OSError as e:
+                            log(f"porzadki: nie usunalem {kandydat}: {e}")
+        # kopia zapasowa json-ow (kolejka, ustawienia, teksty...)
+        cel = os.path.join(kopie_dir, dzis, slug)
+        try:
+            os.makedirs(cel, exist_ok=True)
+            folder = baza.folder_modelki(slug)
+            for n in os.listdir(folder):
+                if n.endswith(".json"):
+                    shutil.copy2(os.path.join(folder, n), os.path.join(cel, n))
+                    wynik["kopie"] += 1
+        except OSError as e:
+            log(f"porzadki: kopia {slug}: {e}")
+    # stare kopie (> 7 dni) won
+    if os.path.isdir(kopie_dir):
+        for n in sorted(os.listdir(kopie_dir))[:-7]:
+            shutil.rmtree(os.path.join(kopie_dir, n), ignore_errors=True)
+    if wynik["usuniete"]:
+        baza.dziennik_zapisz("info", f"porzadki: usunieto {wynik['usuniete']} starych surowych plikow, kopia json: {wynik['kopie']}")
+    return wynik
+
+
+def wyslij_zdjecia(slug, log=None):
+    """Nowe gotowe zdjecia (dzisiejsze, nie wyslane) -> telefon. Zwraca liczbe wyslanych."""
+    log = log or _log
+    tg = _telegram()
+    if not tg or not tg.sparowany() or not baza.ustawienia_modelki(slug).get("telegram_wysylaj"):
+        return 0
+    ile = 0
+    for z in baza.zdjecia_z_dnia(slug):
+        if z.get("telegram_wyslano") or not z.get("plik") or not os.path.isfile(z["plik"]):
+            continue
+        try:
+            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}\n{z.get('prompt') or ''}".strip())
+            import zdjecia as _zdj
+            _zdj._ustaw(slug, z["id"], telegram_wyslano=True)
+            ile += 1
+        except Exception as e:
+            log(f"telegram: nie wyslalem zdjecia #{z['id']}: {e}")
+            break
+    return ile
+
+
 # ---------------- przebieg ----------------
 
 def przebieg(slug, log=None, stop=None):
@@ -359,7 +426,7 @@ def przebieg(slug, log=None, stop=None):
 
     STAN["etap"] = "telefon"
     try:
-        pods["wyslane"] = wyslij_gotowe(slug, log=log)
+        pods["wyslane"] = wyslij_gotowe(slug, log=log) + wyslij_zdjecia(slug, log=log)
     except Exception as e:
         log(f"telegram: {e}")
     STAN["etap"] = ""
@@ -403,6 +470,12 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
             raport_dnia()
         except Exception as e:
             (log or _log)(f"raport dnia: {e}")
+        if STAN.get("porzadki_dnia") != datetime.now().strftime("%Y-%m-%d"):
+            try:
+                porzadki(log)
+            except Exception as e:
+                (log or _log)(f"porzadki: {e}")
+            STAN["porzadki_dnia"] = datetime.now().strftime("%Y-%m-%d")
         STAN["przebiegi"] += 1
         STAN["ostatni"] = time.time()
     finally:

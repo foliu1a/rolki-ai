@@ -50,6 +50,7 @@ USTAWIENIA_DOMYSLNE = {
     "autopilot_stop_po_bledach": 3,       # tyle nieudanych rolek z rzedu = autopilot sie zatrzymuje (hamulec), 0 = nigdy
     "telegram_wysylaj": True,             # gotowe rolki (i zdjecia) leca na telefon przez bota Telegram
     "dziel_dlugie": True,                 # filmik dluzszy niz 30 s (max Seedance) tnij na kawalki po 30 s
+    "sprzataj_po_dniach": 14,             # autopilot kasuje surowe wyniki (.raw.mp4) starsze niz tyle dni, gdy gotowy plik istnieje (0 = nigdy)
     # --- zdjecia persony ---
     "zdjecia_model": "",            # job_type modelu obrazu z `model list --image` (wybor w panelu), "" = wylaczone
     "zdjecia_dziennie": 0,          # ile zdjec dziennie robi autopilot (0 = tylko recznie z panelu)
@@ -107,7 +108,7 @@ def lista_modelek():
         return []
     return sorted(
         n for n in os.listdir(KATALOG_MODELEK)
-        if os.path.isdir(os.path.join(KATALOG_MODELEK, n))
+        if os.path.isdir(os.path.join(KATALOG_MODELEK, n)) and not n.startswith(("_", "."))   # _kopie to nie modelka
     )
 
 
