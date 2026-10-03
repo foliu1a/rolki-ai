@@ -113,8 +113,10 @@ Zmienna `ROLKI_MODELKI` przenosi folder modelek gdzie indziej (testy, dysk D:); 
 i telegram.json leza wtedy obok tego folderu.
 
 Pliki .bat dla usera (nietechniczny - komunikuj sie z nim przez "kliknij dwa razy w X.bat"): skrot "Rolki AI" na pulpicie
-(skroty.vbs pulpit -> rolki.vbs: panel w tle `python app.py --autopilot --bez-przegladarki` + przegladarka; ikona static/rolki.ico,
-generator w scratchpadzie), panel.bat (panel z oknem - do ogladania bledow), aktualizuj.bat (git pull z main-mj7alw + testy +
+(skroty.vbs pulpit -> rolki.vbs: panel w tle `python app.py --autopilot --bez-przegladarki` + FIREFOX `-new-tab` (szukany w App Paths
+HKCU/HKLM, %ProgramFiles%, %ProgramFiles(x86)%, %LOCALAPPDATA%; bez Firefoksa domyslna przegladarka); ikona static/rolki.ico,
+generator w scratchpadzie), panel.bat (panel z oknem - do ogladania bledow; ten sam Firefox przez env BROWSER="cmd /c start ...
+-new-tab %s" dla webbrowser w app.py), aktualizuj.bat (git pull z main-mj7alw + testy +
 odswiezenie skrotu + panel), autostart.bat / autostart-usun.bat (skrot w folderze Autostart -> start-cicho.vbs; BEZ schtasks, bo
 user dostawal "Odmowa dostepu"), skrot-na-pulpit.bat, zaloguj-higgsfield.bat, instaluj.bat, widget.bat, autopilot.bat.
 Statyczne pliki panelu maja `?v=WERSJA` (app.WERSJA) - podbij przy zmianach w static/, inaczej przegladarka usera trzyma stary app.js.

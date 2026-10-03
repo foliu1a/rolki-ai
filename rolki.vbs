@@ -1,12 +1,15 @@
 ' Skrot "Rolki AI" na pulpicie uruchamia ten plik:
-'   - panel juz dziala (np. z autostartu)  -> tylko otwiera http://localhost:5077 w przegladarce
-'   - panel nie dziala                      -> uruchamia go w tle (python app.py --autopilot) i otwiera przegladarke, gdy odpowie
-' Bez czarnego okna konsoli. Jesli panel nie wstanie w 30 s - komunikat, zeby kliknac panel.bat (tam widac blad).
+'   - panel juz dziala (np. z autostartu)  -> tylko otwiera http://localhost:5077 w Firefoksie
+'   - panel nie dziala                      -> uruchamia go w tle (python app.py --autopilot) i otwiera Firefoksa, gdy odpowie
+' Firefox szukany w: App Paths (HKCU, HKLM), %ProgramFiles%, %ProgramFiles(x86)%, %LOCALAPPDATA%\Mozilla Firefox.
+' Bez Firefoksa - domyslna przegladarka. Bez czarnego okna konsoli. Jesli panel nie wstanie w 30 s - komunikat (panel.bat pokaze blad).
 Option Explicit
-Dim sh, katalog, i
+Dim sh, fso, katalog, i
 Set sh = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
 katalog = Replace(WScript.ScriptFullName, WScript.ScriptName, "")
 sh.CurrentDirectory = katalog
+Const PANEL = "http://localhost:5077"
 
 Function PanelDziala()
   Dim h
@@ -21,8 +24,47 @@ Function PanelDziala()
   On Error GoTo 0
 End Function
 
+Function Firefox()
+  ' Sciezka do firefox.exe albo "" (rejestr App Paths, potem typowe foldery instalacji).
+  Dim k, p, kand
+  Firefox = ""
+  On Error Resume Next
+  For Each k In Array("HKCU", "HKLM")
+    Err.Clear
+    p = sh.RegRead(k & "\Software\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe\")
+    If Err.Number = 0 Then
+      p = Trim(Replace(p, """", ""))
+      If p <> "" Then
+        If fso.FileExists(p) Then
+          Firefox = p
+          Exit Function
+        End If
+      End If
+    End If
+  Next
+  On Error GoTo 0
+  For Each kand In Array(sh.ExpandEnvironmentStrings("%ProgramFiles%") & "\Mozilla Firefox\firefox.exe", _
+                         sh.ExpandEnvironmentStrings("%ProgramFiles(x86)%") & "\Mozilla Firefox\firefox.exe", _
+                         sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Mozilla Firefox\firefox.exe")
+    If fso.FileExists(kand) Then
+      Firefox = kand
+      Exit Function
+    End If
+  Next
+End Function
+
+Sub OtworzPanel()
+  Dim ff
+  ff = Firefox()
+  If ff <> "" Then
+    sh.Run """" & ff & """ -new-tab " & PANEL, 1, False
+  Else
+    sh.Run PANEL, 1, False
+  End If
+End Sub
+
 If PanelDziala() Then
-  sh.Run "http://localhost:5077", 1, False
+  OtworzPanel
 Else
   sh.Run "python app.py --autopilot --bez-przegladarki", 0, False
   For i = 1 To 60
@@ -30,7 +72,7 @@ Else
     If PanelDziala() Then Exit For
   Next
   If PanelDziala() Then
-    sh.Run "http://localhost:5077", 1, False
+    OtworzPanel
   Else
     MsgBox "Panel nie wystartowal. Kliknij dwa razy w panel.bat (w folderze rolki-ai) - tam bedzie widac, co nie gra.", 48, "Rolki AI"
   End If

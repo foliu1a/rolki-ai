@@ -286,3 +286,8 @@ def test_pliki_startowe_bez_schtasks():
     tekst = open(os.path.join(katalog, "autostart.bat"), encoding="utf-8", errors="replace").read()
     assert "schtasks /Create" not in tekst and "skroty.vbs" in tekst
     assert "pulpit" in open(os.path.join(katalog, "aktualizuj.bat"), encoding="utf-8", errors="replace").read()
+    # panel ma sie otwierac w Firefoksie (skrot = rolki.vbs, panel.bat = BROWSER dla webbrowser w app.py)
+    vbs = open(os.path.join(katalog, "rolki.vbs"), encoding="utf-8", errors="replace").read()
+    assert "App Paths\\firefox.exe" in vbs and "-new-tab" in vbs and "Mozilla Firefox\\firefox.exe" in vbs
+    bat = open(os.path.join(katalog, "panel.bat"), encoding="utf-8", errors="replace").read()
+    assert 'App Paths\\firefox.exe' in bat and 'set "BROWSER=cmd /c start "" "%FF%" -new-tab %%s"' in bat and "python app.py" in bat
