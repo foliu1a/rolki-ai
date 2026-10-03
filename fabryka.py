@@ -150,9 +150,10 @@ def sprawdz_prompt(slug, ust=None):
         numery = sorted({int(m.group(1) or m.group(2)) for m in _WZORZEC_IMAGE.finditer(prompt)})
         if not numery:
             continue
-        if max(numery) != oczekiwane or len(numery) != oczekiwane:
+        # najwyzszy numer ma byc rowny liczbie zdjec: wyzszy = zdjecia nie ma, nizszy = ostatnie zdjecie (np. stroj) nieuzyte
+        if max(numery) != oczekiwane:
             uwagi.append(f"prompt {nazwa}: odwoluje sie do @Image {numery}, a zdjec jest {oczekiwane} "
-                         f"({'referencje' if nazwa == 'A' else 'referencje + stroj'}) - numery musza sie zgadzac")
+                         f"({'referencje' if nazwa == 'A' else 'referencje + stroj'}) - najwyzszy numer musi byc rowny liczbie zdjec")
     stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
     if (stroje or baza.stroj_domyslny(slug)) and not b:
         uwagi.append("sa zdjecia strojow, ale prompt B (stroj ze zdjecia) jest pusty")
