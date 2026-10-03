@@ -13,8 +13,10 @@ Najwazniejsze funkcje:
     model(jst)              -> schema modelu (parametry, media, aspect_ratios, durations)
     koszt(jst, params, media)   -> int (kredyty, bez tworzenia joba)
     generuj(jst, params, media, wait=True) -> job dict (z URL wyniku)
-    wyniki_url(job)         -> [url, ...]
+    wyniki_url(job)         -> [url, ...]  (najpewniejszy pierwszy, bez wejsc i miniatur)
+    status_joba(job)        -> "completed" | "failed" | ...   job_udany(job) / job_nieudany(job) / blad_joba(job)
     pobierz(url, sciezka)   -> sciezka
+    glosy()                 -> lista glosow do TTS / voice-change
 """
 import json
 import os
@@ -22,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 
 # Timeouty (sekundy) dla subprocess - CLI samo ma --wait-timeout, to jest tylko bezpiecznik.
@@ -158,10 +161,16 @@ def kredyty():
 # ---------------- modele ----------------
 
 def modele(typ=None):
+    """Lista modeli z CLI (dicty z job_type/name/type). Wymaga logowania."""
     args = ["model", "list"]
     if typ in ("image", "video", "audio", "text"):
         args.append(f"--{typ}")
-    return _uruchom(args)
+    dane = _uruchom(args)
+    if isinstance(dane, dict):
+        for k in ("items", "models", "data"):
+            if isinstance(dane.get(k), list):
+                return dane[k]
+    return dane if isinstance(dane, list) else []
 
 
 def model(jst):
@@ -251,13 +260,18 @@ def _wyciagnij_koszt(dane):
 
 
 def generuj(jst, params=None, media=None, wait=True, wait_timeout="30m", wait_interval="5s"):
-    """Tworzy job. Z wait=True blokuje do konca i zwraca obiekt joba z URL-ami wyniku."""
+    """Tworzy job. Z wait=True blokuje do konca i zwraca obiekt joba:
+    {id, job_type, display_name, status, created_at, params, result_url, min_result_url, thumbnail_url?}
+    (CLI 1.1.26 z --wait --json drukuje liste takich obiektow; bez --wait - liste UUID-ow jako stringi)."""
     args = ["generate", "create", jst] + _flagi(params, media)
     if wait:
         args += ["--wait", "--wait-timeout", wait_timeout, "--wait-interval", wait_interval]
     dane = _uruchom(args, timeout=TIMEOUT_GENERACJA)
     if isinstance(dane, list):
         dane = dane[0] if dane else {}
+    if isinstance(dane, str):
+        # bez --wait: sam identyfikator joba
+        return {"id": dane, "status": "queued"}
     return dane if isinstance(dane, dict) else {"surowe": dane}
 
 
@@ -266,6 +280,27 @@ def job(job_id):
     if isinstance(dane, list):
         dane = dane[0] if dane else {}
     return dane
+
+
+def doczytaj_url(job_obj, proby=5, odstep=8):
+    """Job 'completed', ale result_url == null (CLI widzi tylko result_url/min_result_url, a backend czasem
+    dopisuje link chwile po zakonczeniu). Odpytuje `generate get <id>` kilka razy. Zwraca (job, urls)."""
+    urls = wyniki_url(job_obj)
+    jid = job_id_z(job_obj)
+    if urls or not jid or not job_udany(job_obj):
+        return job_obj, urls
+    for i in range(proby):
+        time.sleep(odstep * (i + 1))
+        try:
+            swiezy = job(jid)
+        except HiggsfieldBlad:
+            continue
+        if isinstance(swiezy, dict) and swiezy:
+            job_obj = swiezy
+            urls = wyniki_url(job_obj)
+            if urls or job_nieudany(job_obj):
+                break
+    return job_obj, urls
 
 
 def czekaj(job_id, timeout="30m", interval="5s"):
@@ -288,12 +323,56 @@ def job_id_z(job_obj):
 
 
 def status_joba(job_obj):
+    """Status joba (lowercase). API zwraca `job_status` albo `status`, czasem tylko w jobs[0]."""
     if not isinstance(job_obj, dict):
         return None
-    for k in ("status", "state"):
+    for k in ("job_status", "status", "state"):
         if job_obj.get(k):
             return str(job_obj[k]).lower()
+    for k in ("data", "job", "job_set"):
+        w = status_joba(job_obj.get(k))
+        if w:
+            return w
+    jobs = job_obj.get("jobs")
+    if isinstance(jobs, list) and jobs:
+        return status_joba(jobs[0])
     return None
+
+
+# Statusy jobow w CLI 1.1.26: queued, pending, in_progress, completed, failed, nsfw, ip_detected, canceled
+STATUSY_OK = ("completed", "succeeded", "success", "done", "finished")
+STATUSY_BLAD = ("failed", "error", "cancelled", "canceled", "rejected", "nsfw", "ip_detected", "moderated")
+STATUSY_W_TOKU = ("queued", "pending", "in_progress", "processing", "running")
+
+
+def job_udany(job_obj):
+    return (status_joba(job_obj) or "") in STATUSY_OK
+
+
+def job_nieudany(job_obj):
+    return (status_joba(job_obj) or "") in STATUSY_BLAD
+
+
+def blad_joba(job_obj):
+    """Powod bledu z obiektu joba (fail_reason / error / detail), albo ''."""
+    if not isinstance(job_obj, dict):
+        return ""
+    for k in ("fail_reason", "error", "detail", "message", "reason"):
+        v = job_obj.get(k)
+        if isinstance(v, str) and v.strip():
+            typ = job_obj.get("fail_reason_type")
+            return f"{typ}: {v.strip()}" if isinstance(typ, str) and typ else v.strip()
+        if isinstance(v, dict):
+            w = blad_joba(v)
+            if w:
+                return w
+    jobs = job_obj.get("jobs")
+    if isinstance(jobs, list):
+        for j in jobs:
+            w = blad_joba(j)
+            if w:
+                return w
+    return ""
 
 
 _WZORZEC_URL = re.compile(
@@ -301,33 +380,76 @@ _WZORZEC_URL = re.compile(
     re.I,
 )
 
+# Poddrzewa JSON-a joba, w ktorych siedza WEJSCIA (nasze referencje, filmik zrodlowy) - nie wyniki.
+_KLUCZE_WEJSCIA = ("input", "inputs", "params", "request", "references", "image_references", "video_references",
+                   "audio_references", "media_inputs", "start_image", "end_image", "source", "prompt")
+# Klucze z linkami, ktore nigdy nie sa wynikiem (miniatury, podglady, upload).
+_KLUCZE_SMIECI = ("thumbnail", "preview", "avatar", "upload_url", "example", "icon", "logo")
+# Priorytet klucza z linkiem: nizszy = pewniejszy wynik.
+_PRIORYTET_KLUCZA = {
+    "result_url": 0, "video_url": 0, "image_url": 0, "audio_url": 0, "output_url": 0,
+    "url": 1, "urls": 1, "image_urls": 1, "video_urls": 1,
+    "min_result_url": 3, "video_s3_url": 4, "s3_url": 4,
+}
+
 
 def wyniki_url(job_obj):
-    """Wyciaga URL-e plikow wynikowych z obiektu joba (odporne na ksztalt JSON-a)."""
-    urls = []
+    """Linki do plikow wynikowych joba, najpewniejszy pierwszy.
 
-    def zbierz(o):
+    Odporne na ksztalt JSON-a: results.raw.url / result_url / jobs[].results[] / urls[].
+    Pomija poddrzewa z wejsciami (zeby nie zwrocic naszego filmiku zrodlowego) i miniatury.
+    """
+    kandydaci = []      # (priorytet, kolejnosc, url)
+    wejsciowe = set()   # linki z wejsc - wykluczamy je z wynikow
+
+    def _wejscie(o):
         if isinstance(o, dict):
-            for k, v in o.items():
-                if isinstance(v, str) and v.startswith("http") and (
-                    k in ("url", "video_url", "image_url", "result_url", "raw", "min")
-                    or _WZORZEC_URL.match(v)
-                ):
-                    urls.append(v)
-                else:
-                    zbierz(v)
+            for v in o.values():
+                _wejscie(v)
         elif isinstance(o, list):
             for v in o:
-                zbierz(v)
-        elif isinstance(o, str) and o.startswith("http") and _WZORZEC_URL.match(o):
-            urls.append(o)
+                _wejscie(v)
+        elif isinstance(o, str) and o.startswith("http"):
+            wejsciowe.add(o)
 
-    zbierz(job_obj)
+    def _zbierz(o, klucz=None, rodzic=None):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                kl = str(k).lower()
+                if kl in _KLUCZE_WEJSCIA:
+                    _wejscie(v)
+                    continue
+                if any(sm in kl for sm in _KLUCZE_SMIECI):
+                    continue
+                _zbierz(v, kl, klucz)
+        elif isinstance(o, list):
+            for v in o:
+                _zbierz(v, klucz, rodzic)
+        elif isinstance(o, str) and o.startswith("http"):
+            if klucz is None:
+                return
+            prio = _PRIORYTET_KLUCZA.get(klucz)
+            if prio is None:
+                if not _WZORZEC_URL.match(o):
+                    return
+                prio = 2
+            if klucz == "url" and rodzic == "min":
+                prio = 3
+            elif klucz == "url" and rodzic == "raw":
+                prio = 0
+            elif prio == 1 and _WZORZEC_URL.match(o):
+                prio = 1
+            elif prio == 1:
+                prio = 2
+            kandydaci.append((prio, len(kandydaci), o))
+
+    _zbierz(job_obj)
     widziane, wynik = set(), []
-    for u in urls:
-        if u not in widziane:
-            widziane.add(u)
-            wynik.append(u)
+    for prio, _, u in sorted(kandydaci):
+        if u in widziane or u in wejsciowe:
+            continue
+        widziane.add(u)
+        wynik.append(u)
     return wynik
 
 
@@ -347,6 +469,31 @@ def upload(plik):
     if not isinstance(dane, dict) or not dane.get("id"):
         raise HiggsfieldBlad(f"upload create nie zwrocil id: {dane}")
     return dane
+
+
+# ---------------- glosy (text-to-speech / voice-change) ----------------
+
+def glosy():
+    """Lista glosow: id -> --voice-id, Voice Type (preset/element) -> --voice-type."""
+    dane = _uruchom(["voices", "list"])
+    if isinstance(dane, dict):
+        for k in ("items", "voices", "data"):
+            if isinstance(dane.get(k), list):
+                return dane[k]
+    return dane if isinstance(dane, list) else []
+
+
+def joby(typ=None, ile=20):
+    """Ostatnie joby (--video/--image/--audio)."""
+    args = ["generate", "list", "--size", str(ile)]
+    if typ in ("image", "video", "audio", "text"):
+        args.append(f"--{typ}")
+    dane = _uruchom(args)
+    if isinstance(dane, dict):
+        for k in ("items", "jobs", "data"):
+            if isinstance(dane.get(k), list):
+                return dane[k]
+    return dane if isinstance(dane, list) else []
 
 
 # ---------------- Soul ID ----------------
