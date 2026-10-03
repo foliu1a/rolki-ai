@@ -120,10 +120,24 @@ body.konsola-otwarta .tresc { padding-bottom: calc(var(--konsola-wys, calc(var(-
 .kredyty.ok .kredyty-kropka { background: var(--ok); }
 .kredyty.uwaga .kredyty-kropka { background: var(--uwaga); }
 .kredyty.zle .kredyty-kropka { background: var(--zle); }
-.kredyty-tekst { font-size: 15px; color: var(--szary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kredyty-tekst b { color: var(--tekst); font-size: 18px; font-variant-numeric: tabular-nums; }
-.kredyty.uwaga .kredyty-tekst, .kredyty.uwaga .kredyty-tekst b { color: var(--uwaga); }
-.kredyty.zle .kredyty-tekst, .kredyty.zle .kredyty-tekst b { color: var(--zle); }
+.kredyty-kropka { display: none; }   /* kazda pastylka salda ma wlasna kropke */
+.kredyty-tekst { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font-size: 14px; color: var(--szary); min-width: 0; }
+.saldo-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 999px;
+  border: 1px solid var(--linia); background: var(--karta); color: var(--szary); font-size: 13px; white-space: nowrap; line-height: 1.3;
+}
+.saldo-pill .kropka { width: 8px; height: 8px; flex: none; background: var(--linia-3); }
+.saldo-pill.ok .kropka { background: var(--ok); }
+.saldo-pill.uwaga .kropka { background: var(--uwaga); }
+.saldo-pill.zle .kropka { background: var(--zle); }
+.saldo-pill b { color: var(--tekst); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.saldo-pill small { font-size: 12px; color: var(--szary); }
+.saldo-pill.zle, .saldo-pill.zle b, .saldo-pill.zle small { color: var(--zle); }
+.saldo-pill.aktywny { border-color: var(--akcent); }
+.saldo-nazwa { font-weight: 600; color: var(--tekst-2, var(--szary)); }
+.kredyty-dzis { white-space: nowrap; font-size: 13px; }
+.kredyty.uwaga .kredyty-dzis { color: var(--uwaga); }
+.kredyty.zle .kredyty-dzis { color: var(--zle); }
 .offline {
   background: var(--zle-tlo); color: var(--zle); border-bottom: 1px solid rgba(240, 100, 126, .3);
   padding: 10px 24px; font-size: 15px; text-align: center;

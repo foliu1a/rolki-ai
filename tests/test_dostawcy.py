@@ -237,6 +237,25 @@ def test_sync_opis_bledu_401(dane, udawany_http):
     assert ok is False and "401" in kom
 
 
+# ---------------- elevenlabs (tylko saldo) ----------------
+
+def test_elevenlabs_saldo_i_gotowy(dane, udawany_http):
+    from dostawcy import elevenlabs
+    assert elevenlabs.gotowy() == (False, "brak klucza API ElevenLabs (panel -> Konta)")
+    sekrety.zapisz_klucz("elevenlabs", "el-123")
+    udawany_http.ustaw("GET", "/user/subscription", {"tier": "starter", "character_count": 1200, "character_limit": 30000})
+    assert elevenlabs.saldo() == 28800
+    s = elevenlabs.saldo_szczegoly()
+    assert s == {"kredyty": 28800, "limit": 30000, "plan": "starter", "jednostka": "zn"}
+    assert udawany_http.wywolania[-1][3]["xi-api-key"] == "el-123"
+    assert elevenlabs.gotowy() == (True, "klucz dziala, plan starter: zostalo 28800 z 30000 znakow w tym miesiacu")
+    udawany_http.ustaw("GET", "/user/subscription", http.BladHTTP(401, json.dumps({"detail": {"status": "invalid_api_key", "message": "Invalid API key"}}), "u"))
+    with pytest.raises(dostawcy.BladDostawcy, match="ElevenLabs 401: Invalid API key"):
+        elevenlabs.saldo()
+    assert elevenlabs.gotowy()[0] is False
+    assert dostawcy.dostawca("elevenlabs") is elevenlabs and "elevenlabs" not in dostawcy.NAZWY
+
+
 # ---------------- lipsync.zrob ----------------
 
 def test_lipsync_zrob_sync(bez_mediatool_modelka, monkeypatch, tmp_path):

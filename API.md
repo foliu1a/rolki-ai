@@ -57,6 +57,10 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - Zdjęcia ze strojów: ustawienia `zdjecia_stroje` (bool, co drugie zdjęcie w kolejnym stroju ze `stroje/`) i `zdjecia_prompt_stroj`
   (dopisek do promptu, strój = ostatni obraz). Akcja `{"typ": "zdjecia", "stroj": "auto"|"bez"|"<plik ze stroje/>"}` (brak = automatycznie).
   Wpis w `/api/zdjecia` ma `stroj` (ścieżka albo null).
+- Salda (2.5): `/api/stan.saldo` = `{"higgsfield": {"kredyty", "blad", "czas", "jednostka": "kr"}, "yapper": {...} (gdy klucz albo robi rolki
+  aktywnej persony), "elevenlabs": {"kredyty": zostało znaków, "limit", "plan", "jednostka": "zn", ...} (gdy klucz)}`. Pasek u góry pokazuje
+  po jednej pastylce na konto (`.saldo-pill`, aktywne konto = ramka akcentu) + „dziś wydałeś X z Y” dla konta robiącego rolki.
+  `POST /api/konta/test {"dostawca": "elevenlabs"}` sprawdza klucz przez `GET /v1/user/subscription` (dostawcy/elevenlabs.py: tylko gotowy/saldo).
 - Jakość i koszt (2.2): `/api/stan.jakosc` = `{"preset": "oszczednie"|"normalnie"|"najlepiej"|"wlasne", "resolution", "max_sekund_rolki",
   "koszt_rolki": 112, "koszt_sekundy": 7.5, "za_drogo": false, "max_kredyty_na_rolke": 150, "presety": {"oszczednie": {"resolution": "720p",
   "max_sekund_rolki": 10, "koszt_rolki": 75}, "normalnie": {...112}, "najlepiej": {...180}}}` (szacunek: sekundy × stawka; prawdziwą cenę

@@ -112,6 +112,46 @@ def test_skanuj_tnie_wg_max_sekund_rolki(modelka, cli, bez_ffmpeg, monkeypatch):
     assert len(fabryka.skanuj(modelka)["nowe"]) == 1 and wywolania == [15, 10]
 
 
+def test_api_stan_salda_higgsfield_yapper_elevenlabs(modelka, cli, monkeypatch):
+    """Pasek u gory: Higgsfield zawsze, yapper i ElevenLabs tylko gdy jest klucz (z jednostka i szczegolami)."""
+    import sekrety
+    import app as panel
+    from dostawcy import elevenlabs, yapper
+    panel._saldo.clear(); panel._konta_test.clear()
+    panel.app.config["TESTING"] = True
+    with panel.app.test_client() as c:
+        s = c.get("/api/stan?saldo=1").get_json()["saldo"]
+        assert set(s) == {"higgsfield"} and s["higgsfield"]["kredyty"] == 1000 and s["higgsfield"]["jednostka"] == "kr"
+        sekrety.zapisz_klucz("elevenlabs", "el-1")
+        sekrety.zapisz_klucz("yapper", "y-1")
+        monkeypatch.setattr(elevenlabs, "saldo_szczegoly", lambda: {"kredyty": 28800, "limit": 30000, "plan": "starter", "jednostka": "zn"})
+        monkeypatch.setattr(yapper, "saldo", lambda: 7000)
+        panel._saldo.clear()
+        s = c.get("/api/stan?saldo=1").get_json()["saldo"]
+        assert s["yapper"]["kredyty"] == 7000 and s["yapper"]["jednostka"] == "kr"
+        assert s["elevenlabs"] == {"kredyty": 28800, "limit": 30000, "plan": "starter", "jednostka": "zn", "blad": None, "czas": s["elevenlabs"]["czas"]}
+        monkeypatch.setattr(elevenlabs, "gotowy", lambda: (True, "klucz dziala"))
+        assert c.post("/api/konta/test", json={"dostawca": "elevenlabs"}).get_json()["dziala"] is True
+        # bez klucza ElevenLabs znika z paska; zly klucz = blad w saldzie, panel sie nie wywala
+        sekrety.zapisz_klucz("elevenlabs", "")
+        panel._saldo.clear()
+        assert "elevenlabs" not in c.get("/api/stan?saldo=1").get_json()["saldo"]
+        sekrety.zapisz_klucz("elevenlabs", "el-2")
+        monkeypatch.setattr(elevenlabs, "saldo_szczegoly", lambda: (_ for _ in ()).throw(dostawcy_blad("ElevenLabs 401: zly klucz API")))
+        panel._saldo.clear()
+        s = c.get("/api/stan?saldo=1").get_json()["saldo"]["elevenlabs"]
+        assert s["kredyty"] is None and "401" in s["blad"] and s["jednostka"] == "zn"
+
+
+def dostawca_blad_klasa():
+    import dostawcy
+    return dostawcy.BladDostawcy
+
+
+def dostawcy_blad(tekst):
+    return dostawca_blad_klasa()(tekst)
+
+
 def test_api_jakosc_i_zostalo(modelka, cli, bez_ffmpeg):
     import app as panel
     panel._saldo.clear()

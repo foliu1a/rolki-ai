@@ -18,7 +18,8 @@ Bledy dostawcy (CLI/API/siec) to BladDostawcy - fabryka je lapie i decyduje o po
 import importlib
 import re
 
-NAZWY = ("higgsfield", "yapper")
+NAZWY = ("higgsfield", "yapper")                 # robia rolki (pelny interfejs)
+NAZWY_SALDA = NAZWY + ("elevenlabs",)            # maja saldo do paska w panelu (elevenlabs: tylko gotowy/saldo)
 
 
 def sekundy(timeout, domyslnie=1800):
@@ -42,6 +43,6 @@ class BrakKlucza(BladDostawcy):
 
 def dostawca(nazwa):
     nazwa = (nazwa or "higgsfield").strip().lower()
-    if nazwa not in NAZWY:
-        raise BladDostawcy(f"Nieznany dostawca '{nazwa}'. Znam: {', '.join(NAZWY)}")
+    if nazwa not in NAZWY_SALDA:
+        raise BladDostawcy(f"Nieznany dostawca '{nazwa}'. Znam: {', '.join(NAZWY_SALDA)}")
     return importlib.import_module(f"dostawcy.{nazwa}")

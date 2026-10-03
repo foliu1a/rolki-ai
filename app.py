@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.4"
+WERSJA = "2.5"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -180,14 +180,21 @@ _konta_test = {}
 CZEKAJ_NA_SALDO_S = 3   # tyle /api/stan czeka na swieze saldo; dluzej = oddaje stare i dociaga w tle
 
 
+NAZWY_KONT_Z_KLUCZEM = {"yapper": "yapper.so", "elevenlabs": "ElevenLabs"}
+
+
 def _pobierz_saldo(nazwa):
     try:
         d = dostawcy.dostawca(nazwa)
-        if nazwa == "yapper" and not sekrety.klucz("yapper"):
-            raise dostawcy.BrakKlucza("brak klucza API yapper.so (panel -> Konta)")
-        wpis = {"kredyty": d.saldo(), "blad": None, "czas": time.time()}
+        if nazwa in NAZWY_KONT_Z_KLUCZEM and not sekrety.klucz(nazwa):
+            raise dostawcy.BrakKlucza(f"brak klucza API {NAZWY_KONT_Z_KLUCZEM[nazwa]} (panel -> Konta)")
+        if hasattr(d, "saldo_szczegoly"):
+            wpis = dict(d.saldo_szczegoly(), blad=None, czas=time.time())      # np. ElevenLabs: zostalo/limit znakow, plan
+        else:
+            wpis = {"kredyty": d.saldo(), "blad": None, "czas": time.time()}
+        wpis.setdefault("jednostka", getattr(d, "JEDNOSTKA", "kr"))
     except dostawcy.BladDostawcy as e:
-        wpis = {"kredyty": None, "blad": str(e), "czas": time.time()}
+        wpis = {"kredyty": None, "blad": str(e), "czas": time.time(), "jednostka": getattr(dostawcy.dostawca(nazwa), "JEDNOSTKA", "kr")}
     except Exception as e:
         wpis = {"kredyty": None, "blad": f"{type(e).__name__}: {e}", "czas": time.time()}
     with _saldo_lock:
@@ -214,9 +221,13 @@ def _saldo_dostawcy(nazwa, wymus=False):
 
 
 def _salda(wymus=False, dostawca_aktywnej=None):
+    """Salda do paska w panelu: Higgsfield zawsze, yapper.so gdy jest klucz albo robi rolki aktywnej persony,
+    ElevenLabs (znaki TTS) gdy jest klucz."""
     nazwy = ["higgsfield"]
     if dostawca_aktywnej == "yapper" or sekrety.klucz("yapper"):
         nazwy.append("yapper")
+    if sekrety.klucz("elevenlabs"):
+        nazwy.append("elevenlabs")
     return {n: _saldo_dostawcy(n, wymus) for n in nazwy}
 
 
@@ -955,7 +966,9 @@ def api_test_konta():
             dziala, komunikat = yapper.gotowy()
             _saldo.pop("yapper", None)
         elif d == "elevenlabs":
-            dziala, komunikat = bool(sekrety.klucz("elevenlabs")), "klucz zapisany (nie testuje polaczenia)"
+            from dostawcy import elevenlabs
+            dziala, komunikat = elevenlabs.gotowy()
+            _saldo.pop("elevenlabs", None)
         elif d == "telegram":
             from dostawcy import telegram
             dziala, komunikat = telegram.gotowy()

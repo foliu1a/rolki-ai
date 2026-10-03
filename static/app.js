@@ -614,39 +614,64 @@ function renderAvatarPersony() {
   el.hidden = false;
 }
 
-// „Masz 1 234 kredytów · dziś wydałeś 90 z 300” – czerwone poniżej minimum, pomarańczowe przy 80 % limitu.
+// Pasek sald u góry: po jednej „pastylce” na konto (Higgsfield · yapper.so · ElevenLabs) + „dziś wydałeś X z Y” dla konta,
+// które robi rolki tej persony. Kropka w pastylce: zielona (jest), czerwona (za mało / nie widzę), szara (sprawdzam).
+const NAZWY_SALD = { higgsfield: 'Higgsfield', yapper: 'yapper.so', elevenlabs: 'ElevenLabs' };
+const JEDNOSTKI_SALD = { kr: ['kredyt', 'kredyty', 'kredytów'], zn: ['znak', 'znaki', 'znaków'], c: ['cent', 'centy', 'centów'] };
+
+function pillSalda(id, s, aktywny, minKr) {
+  const nazwa = NAZWY_SALD[id] || id;
+  const formy = JEDNOSTKI_SALD[s.jednostka || 'kr'] || JEDNOSTKI_SALD.kr;
+  const tytul = [];
+  let klasa = 'szary', tresc;
+  if (s.kredyty !== null && s.kredyty !== undefined) {
+    klasa = 'ok';
+    // kredyty skracamy do „kr” (jak w całym panelu), znaki ElevenLabs piszemy słowem – inaczej pasek robi się za długi
+    const jedn = (s.jednostka || 'kr') === 'kr' ? 'kr' : odmiana(s.kredyty, ...formy);
+    tresc = `<b>${esc(liczba(s.kredyty))}</b> <small>${esc(jedn)}</small>`;
+    if (id === 'elevenlabs') tytul.push(`ElevenLabs: zostało ${liczba(s.kredyty)}${s.limit ? ' z ' + liczba(s.limit) : ''} znaków do czytania tekstu w tym miesiącu${s.plan ? ' (plan ' + s.plan + ')' : ''}.`);
+    else tytul.push(`${nazwa}: kredyty na rolki${id === 'yapper' ? ' (Wan)' : ' i zdjęcia'} – każda rolka kosztuje ich kilkadziesiąt.`);
+    if (aktywny) {
+      tytul.push('To konto robi teraz rolki tej persony.');
+      if (s.kredyty < minKr) { klasa = 'zle'; tytul.push(`To mniej niż ${liczba(minKr)} – tyle bezpiecznik każe zostawić na koncie, więc rolki się nie zrobią.`); }
+      else if (minKr) tytul.push(`Bezpiecznik zostawia na koncie co najmniej ${liczba(minKr)}.`);
+    }
+    if (s.czas) tytul.push(`Stan z ${formatCzas(s.czas)}.`);
+  } else if (s.blad) {
+    klasa = 'zle';
+    tresc = `<small>nie widzę ${id === 'elevenlabs' ? 'znaków' : 'kredytów'}</small>`;
+    tytul.push(prostyBlad(s.blad));
+  } else {
+    tresc = '<small>sprawdzam…</small>';
+  }
+  return `<span class="saldo-pill ${klasa}${aktywny ? ' aktywny' : ''}" data-saldo="${esc(id)}" title="${esc(tytul.join(' '))}"><i class="kropka" aria-hidden="true"></i><span class="saldo-nazwa">${esc(nazwa)}</span> ${tresc}</span>`;
+}
+
 function renderKredyty() {
   const s = state.stan;
   const u = (s && s.ustawienia) || {};
   const b = (s && s.budzet) || {};
   const dost = b.dostawca || u.dostawca || 'higgsfield';
-  const saldo = state.saldo[dost] || {};
   const wrap = $('#kredyty'), el = $('#kredyty-tekst');
   const minKr = Number(b.min_kredyty !== undefined ? b.min_kredyty : u.min_kredyty) || 0;
   const wydano = Number(b.wydano_dzis) || 0, limit = Number(b.limit_dzienny) || 0;
-  const gdzie = dost === 'yapper' ? ' yapper.so' : '';
-  let html, klasa = '';
+  const znaneKonta = Object.keys(NAZWY_SALD);
+  const ids = znaneKonta.filter(id => state.saldo[id]).concat(Object.keys(state.saldo).filter(id => !znaneKonta.includes(id)));
+  if (!ids.includes(dost)) ids.unshift(dost);   // konto robiące rolki zawsze widać, nawet zanim saldo przyjdzie
+  let html = ids.map(id => pillSalda(id, state.saldo[id] || {}, id === dost, minKr)).join('');
+  const aktywne = state.saldo[dost] || {};
   const tytul = [];
-  if (saldo.kredyty !== null && saldo.kredyty !== undefined) {
-    html = `Masz <b>${esc(liczba(saldo.kredyty))}</b> ${odmiana(saldo.kredyty, 'kredyt', 'kredyty', 'kredytów')}${gdzie}`;
-    tytul.push(`Kredyty to waluta ${dost === 'yapper' ? 'yapper.so' : 'Higgsfield'} – każda rolka kosztuje ich kilkadziesiąt.`);
-    if (saldo.kredyty < minKr) { klasa = 'zle'; tytul.push(`To mniej niż ${liczba(minKr)} – tyle bezpiecznik każe zostawić na koncie, więc rolki się nie zrobią.`); }
-    else if (minKr) tytul.push(`Bezpiecznik zostawia na koncie co najmniej ${liczba(minKr)}.`);
-    if (saldo.czas) tytul.push(`Stan z ${formatCzas(saldo.czas)}.`);
-  } else if (saldo.blad) {
-    html = `<b>Nie widzę kredytów</b>${gdzie}`; klasa = 'zle'; tytul.push(prostyBlad(saldo.blad));
-  } else {
-    html = 'Sprawdzam kredyty…';
-  }
+  let klasa = '';
+  if (aktywne.kredyty !== null && aktywne.kredyty !== undefined) { if (aktywne.kredyty < minKr) klasa = 'zle'; }
+  else if (aktywne.blad) klasa = 'zle';
   if (s) {
     html += ` <span class="kredyty-dzis">· dziś ${wydano ? 'wydałeś ' + esc(liczba(wydano)) : 'nic nie wydałeś'}${limit ? ' z ' + esc(liczba(limit)) : ''}</span>`;
     if (limit && wydano >= limit) { klasa = klasa || 'zle'; tytul.push('Dzisiejszy limit kredytów jest wykorzystany – jutro liczy się od nowa.'); }
     else if (limit && wydano >= limit * 0.8) { klasa = klasa || 'uwaga'; tytul.push(`Zbliżasz się do dziennego limitu ${liczba(limit)}.`); }
     else if (limit) tytul.push(`Dzienny limit: ${liczba(limit)} (Ustawienia → Limity, tryb pełny).`);
   }
-  el.innerHTML = html;
-  // kropka obok kredytów: zielona (wszystko gra), pomarańczowa (blisko limitu), czerwona (za mało / nie widzę), szara (sprawdzam)
-  const znane = saldo.kredyty !== null && saldo.kredyty !== undefined;
+  if (el.innerHTML !== html) el.innerHTML = html;
+  const znane = aktywne.kredyty !== null && aktywne.kredyty !== undefined;
   wrap.className = 'kredyty' + (klasa ? ' ' + klasa : (znane ? ' ok' : ''));
   wrap.title = tytul.join(' ');
 }
