@@ -14,24 +14,18 @@
   <!-- ===================== BOK ===================== -->
   <aside class="bok">
     <nav class="nav" aria-label="Główne menu">
-      <a href="#pulpit" data-strona="pulpit"><span class="ikona" data-ikona="pulpit"></span><span class="etykieta">Pulpit</span></a>
-      <a href="#kolejka" data-strona="kolejka"><span class="ikona" data-ikona="kolejka"></span><span class="etykieta">Kolejka</span><span class="odznaka" id="odznaka-nowe" title="nowe pomysły" hidden></span><span class="odznaka zle" id="odznaka-bledy" title="błędy" hidden></span></a>
+      <a href="#start" data-strona="start"><span class="ikona" data-ikona="start"></span><span class="etykieta">Start</span></a>
+      <a href="#rolki" data-strona="rolki"><span class="ikona" data-ikona="film"></span><span class="etykieta">Rolki</span><span class="odznaka" id="odznaka-rolki" title="rolki, które czekają" hidden></span><span class="odznaka zle" id="odznaka-rolki-bledy" title="rolki, które nie wyszły" hidden></span></a>
       <a href="#zdjecia" data-strona="zdjecia"><span class="ikona" data-ikona="zdjecia"></span><span class="etykieta">Zdjęcia</span></a>
       <a href="#lipsync" data-strona="lipsync"><span class="ikona" data-ikona="lipsync"></span><span class="etykieta">Lipsync</span></a>
-      <a href="#persona" data-strona="persona"><span class="ikona" data-ikona="persona"></span><span class="etykieta">Persona</span></a>
-      <a href="#konta" data-strona="konta"><span class="ikona" data-ikona="konta"></span><span class="etykieta">Konta</span></a>
-      <a href="#teksty" data-strona="teksty"><span class="ikona" data-ikona="teksty"></span><span class="etykieta">Teksty</span></a>
-      <a href="#dziennik" data-strona="dziennik"><span class="ikona" data-ikona="dziennik"></span><span class="etykieta">Dziennik</span></a>
+      <a href="#ustawienia" data-strona="ustawienia"><span class="ikona" data-ikona="ustawienia"></span><span class="etykieta">Ustawienia</span></a>
+      <a href="#historia" data-strona="historia"><span class="ikona" data-ikona="historia"></span><span class="etykieta">Historia</span></a>
     </nav>
     <div class="bok-dol">
-      <div class="autopilot-wiersz">
-        <b><span class="ikona" data-ikona="bolt"></span>Autopilot</b>
-        <label class="przelacznik" title="Autopilot: skanuj → generuj → pierz → lipsync → zdjęcia (w pętli)">
-          <input type="checkbox" id="autopilot-przelacznik" aria-label="Autopilot włączony">
-          <span class="suwak"></span>
-        </label>
-      </div>
-      <div class="autopilot-tekst" id="autopilot-status">—</div>
+      <label class="tryb" title="Tryb prosty pokazuje tylko to, co potrzebne. Tryb pełny pokazuje wszystkie ustawienia, surowe komunikaty i logi.">
+        <span class="tryb-tekst"><b id="tryb-nazwa">Tryb prosty</b><small id="tryb-opis">tylko to, co potrzebne</small></span>
+        <span class="przelacznik"><input type="checkbox" id="tryb-przelacznik" aria-label="Tryb pełny (wszystkie ustawienia i logi)"><span class="suwak"></span></span>
+      </label>
       <div class="wersja" id="wersja"></div>
     </div>
   </aside>
@@ -46,137 +40,150 @@
         <button class="btn btn-maly" type="button" data-akcja="nowa-persona"><span class="ikona" data-ikona="plus"></span>nowa</button>
       </div>
       <div class="kredyty" id="kredyty">
-        <div class="kredyty-blok">
-          <span class="kredyty-etykieta">Higgsfield</span>
-          <span class="kredyty-liczba" id="kredyty-hf-liczba">—</span>
-          <span class="kredyty-blad" id="kredyty-hf-blad" hidden></span>
-        </div>
-        <div class="kredyty-blok" id="kredyty-yapper" hidden>
-          <span class="kredyty-etykieta">yapper.so</span>
-          <span class="kredyty-liczba" id="kredyty-yapper-liczba">—</span>
-          <span class="kredyty-blad" id="kredyty-yapper-blad" hidden></span>
-        </div>
-        <div class="kredyty-blok">
-          <span class="kredyty-etykieta" id="kredyty-dzis-etykieta">dziś</span>
-          <span class="kredyty-dzis" id="kredyty-dzis">—</span>
-          <span class="kredyty-pasek"><i id="kredyty-pasek"></i></span>
-        </div>
-        <button class="btn btn-ikona btn-tekst" type="button" data-akcja="odswiez-saldo" title="Odśwież saldo" aria-label="Odśwież saldo"><span class="ikona" data-ikona="odswiez"></span></button>
+        <span class="kredyty-tekst" id="kredyty-tekst">Sprawdzam kredyty…</span>
+        <button class="btn btn-ikona btn-tekst" type="button" data-akcja="odswiez-saldo" title="Sprawdź kredyty jeszcze raz" aria-label="Sprawdź kredyty jeszcze raz"><span class="ikona" data-ikona="odswiez"></span></button>
       </div>
     </header>
 
-    <div class="offline" id="offline" hidden>Brak połączenia z panelem – sprawdź, czy <b>panel.bat</b> (app.py) działa.</div>
+    <div class="offline" id="offline" hidden>Panel nie odpowiada. Sprawdź, czy okno <b>panel.bat</b> jest otwarte.</div>
 
     <main class="tresc">
 
       <!-- brak persony -->
       <div class="pusto duzy" id="brak-persony" hidden>
         <span class="ikona" data-ikona="persona"></span>
-        <b>Nie ma jeszcze żadnej persony</b>
-        <span>Persona to „modelka” AI: ma swoje zdjęcia referencyjne, prompty, wrzutnię i gotowe rolki.</span>
-        <button class="btn btn-glowny btn-duzy" type="button" data-akcja="nowa-persona"><span class="ikona" data-ikona="plus"></span>Załóż pierwszą personę</button>
+        <b>Zacznij od dodania persony</b>
+        <span>Persona to Twoja „modelka” AI. Ma swoje zdjęcia, swój opis dla AI i swoje foldery z filmikami.</span>
+        <button class="btn btn-glowny btn-duzy" type="button" data-akcja="nowa-persona"><span class="ikona" data-ikona="plus"></span>Dodaj pierwszą personę</button>
       </div>
 
       <div id="strony" hidden>
 
-        <!-- ===================== PULPIT ===================== -->
-        <section class="strona" id="strona-pulpit" hidden>
+        <!-- ===================== START ===================== -->
+        <section class="strona" id="strona-start" hidden>
           <div class="naglowek-strony">
-            <div><h1>Pulpit</h1><p id="pulpit-podtytul">Co się dzieje i co zrobić dalej.</p></div>
+            <div><h1>Start</h1><p id="start-podtytul">Trzy kroki: wrzuć filmiki, zrób rolki, odbierz.</p></div>
           </div>
 
-          <div class="siatka siatka-4">
-            <div class="kafel" id="kafel-do-generacji"><div class="kafel-liczba">0</div><div class="kafel-etykieta">do generacji</div></div>
-            <div class="kafel" id="kafel-bez-promptu"><div class="kafel-liczba">0</div><div class="kafel-etykieta">bez promptu</div></div>
-            <div class="kafel" id="kafel-gotowe"><div class="kafel-liczba">0</div><div class="kafel-etykieta">gotowe</div></div>
-            <div class="kafel" id="kafel-bledy"><div class="kafel-liczba">0</div><div class="kafel-etykieta">błędy</div></div>
+          <div class="banner" id="banner" role="status">
+            <span class="banner-kropka"></span>
+            <div class="banner-tekst" id="banner-tekst">Sprawdzam, co się dzieje…</div>
+            <div class="banner-akcja" id="banner-akcja"></div>
           </div>
 
-          <div class="siatka siatka-2">
-            <div class="karta" id="karta-co-teraz">
-              <div class="karta-naglowek"><div><h2>Co teraz?</h2><p id="co-teraz-opis">…</p></div></div>
-              <div id="co-teraz-szczegoly"></div>
-              <div class="akcje-duze">
-                <button class="btn btn-duzy btn-glowny" type="button" data-akcja="skanuj">Skanuj wrzutnię</button>
-                <button class="btn btn-duzy" type="button" data-akcja="koszt">Policz koszt</button>
-                <button class="btn btn-duzy" type="button" data-akcja="generuj-wszystko">Generuj wszystko</button>
-                <button class="btn btn-duzy" type="button" data-akcja="autopilot-raz">Jeden przebieg autopilota</button>
+          <div class="kroki">
+            <section class="karta krok" id="krok-1" aria-labelledby="krok1-tytul">
+              <header class="krok-naglowek"><span class="krok-numer">1</span><h2 id="krok1-tytul">Wrzuć filmiki</h2></header>
+              <div class="strefa duza" data-upload="zrodlo" tabindex="0" role="button" aria-label="Wrzuć filmiki">
+                <span class="ikona" data-ikona="upload"></span>
+                <b>Przeciągnij filmiki tutaj</b>
+                <span>albo kliknij, żeby wybrać (mp4, mov)</span>
               </div>
-            </div>
-
-            <div class="karta" id="karta-budzet">
-              <div class="karta-naglowek"><div><h2>Budżet dzienny</h2><p id="budzet-dostawca">kredyty wydane dziś</p></div><a href="#persona" class="btn btn-maly btn-tekst">ustawienia</a></div>
-              <div class="budzet-duzy"><span class="budzet-liczba" id="budzet-wydano">0</span><span class="budzet-z" id="budzet-limit">/ — kr</span></div>
-              <div class="pasek" id="budzet-pasek"><i></i></div>
-              <dl class="kv">
-                <dt>rolki dziś</dt><dd id="budzet-rolki">—</dd>
-                <dt>minimum na koncie</dt><dd id="budzet-min">—</dd>
-                <dt>maks. na jedną rolkę</dt><dd id="budzet-max">—</dd>
-                <dt>zdjęcia dziś</dt><dd id="budzet-zdjecia">—</dd>
-              </dl>
-            </div>
-
-            <div class="karta" id="karta-dziennik">
-              <div class="karta-naglowek"><div><h2>Ostatnie zdarzenia</h2></div><a href="#dziennik" class="btn btn-maly btn-tekst">cały dziennik</a></div>
-              <ul class="wpisy" id="pulpit-dziennik"></ul>
-            </div>
-
-            <div class="karta" id="karta-foldery">
-              <div class="karta-naglowek"><div><h2>Foldery</h2><p>Tu wrzucasz filmiki, stąd zabierasz gotowe rolki.</p></div></div>
-              <div class="folder-wiersz">
-                <span class="etykieta">Wrzutnia</span>
+              <p class="krok-info" id="krok1-info">—</p>
+              <div class="folder">
+                <span class="etykieta">Albo wrzuć je do folderu:</span>
                 <span class="sciezka" id="folder-wrzutnia">—</span>
                 <button class="btn btn-maly" type="button" data-akcja="kopiuj" data-cel="#folder-wrzutnia"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
               </div>
-              <div class="folder-wiersz">
-                <span class="etykieta">Gotowe</span>
+            </section>
+
+            <section class="karta krok" id="krok-2" aria-labelledby="krok2-tytul">
+              <header class="krok-naglowek"><span class="krok-numer">2</span><h2 id="krok2-tytul">Zrób rolki</h2></header>
+              <p class="krok-info" id="krok2-info">—</p>
+              <button class="btn btn-glowny btn-krok" type="button" data-akcja="zrob-rolki" id="btn-zrob-rolki">Zrób rolki</button>
+              <p class="krok-podpis">Najpierw sprawdzę nowe filmiki i policzę koszt. Zapytam, zanim wydam kredyty.</p>
+              <div class="postep" id="krok2-postep" hidden>
+                <span class="kropka kredyty pulsuje"></span>
+                <span class="postep-tekst" id="krok2-postep-tekst">Pracuję…</span>
+                <button class="btn btn-maly btn-zly" type="button" data-akcja="stop"><span class="ikona" data-ikona="stop"></span>STOP</button>
+              </div>
+              <div class="krok-wynik" id="krok2-wynik" hidden></div>
+              <div class="krok-drugie">
+                <button class="btn" type="button" data-akcja="skanuj">Tylko sprawdź nowe filmiki</button>
+                <button class="btn" type="button" data-akcja="koszt">Ile to będzie kosztować?</button>
+              </div>
+            </section>
+
+            <section class="karta krok" id="krok-3" aria-labelledby="krok3-tytul">
+              <header class="krok-naglowek"><span class="krok-numer">3</span><h2 id="krok3-tytul">Odbierz</h2></header>
+              <div class="odbierz" id="odbierz-lista"></div>
+              <div class="folder">
+                <span class="etykieta">Gotowe rolki leżą w folderze:</span>
                 <span class="sciezka" id="folder-gotowe">—</span>
                 <button class="btn btn-maly" type="button" data-akcja="kopiuj" data-cel="#folder-gotowe"><span class="ikona" data-ikona="kopiuj"></span>kopiuj ścieżkę</button>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===================== KOLEJKA ===================== -->
-        <section class="strona" id="strona-kolejka" hidden>
-          <div class="naglowek-strony">
-            <div><h1>Kolejka</h1><p>Każdy filmik z wrzutni to jeden pomysł na rolkę: nowy → wygenerowany → postprodukcja → gotowe.</p></div>
-            <button class="btn" type="button" data-akcja="skanuj">Skanuj wrzutnię</button>
+              <a class="link-dalej" href="#rolki">wszystkie rolki →</a>
+            </section>
           </div>
 
           <div class="siatka siatka-2">
-            <div class="strefa" data-upload="zrodlo" tabindex="0" role="button" aria-label="Wrzuć filmiki">
-              <span class="ikona" data-ikona="upload"></span>
-              <b>Wrzuć filmiki tutaj</b>
-              <small>albo kliknij, żeby wybrać (mp4, mov). Trafią do wrzutni – potem kliknij „Skanuj wrzutnię”.</small>
-            </div>
+            <section class="karta" id="karta-autopilot">
+              <div class="autopilot-gora">
+                <div>
+                  <h2>Rób wszystko sam (autopilot)</h2>
+                  <p id="autopilot-opis">Co 15 min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, dopasuje usta, jeśli jest głos, i zrobi zdjęcia. Pilnuje limitów kredytów.</p>
+                </div>
+                <label class="przelacznik duzy" title="Włącza autopilota w tle i zaznacza tę personę do obsługi (ustawienie „autopilot” persony). Wyłączenie odznacza personę; pętla gaśnie, gdy żadna persona jej nie potrzebuje.">
+                  <input type="checkbox" id="autopilot-przelacznik" aria-label="Autopilot włączony">
+                  <span class="suwak"></span>
+                </label>
+              </div>
+              <div class="autopilot-status" id="autopilot-status">—</div>
+              <div class="rzad" data-zaawansowane>
+                <button class="btn btn-maly" type="button" data-akcja="autopilot-raz">Jeden przebieg autopilota teraz</button>
+              </div>
+            </section>
 
-            <form class="karta" id="form-pomysl-tekst">
-              <div class="karta-naglowek"><div><h2>Dodaj pomysł tekstowy</h2><p>Rolka bez filmiku źródłowego – z samego promptu i zdjęć referencyjnych.</p></div></div>
-              <div class="callout uwaga" id="pomysl-tekst-hint" hidden><span class="ikona" data-ikona="uwaga"></span><span>Pomysły bez filmiku są <b>pomijane</b>, dopóki w <a href="#persona">Persona → Generowanie</a> nie ustawisz trybu „bez filmiku” (<span class="mono">mode_bez_zrodla</span>).</span></div>
-              <div class="pole"><label for="pt-opis">Opis (dla Ciebie)</label><input type="text" id="pt-opis" name="opis" placeholder="np. spacer po plaży, zachód słońca" required></div>
-              <div class="pole"><label for="pt-prompt">Prompt (opcjonalnie – inaczej wejdzie prompt persony)</label><textarea id="pt-prompt" name="prompt" class="mono" placeholder="Zostaw puste, żeby użyć promptu A persony."></textarea></div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Dodaj do kolejki</button></div>
-            </form>
+            <section class="karta" id="karta-ostatnio">
+              <div class="karta-naglowek"><div><h2>Ostatnio</h2></div><a href="#historia" class="link-dalej">cała historia →</a></div>
+              <ul class="wpisy" id="start-ostatnio"></ul>
+            </section>
+          </div>
+        </section>
+
+        <!-- ===================== ROLKI ===================== -->
+        <section class="strona" id="strona-rolki" hidden>
+          <div class="naglowek-strony">
+            <div><h1>Rolki</h1><p>Każdy filmik z folderu to jedna rolka. Tu widzisz, która czeka, która się robi, a która jest gotowa.</p></div>
           </div>
 
-          <div class="chipy" id="kolejka-filtry"></div>
-          <div class="lista" id="kolejka-lista"></div>
+          <div class="strefa" data-upload="zrodlo" tabindex="0" role="button" aria-label="Wrzuć filmiki">
+            <span class="ikona" data-ikona="upload"></span>
+            <b>Przeciągnij filmiki tutaj</b>
+            <span>albo kliknij, żeby wybrać (mp4, mov)</span>
+          </div>
+
+          <div class="chipy" id="rolki-filtry"></div>
+          <div class="lista" id="rolki-lista"></div>
+
+          <details class="karta zwijane" id="pomysl-tekst-wrap">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Dodaj pomysł z tekstu (rolka bez filmiku)</summary>
+            <form id="form-pomysl-tekst" class="kolumna">
+              <div class="callout uwaga" id="pomysl-tekst-hint" hidden><span class="ikona" data-ikona="uwaga"></span><span>Pomysły bez filmiku są <b>pomijane</b>, dopóki w <a href="#ustawienia/generowanie">Ustawienia → Jak robić rolki</a> (tryb pełny) nie ustawisz trybu „bez filmiku”.</span></div>
+              <div class="pole"><label for="pt-opis">O czym ma być rolka (dla Ciebie)</label><input type="text" id="pt-opis" name="opis" placeholder="np. spacer po plaży, zachód słońca" required></div>
+              <div class="pole"><label for="pt-prompt">Prompt – opis dla AI (puste = wstawię prompt A persony)</label><textarea id="pt-prompt" name="prompt" class="mono" placeholder="Zostaw puste, żeby użyć promptu A persony."></textarea></div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Dodaj do kolejki</button></div>
+            </form>
+          </details>
         </section>
 
         <!-- ===================== ZDJĘCIA ===================== -->
         <section class="strona" id="strona-zdjecia" hidden>
           <div class="naglowek-strony">
-            <div><h1>Zdjęcia</h1><p>Zdjęcia persony z modelu obrazu (Higgsfield) na bazie zdjęć referencyjnych.</p></div>
+            <div><h1>Zdjęcia</h1><p>Zdjęcia persony zrobione przez AI na podstawie jej zdjęć z Ustawień.</p></div>
           </div>
-          <div class="callout uwaga" id="zdjecia-brak-modelu" hidden><span class="ikona" data-ikona="uwaga"></span><span><b>Nie wybrano modelu zdjęć.</b> Wejdź w <a href="#persona">Persona → Zdjęcia</a> i wybierz model (np. Nano Banana) – bez tego przycisk „Zrób zdjęcie” nie zadziała.</span></div>
+          <div class="karta karta-info" id="zdjecia-brak-modelu" hidden>
+            <span class="ikona duza" data-ikona="zdjecia"></span>
+            <div><h2>Najpierw wybierz model zdjęć</h2><p>Model to „aparat” AI, który robi zdjęcia. Wybiera się go raz, w Ustawieniach.</p></div>
+            <a class="btn btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>
+          </div>
           <form class="karta" id="form-zdjecia">
-            <div class="karta-naglowek"><div><h2>Zrób zdjęcie</h2><p id="zdjecia-opis-modelu">Każde zdjęcie kosztuje kredyty Higgsfield.</p></div></div>
-            <div class="rzad">
-              <div class="pole waskie"><label for="zd-ile">Ile</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
-              <div class="pole" style="flex:1;min-width:220px"><label for="zd-prompt">Prompt (opcjonalnie – inaczej kolejny z listy promptów zdjęć)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
+            <div class="karta-naglowek"><div><h2>Zrób zdjęcie</h2><p id="zdjecia-opis-modelu">Każde zdjęcie kosztuje kredyty.</p></div></div>
+            <div class="rzad rzad-pola">
+              <div class="pole waskie"><label for="zd-ile">Ile zdjęć</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
+              <div class="pole rosnie"><label for="zd-prompt">Jakie (puste = kolejne z listy w Ustawieniach)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
             </div>
-            <div class="karta-stopka"><span class="muted" id="zdjecia-dzis"></span><button class="btn btn-glowny" type="submit">Zrób zdjęcie</button></div>
+            <div class="karta-stopka"><span class="muted" id="zdjecia-dzis"></span><button class="btn btn-glowny btn-duzy" type="submit">Zrób zdjęcie</button></div>
           </form>
           <div class="galeria" id="zdjecia-galeria"></div>
         </section>
@@ -184,22 +191,52 @@
         <!-- ===================== LIPSYNC ===================== -->
         <section class="strona" id="strona-lipsync" hidden>
           <div class="naglowek-strony">
-            <div><h1>Lipsync</h1><p>Gotowa rolka + plik z głosem → wideo z dopasowanymi ustami. Wynik trafia do folderu gotowych.</p></div>
+            <div><h1>Lipsync (dopasuj usta do głosu)</h1><p>Wybierz gotową rolkę i nagranie głosu. AI dopasuje ruch ust do słów. Wynik trafia do folderu gotowych.</p></div>
           </div>
-          <div class="siatka siatka-2">
-            <form class="karta" id="form-lipsync">
-              <div class="karta-naglowek"><div><h2>Nowy lipsync</h2><p>Wybierz wideo i głos, potem Start. Kosztuje (sync.so liczy za sekundę).</p></div></div>
+          <form id="form-lipsync" class="kroki">
+            <section class="karta krok">
+              <header class="krok-naglowek"><span class="krok-numer">1</span><h2>Wybierz rolkę</h2></header>
               <div class="pole">
-                <label for="ls-wideo">Wideo</label>
-                <select id="ls-wideo"><option value="">— wpisz ścieżkę poniżej —</option></select>
+                <label for="ls-wideo">Gotowa rolka</label>
+                <select id="ls-wideo"><option value="">— nie ma jeszcze gotowych rolek —</option></select>
+              </div>
+              <div class="pole" id="ls-wideo-sciezka-wrap" hidden>
+                <label for="ls-wideo-sciezka">Ścieżka do pliku wideo</label>
                 <input type="text" id="ls-wideo-sciezka" placeholder="C:\…\rolka.mp4" autocomplete="off">
               </div>
+            </section>
+            <section class="karta krok">
+              <header class="krok-naglowek"><span class="krok-numer">2</span><h2>Wybierz głos</h2></header>
               <div class="pole">
-                <label for="ls-audio">Głos (audio)</label>
-                <select id="ls-audio"><option value="">— wpisz ścieżkę poniżej —</option></select>
+                <label for="ls-audio">Nagranie głosu</label>
+                <select id="ls-audio"><option value="">— brak nagrań —</option></select>
+              </div>
+              <div class="pole" id="ls-audio-sciezka-wrap" hidden>
+                <label for="ls-audio-sciezka">Ścieżka do pliku z głosem</label>
                 <input type="text" id="ls-audio-sciezka" placeholder="C:\…\glos.mp3" autocomplete="off">
               </div>
-              <div class="pola-siatka">
+              <div class="strefa mala" data-upload="audio" tabindex="0" role="button" aria-label="Wrzuć nagranie głosu">
+                <span class="ikona" data-ikona="audio"></span>
+                <span><b>Wrzuć nagranie</b> <small>(mp3, wav)</small></span>
+              </div>
+              <details class="zwijane cicho" id="tts-wrap">
+                <summary><span class="ikona" data-ikona="chevron-dol"></span>Nie masz nagrania? Napisz tekst – zrobię głos</summary>
+                <div class="kolumna">
+                  <div class="pole"><label for="tts-tekst">Co ma powiedzieć</label><textarea id="tts-tekst" placeholder="Cześć! Dziś pokażę wam…"></textarea></div>
+                  <div class="pola-siatka">
+                    <div class="pole"><label for="tts-glos">Głos</label>
+                      <select id="tts-glos"></select>
+                      <input type="text" id="tts-glos-id" placeholder="id głosu (np. EXAVITQu4vr4xnSDxMaL)" hidden>
+                      <small class="pole-info" id="tts-glos-info"></small></div>
+                    <div class="pole"><label for="tts-nazwa">Nazwa nagrania</label><input type="text" id="tts-nazwa" placeholder="np. intro"></div>
+                  </div>
+                  <div class="rzad"><button class="btn" type="button" data-akcja="tts">Zrób głos z tekstu</button><span class="muted">Kosztuje (sync.so / ElevenLabs). Nagranie pojawi się na liście powyżej.</span></div>
+                </div>
+              </details>
+            </section>
+            <section class="karta krok">
+              <header class="krok-naglowek"><span class="krok-numer">3</span><h2>Dopasuj usta</h2></header>
+              <div class="pola-siatka" data-zaawansowane>
                 <div class="pole"><label for="ls-model">Model</label><select id="ls-model"></select><small class="pole-info" id="ls-model-info"></small></div>
                 <div class="pole"><label for="ls-tryb">Tryb (sync_mode)</label>
                   <select id="ls-tryb">
@@ -210,175 +247,205 @@
                     <option value="remap">remap – dopasuj tempo</option>
                   </select></div>
               </div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Start lipsync</button></div>
-            </form>
-
-            <div class="kolumna">
-              <form class="karta" id="form-tts">
-                <div class="karta-naglowek"><div><h2>Głos z tekstu (TTS)</h2><p>sync.so / ElevenLabs – mp3 ląduje w folderze audio persony.</p></div></div>
-                <div class="pole"><label for="tts-tekst">Tekst</label><textarea id="tts-tekst" placeholder="Cześć! Dziś pokażę wam…" required></textarea></div>
-                <div class="pola-siatka">
-                  <div class="pole"><label for="tts-glos">Głos</label>
-                    <select id="tts-glos"></select>
-                    <input type="text" id="tts-glos-id" placeholder="voice id (np. EXAVITQu4vr4xnSDxMaL)" hidden>
-                    <small class="pole-info" id="tts-glos-info"></small></div>
-                  <div class="pole"><label for="tts-nazwa">Nazwa pliku</label><input type="text" id="tts-nazwa" placeholder="np. intro"></div>
-                </div>
-                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zrób głos</button></div>
-              </form>
-              <div class="strefa mala" data-upload="audio" tabindex="0" role="button" aria-label="Wrzuć pliki audio">
-                <span class="ikona" data-ikona="audio"></span>
-                <span><b>Wrzuć pliki audio</b> <small>(mp3, wav) – do folderu audio persony</small></span>
-              </div>
-            </div>
-          </div>
-          <div class="karta">
-            <div class="karta-naglowek"><div><h2>Historia</h2><p>Wszystkie próby lipsyncu tej persony.</p></div></div>
+              <p class="krok-podpis">To kosztuje: sync.so liczy za każdą sekundę filmu. Zapytam, zanim zacznę.</p>
+              <button class="btn btn-glowny btn-krok" type="submit">Dopasuj usta</button>
+            </section>
+          </form>
+          <section class="karta">
+            <div class="karta-naglowek"><div><h2>Poprzednie dopasowania</h2><p>Wszystkie próby lipsyncu tej persony.</p></div></div>
             <div id="lipsync-historia"></div>
-          </div>
+          </section>
         </section>
 
-        <!-- ===================== PERSONA ===================== -->
-        <section class="strona" id="strona-persona" hidden>
+        <!-- ===================== USTAWIENIA ===================== -->
+        <section class="strona" id="strona-ustawienia" hidden>
           <div class="naglowek-strony">
-            <div><h1 id="persona-tytul">Persona</h1><p>Ustawienia aktywnej persony. Każda karta ma własny przycisk „Zapisz”.</p></div>
-            <button class="btn btn-maly" type="button" data-akcja="odswiez-listy"><span class="ikona" data-ikona="odswiez"></span>odśwież listy modeli i głosów</button>
+            <div><h1 id="ustawienia-tytul">Ustawienia</h1><p>Kliknij temat, żeby go rozwinąć. Każdy temat ma swój przycisk „Zapisz”.</p></div>
+            <button class="btn btn-maly" type="button" data-akcja="odswiez-listy" data-zaawansowane><span class="ikona" data-ikona="odswiez"></span>odśwież listy modeli i głosów</button>
           </div>
 
-          <!-- Generowanie -->
-          <form class="karta" data-ustawienia novalidate id="form-generowanie">
-            <div class="karta-naglowek"><div><h2>Generowanie</h2><p>Kto i jak robi rolki dla tej persony.</p></div></div>
-            <div class="radio-grupa">
-              <label class="radio"><input type="radio" name="dostawca" value="higgsfield"><span><b>Higgsfield – Seedance 2.5</b><small>oficjalne CLI, logowanie OAuth, kredyty z planu</small></span></label>
-              <label class="radio"><input type="radio" name="dostawca" value="yapper"><span><b>yapper.so – Wan</b><small>API z kluczem (Konta → yapper.so)</small></span></label>
+          <!-- Konta -->
+          <details class="sekcja" id="sekcja-konta">
+            <summary><span class="ikona" data-ikona="klucz"></span><span class="sekcja-tytul">Konta</span><span class="sekcja-opis">Logowanie do Higgsfield i klucze do yapper.so i sync.so.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <div class="sekcja-tresc">
+              <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Klucze zostają <b>tylko na tym komputerze</b> (plik <span class="mono">klucze.json</span> w folderze programu). Panel wysyła je wyłącznie do ich dostawcy.</span></div>
+              <div class="siatka siatka-3" id="konta-lista"></div>
             </div>
+          </details>
 
-            <div class="pola-siatka" data-dostawca-blok="higgsfield">
-              <div class="pole"><label for="u-model">Model</label><input type="text" id="u-model" name="model" placeholder="seedance_2_5"></div>
-              <div class="pole"><label for="u-mode">Tryb</label>
-                <select id="u-mode" name="mode">
-                  <option value="video_edit">video_edit – podmiana persony w filmiku</option>
-                  <option value="omni_reference">omni_reference – z referencji</option>
-                  <option value="t2v">t2v – z samego tekstu</option>
-                  <option value="video_extension">video_extension – przedłużenie filmiku</option>
-                </select></div>
-              <div class="pole"><label for="u-mode-bez">Tryb dla pomysłów bez filmiku</label>
-                <select id="u-mode-bez" name="mode_bez_zrodla">
-                  <option value="">pomijaj pomysły bez filmiku</option>
-                  <option value="omni_reference">omni_reference – z referencji</option>
-                  <option value="t2v">t2v – z samego tekstu</option>
-                </select></div>
-              <div class="pole"><label for="u-aspect">Proporcje</label><input type="text" id="u-aspect" name="aspect_ratio" list="lista-proporcji" placeholder="9:16"><datalist id="lista-proporcji"><option value="9:16"><option value="16:9"><option value="1:1"><option value="4:5"><option value="3:4"></datalist></div>
-              <div class="pole"><label for="u-resolution">Rozdzielczość</label>
-                <select id="u-resolution" name="resolution"><option value="480p">480p (najtaniej)</option><option value="720p">720p</option><option value="1080p">1080p (najdrożej)</option></select></div>
-              <div class="pole"><label for="u-duration">Długość (s)</label><input type="number" id="u-duration" name="duration" min="4" max="30" placeholder="jak źródło"><small class="pole-info">Puste = tyle, ile ma filmik źródłowy.</small></div>
-              <div class="pole"><label for="u-audio">Dźwięk z modelu</label>
-                <select id="u-audio" name="generate_audio" data-typ="tri"><option value="">domyślne modelu</option><option value="true">tak</option><option value="false">nie</option></select></div>
-              <div class="pole"><label for="u-powtorki">Powtórki po odrzuceniu</label><input type="number" id="u-powtorki" name="powtorki" min="0" max="10" data-domyslne="2"><small class="pole-info">Seedance przy odrzuceniu oddaje kredyty.</small></div>
-              <label class="check szerokie"><input type="checkbox" name="prompt_auto"><span>Skanowanie samo wpisuje prompt persony (A / B) do nowych pomysłów<small>Prompt nie zależy od klipu – wyłącz tylko, jeśli chcesz pisać prompty ręcznie.</small></span></label>
-            </div>
+          <!-- Persona -->
+          <details class="sekcja" id="sekcja-persona">
+            <summary><span class="ikona" data-ikona="persona"></span><span class="sekcja-tytul">Persona</span><span class="sekcja-opis">Nazwa, Instagram, zdjęcia persony i stroje.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <div class="sekcja-tresc">
+              <form id="form-profil" class="kolumna">
+                <div class="pola-siatka">
+                  <div class="pole"><label for="p-nazwa">Nazwa</label><input type="text" id="p-nazwa" name="nazwa" placeholder="np. Noemi"></div>
+                  <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
+                  <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
+                  <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
+                </div>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </form>
 
-            <div class="pola-siatka" data-dostawca-blok="yapper">
-              <div class="pole"><label for="u-yapper-model">Model yapper</label>
-                <select id="u-yapper-model" name="yapper.model" data-lista="modele?dostawca=yapper" data-pusta="— nie wybrano —"></select>
-                <input type="text" name="yapper.model" data-zapas placeholder="np. wan-3.0, wan-3.0-prime, seedance-2.5" hidden disabled>
-                <small class="pole-info" data-lista-info></small></div>
-              <div class="pole"><label for="u-yapper-res">Rozdzielczość</label>
-                <select id="u-yapper-res" name="yapper.resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></div>
-              <div class="pole"><label for="u-yapper-dur">Długość (s)</label><input type="number" id="u-yapper-dur" name="yapper.duration" min="1" max="30" data-domyslne="5"></div>
-              <div class="pole szerokie"><label for="u-yapper-prompt">Osobny prompt dla yapper (opcjonalnie)</label><textarea id="u-yapper-prompt" name="yapper.prompt" class="mono" placeholder="Puste = prompty A / B persony."></textarea></div>
+              <div class="podsekcja">
+                <h3>Zdjęcia persony</h3>
+                <p class="muted">AI patrzy na te zdjęcia, żeby wiedzieć, jak wygląda persona. Numer zdjęcia to <span class="mono">@[Image N]</span> w prompcie.</p>
+                <div class="muted" id="referencje-licznik"></div>
+                <div class="miniaturki" id="referencje-lista"></div>
+                <div class="strefa mala" data-upload="referencja" tabindex="0" role="button" aria-label="Dodaj zdjęcia persony"><span class="ikona" data-ikona="upload"></span><span><b>Dodaj zdjęcia persony</b> <small>(png, jpg) – dostaną kolejny numer</small></span></div>
+              </div>
+
+              <div class="podsekcja">
+                <h3>Stroje</h3>
+                <p class="muted">Zdjęcia ubrań. Gdy obok filmiku leży <span class="mono">nazwa.stroj.png</span>, persona dostaje ten strój (wariant „strój ze zdjęcia”).</p>
+                <div class="muted" id="stroje-licznik"></div>
+                <div class="miniaturki" id="stroje-lista"></div>
+                <div class="strefa mala" data-upload="stroj" tabindex="0" role="button" aria-label="Dodaj zdjęcia strojów"><span class="ikona" data-ikona="upload"></span><span><b>Dodaj zdjęcia strojów</b> <small>(png, jpg)</small></span></div>
+              </div>
             </div>
-            <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-          </form>
+          </details>
 
           <!-- Prompty -->
-          <form class="karta" data-ustawienia novalidate id="form-prompty">
-            <div class="karta-naglowek"><div><h2>Prompty</h2><p>Stałe prompty persony. <span class="mono">@[Image N](image_N)</span> = N-te zdjęcie referencyjne (kolejność 01_, 02_…), w wariancie B ostatni numer to strój.</p></div></div>
-            <div class="callout info" id="prompty-info"><span class="ikona" data-ikona="info"></span><span id="prompty-info-tekst"></span></div>
-            <div class="pole"><label for="u-prompt-a">Prompt A – strój z filmu</label><textarea id="u-prompt-a" name="prompt_a_tekst" class="mono" rows="7"></textarea></div>
-            <div class="pole"><label for="u-prompt-b">Prompt B – strój ze zdjęcia</label><textarea id="u-prompt-b" name="prompt_b_tekst" class="mono" rows="7"></textarea></div>
-            <div class="pole"><label for="u-stroj">Domyślny strój (wariant B dla każdego klipu bez własnego <span class="mono">nazwa.stroj.png</span>)</label>
-              <input type="text" id="u-stroj" name="stroj_domyslny" list="lista-strojow" placeholder="np. stroje/mesh.png (puste = wariant A)"><datalist id="lista-strojow"></datalist></div>
-            <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-          </form>
+          <details class="sekcja" id="sekcja-prompty">
+            <summary><span class="ikona" data-ikona="teksty"></span><span class="sekcja-tytul">Prompty</span><span class="sekcja-opis">Opis dla AI, co ma zrobić z filmikiem.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-prompty">
+              <p class="muted">Prompt to opis dla AI, co ma zrobić z filmikiem. Numery <span class="mono">@[Image N]</span> muszą zgadzać się z liczbą zdjęć persony (w wariancie B ostatni numer to strój).</p>
+              <div class="callout info" id="prompty-info"><span class="ikona" data-ikona="info"></span><span id="prompty-info-tekst"></span></div>
+              <div class="pole"><label for="u-prompt-a">Prompt A – persona w stroju z filmu</label><textarea id="u-prompt-a" name="prompt_a_tekst" class="mono" rows="7"></textarea></div>
+              <div class="pole"><label for="u-prompt-b">Prompt B – persona w stroju ze zdjęcia</label><textarea id="u-prompt-b" name="prompt_b_tekst" class="mono" rows="7"></textarea></div>
+              <div class="pole" data-zaawansowane><label for="u-stroj">Strój domyślny (dla każdego filmiku bez własnego <span class="mono">nazwa.stroj.png</span>)</label>
+                <select id="u-stroj" name="stroj_domyslny"><option value="">— brak (strój z filmu, wariant A) —</option></select></div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+          </details>
 
-          <!-- Referencje i stroje -->
-          <div class="karta" id="karta-referencje">
-            <div class="karta-naglowek"><div><h2>Referencje i stroje</h2><p>Zdjęcia persony idą do modelu w kolejności numerów (01_, 02_…) – tak samo liczysz <span class="mono">@Image</span> w prompcie.</p></div></div>
-            <div class="rzad"><b>Referencje</b><span class="muted" id="referencje-licznik"></span></div>
-            <div class="miniaturki" id="referencje-lista"></div>
-            <div class="strefa mala" data-upload="referencja" tabindex="0" role="button" aria-label="Dodaj zdjęcia referencyjne"><span class="ikona" data-ikona="upload"></span><span><b>Dodaj zdjęcia persony</b> <small>(png, jpg) – dostaną kolejny numer</small></span></div>
-            <div class="rzad"><b>Stroje</b><span class="muted" id="stroje-licznik"></span></div>
-            <div class="miniaturki" id="stroje-lista"></div>
-            <div class="strefa mala" data-upload="stroj" tabindex="0" role="button" aria-label="Dodaj zdjęcia strojów"><span class="ikona" data-ikona="upload"></span><span><b>Dodaj zdjęcia strojów</b> <small>(do wariantu B)</small></span></div>
-          </div>
+          <!-- Jak robić rolki -->
+          <details class="sekcja" id="sekcja-generowanie">
+            <summary><span class="ikona" data-ikona="film"></span><span class="sekcja-tytul">Jak robić rolki</span><span class="sekcja-opis">Kto robi rolki, w jakiej jakości i czy prać je w Media Tool.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-generowanie">
+              <div class="pole-grupa">
+                <span class="etykieta">Kto robi rolki</span>
+                <div class="kafelki">
+                  <label class="kafelek"><input type="radio" name="dostawca" value="higgsfield"><span><b>Higgsfield – Seedance 2.5</b><small>polecane · logowanie przez zaloguj-higgsfield.bat</small></span></label>
+                  <label class="kafelek"><input type="radio" name="dostawca" value="yapper"><span><b>yapper.so – Wan 3.0</b><small>potrzebny klucz (Ustawienia → Konta)</small></span></label>
+                </div>
+              </div>
+              <div class="pole-grupa">
+                <span class="etykieta">Jakość</span>
+                <div class="kafelki">
+                  <label class="kafelek"><input type="radio" name="jakosc" value="480p"><span><b>Szybko i tanio</b><small>480p</small></span></label>
+                  <label class="kafelek"><input type="radio" name="jakosc" value="720p"><span><b>Normalnie</b><small>720p</small></span></label>
+                  <label class="kafelek"><input type="radio" name="jakosc" value="1080p"><span><b>Najlepiej</b><small>1080p – najdrożej</small></span></label>
+                </div>
+              </div>
+              <label class="check"><input type="checkbox" name="mediatool"><span>Wypierz rolkę w Media Tool (iPhone)<small>po zrobieniu plik dostaje metadane jak z iPhone’a i trafia do folderu gotowych</small></span></label>
+              <label class="check"><input type="checkbox" name="prompt_auto"><span>Sam wpisuj prompt persony do nowych filmików<small>wyłącz tylko, jeśli chcesz pisać prompt do każdej rolki ręcznie</small></span></label>
 
-          <div class="siatka siatka-2">
-            <!-- Foldery -->
-            <form class="karta" data-ustawienia novalidate id="form-foldery">
-              <div class="karta-naglowek"><div><h2>Foldery</h2><p>Puste pole = folder w projekcie (modelki/&lt;persona&gt;/…).</p></div></div>
-              <div class="pole"><label for="u-zrodla">Wrzutnia (filmiki źródłowe)</label><input type="text" id="u-zrodla" name="zrodla_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\przed\noemi"></div>
-              <div class="pole"><label for="u-wyniki">Gotowe rolki</label><input type="text" id="u-wyniki" name="wyniki_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\po\noemi"></div>
-              <div class="pole"><label for="u-zdjecia-dir">Gotowe zdjęcia</label><input type="text" id="u-zdjecia-dir" name="zdjecia_dir" placeholder="puste = modelki\noemi\zdjecia"></div>
+              <div class="pola-siatka" data-zaawansowane data-dostawca-blok="higgsfield">
+                <div class="pole"><label for="u-model">Model</label><input type="text" id="u-model" name="model" placeholder="seedance_2_5"></div>
+                <div class="pole"><label for="u-mode">Tryb</label>
+                  <select id="u-mode" name="mode">
+                    <option value="video_edit">video_edit – podmiana persony w filmiku</option>
+                    <option value="omni_reference">omni_reference – z referencji</option>
+                    <option value="t2v">t2v – z samego tekstu</option>
+                    <option value="video_extension">video_extension – przedłużenie filmiku</option>
+                  </select></div>
+                <div class="pole"><label for="u-mode-bez">Tryb dla pomysłów bez filmiku</label>
+                  <select id="u-mode-bez" name="mode_bez_zrodla">
+                    <option value="">pomijaj pomysły bez filmiku</option>
+                    <option value="omni_reference">omni_reference – z referencji</option>
+                    <option value="t2v">t2v – z samego tekstu</option>
+                  </select></div>
+                <div class="pole"><label for="u-aspect">Proporcje</label><input type="text" id="u-aspect" name="aspect_ratio" list="lista-proporcji" placeholder="9:16"><datalist id="lista-proporcji"><option value="9:16"><option value="16:9"><option value="1:1"><option value="4:5"><option value="3:4"></datalist></div>
+                <div class="pole"><label for="u-duration">Długość (s)</label><input type="number" id="u-duration" name="duration" min="4" max="30" placeholder="jak źródło"><small class="pole-info">Puste = tyle, ile ma filmik źródłowy.</small></div>
+                <div class="pole"><label for="u-audio">Dźwięk z modelu</label>
+                  <select id="u-audio" name="generate_audio" data-typ="tri"><option value="">domyślne modelu</option><option value="true">tak</option><option value="false">nie</option></select></div>
+                <div class="pole"><label for="u-powtorki">Powtórki po odrzuceniu</label><input type="number" id="u-powtorki" name="powtorki" min="0" max="10" data-domyslne="2"><small class="pole-info">Seedance przy odrzuceniu oddaje kredyty.</small></div>
+                <div class="pole szerokie"><label for="u-dodatkowe">Dodatkowe parametry CLI (JSON)</label><textarea id="u-dodatkowe" name="dodatkowe_parametry" class="mono" data-typ="json" placeholder='{"seed": 42}'></textarea></div>
+              </div>
+
+              <div class="pola-siatka" data-zaawansowane data-dostawca-blok="yapper">
+                <div class="pole"><label for="u-yapper-model">Model yapper</label>
+                  <select id="u-yapper-model" name="yapper.model" data-lista="modele?dostawca=yapper" data-pusta="— nie wybrano —"></select>
+                  <input type="text" name="yapper.model" data-zapas placeholder="np. wan-3.0, wan-3.0-prime" hidden disabled>
+                  <small class="pole-info" data-lista-info></small></div>
+                <div class="pole"><label for="u-yapper-dur">Długość (s)</label><input type="number" id="u-yapper-dur" name="yapper.duration" min="1" max="30" data-domyslne="5"></div>
+                <div class="pole szerokie"><label for="u-yapper-prompt">Osobny prompt dla yapper (opcjonalnie)</label><textarea id="u-yapper-prompt" name="yapper.prompt" class="mono" placeholder="Puste = prompty A / B persony."></textarea></div>
+                <div class="pole szerokie"><label for="u-yapper-param">Dodatkowe parametry yapper (JSON)</label><textarea id="u-yapper-param" name="yapper.parametry" class="mono" data-typ="json" placeholder="{}"></textarea></div>
+              </div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+          </details>
+
+          <!-- Foldery -->
+          <details class="sekcja" id="sekcja-foldery">
+            <summary><span class="ikona" data-ikona="folder"></span><span class="sekcja-tytul">Foldery</span><span class="sekcja-opis">Skąd brać filmiki i gdzie zapisywać gotowe.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-foldery">
+              <p class="muted">Puste pole = folder w programie (modelki\&lt;persona&gt;\…). Wpisz pełną ścieżkę, np. <span class="mono">C:\Users\…\Desktop\ROLKI AI\przed\noemi</span>.</p>
+              <div class="pole"><label for="u-zrodla">Skąd brać filmiki (wrzutnia)</label><input type="text" id="u-zrodla" name="zrodla_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\przed\noemi"></div>
+              <div class="pole"><label for="u-wyniki">Gdzie zapisywać gotowe rolki</label><input type="text" id="u-wyniki" name="wyniki_dir" placeholder="C:\Users\…\Desktop\ROLKI AI\po\noemi"></div>
+              <div class="pole"><label for="u-zdjecia-dir">Gdzie zapisywać gotowe zdjęcia</label><input type="text" id="u-zdjecia-dir" name="zdjecia_dir" placeholder="puste = modelki\noemi\zdjecia"></div>
               <div class="lista-sciezek" id="foldery-efektywne"></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
+          </details>
 
-            <!-- Bezpiecznik -->
-            <div class="kolumna">
-              <form class="karta" data-ustawienia novalidate id="form-bezpiecznik">
-                <div class="karta-naglowek"><div><h2>Bezpiecznik budżetu</h2><p>Generacja odmawia, gdy przekroczyłaby te progi.</p></div></div>
-                <div class="pola-siatka">
-                  <div class="pole"><label for="u-min">Minimum kredytów na koncie</label><input type="number" id="u-min" name="min_kredyty" min="0" data-domyslne="200"></div>
-                  <div class="pole"><label for="u-max">Maks. kredytów na jedną rolkę</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"></div>
-                  <div class="pole"><label for="u-warianty">Warianty VideoRemixer po generacji</label><input type="number" id="u-warianty" name="warianty" min="0" max="500" data-domyslne="0"><small class="pole-info">0 = pomiń.</small></div>
-                  <label class="check"><input type="checkbox" name="mediatool"><span>Media Tool po generacji<small>metadane iPhone, GPS – „pranie” wideo</small></span></label>
-                </div>
-                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-              </form>
-              <form class="karta" id="form-budzet">
-                <div class="karta-naglowek"><div><h2>Limit dzienny (wspólny dla wszystkich person)</h2><p>Ile kredytów dziennie wolno wydać. 0 = bez limitu.</p></div></div>
-                <div class="pola-siatka">
-                  <div class="pole"><label for="limit-higgsfield">Higgsfield (kr / dzień)</label><input type="number" id="limit-higgsfield" min="0" required></div>
-                  <div class="pole"><label for="limit-yapper">yapper.so (kr / dzień)</label><input type="number" id="limit-yapper" min="0" required></div>
-                </div>
-                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-              </form>
-            </div>
-
-            <!-- Autopilot -->
-            <form class="karta" data-ustawienia novalidate id="form-autopilot">
-              <div class="karta-naglowek"><div><h2>Autopilot</h2><p>Czy ta persona ma być obsługiwana przez autopilota (przełącznik w lewym dolnym rogu włącza samą pętlę).</p></div></div>
-              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>skanuj → generuj → pranie → lipsync → zdjęcia → podpisy</small></span></label>
+          <!-- Limity -->
+          <details class="sekcja" id="sekcja-limity">
+            <summary><span class="ikona" data-ikona="tarcza"></span><span class="sekcja-tytul">Limity kredytów (bezpiecznik)</span><span class="sekcja-opis">Fabryka zatrzyma się, zanim przekroczy te progi.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-limity">
               <div class="pola-siatka">
-                <div class="pole"><label for="u-co-minut">Sprawdzaj wrzutnię co (min)</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
-                <div class="pole"><label for="u-max-rolek">Maks. rolek dziennie</label><input type="number" id="u-max-rolek" name="autopilot_max_rolek_dziennie" min="0" data-domyslne="10"><small class="pole-info">0 = bez limitu ilościowego.</small></div>
+                <div class="pole"><label for="limit-higgsfield">Nie wydawaj więcej niż … kredytów dziennie</label><input type="number" id="limit-higgsfield" name="budzet.higgsfield" min="0"><small class="pole-info">Limit wspólny dla wszystkich person. 0 = bez limitu.</small></div>
+                <div class="pole"><label for="u-min">Zostaw na koncie co najmniej … kredytów</label><input type="number" id="u-min" name="min_kredyty" min="0" data-domyslne="200"></div>
+                <div class="pole"><label for="u-max">Jedna rolka może kosztować najwyżej … kredytów</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"></div>
+                <div class="pole"><label for="u-max-rolek">Najwyżej … rolek dziennie (autopilot)</label><input type="number" id="u-max-rolek" name="autopilot_max_rolek_dziennie" min="0" data-domyslne="10"><small class="pole-info">0 = bez limitu ilościowego.</small></div>
+                <div class="pole" data-zaawansowane><label for="limit-yapper">yapper.so: nie więcej niż … kredytów dziennie</label><input type="number" id="limit-yapper" name="budzet.yapper" min="0"></div>
+                <div class="pole" data-zaawansowane><label for="u-yapper-min">yapper.so: zostaw na koncie co najmniej …</label><input type="number" id="u-yapper-min" name="yapper.min_kredyty" min="0" data-domyslne="0"></div>
+                <div class="pole" data-zaawansowane><label for="u-yapper-max">yapper.so: jedna rolka najwyżej …</label><input type="number" id="u-yapper-max" name="yapper.max_kredyty_na_rolke" min="0" data-domyslne="1000"><small class="pole-info">Kredyty yapper mają inną skalę niż Higgsfield.</small></div>
+                <div class="pole" data-zaawansowane><label for="u-warianty">Warianty VideoRemixer po generacji</label><input type="number" id="u-warianty" name="warianty" min="0" max="500" data-domyslne="0"><small class="pole-info">0 = pomiń.</small></div>
               </div>
-              <label class="check"><input type="checkbox" name="lipsync_auto"><span>Lipsync automatycznie po generacji<small>gdy obok filmiku leży <span class="mono">nazwa.audio.mp3</span></small></span></label>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
+          </details>
 
-            <!-- Zdjęcia -->
-            <form class="karta" data-ustawienia novalidate id="form-zdjecia-ust">
-              <div class="karta-naglowek"><div><h2>Zdjęcia</h2><p>Model obrazu i prompty do zdjęć persony.</p></div></div>
+          <!-- Autopilot -->
+          <details class="sekcja" id="sekcja-autopilot">
+            <summary><span class="ikona" data-ikona="bolt"></span><span class="sekcja-tytul">Autopilot</span><span class="sekcja-opis">Co ile minut sprawdzać folder i co robić samemu.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-autopilot-ust">
+              <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki → pierze → dopasowuje usta → robi zdjęcia → dobiera podpisy</small></span></label>
               <div class="pola-siatka">
-                <div class="pole szerokie"><label for="u-zdjecia-model">Model zdjęć</label>
+                <div class="pole"><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
+              </div>
+              <label class="check"><input type="checkbox" name="lipsync_auto"><span>Jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, dopasuj usta automatycznie</span></label>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+          </details>
+
+          <!-- Zdjęcia -->
+          <details class="sekcja" id="sekcja-zdjecia">
+            <summary><span class="ikona" data-ikona="zdjecia"></span><span class="sekcja-tytul">Zdjęcia</span><span class="sekcja-opis">Jaki model robi zdjęcia persony i jakie zdjęcia ma robić.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-zdjecia-ust">
+              <div class="pola-siatka">
+                <div class="pole szerokie"><label for="u-zdjecia-model">Model zdjęć („aparat” AI)</label>
                   <select id="u-zdjecia-model" name="zdjecia_model" data-lista="modele?dostawca=higgsfield&amp;typ=image" data-pusta="— wyłączone —"></select>
                   <input type="text" name="zdjecia_model" data-zapas placeholder="np. nano_banana_2 (puste = wyłączone)" hidden disabled>
                   <small class="pole-info" data-lista-info></small></div>
-                <div class="pole"><label for="u-zdjecia-dziennie">Zdjęć dziennie (autopilot)</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">0 = tylko ręcznie.</small></div>
-                <div class="pole"><label for="u-zd-aspect">Proporcje</label><input type="text" id="u-zd-aspect" name="zdjecia_parametry.aspect_ratio" list="lista-proporcji" placeholder="np. 3:4"></div>
-                <div class="pole"><label for="u-zd-res">Rozdzielczość</label><input type="text" id="u-zd-res" name="zdjecia_parametry.resolution" placeholder="np. 1080p"></div>
+                <div class="pole"><label for="u-zdjecia-dziennie">Ile zdjęć dziennie robi autopilot</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">0 = tylko ręcznie.</small></div>
+                <div class="pole" data-zaawansowane><label for="u-zd-aspect">Proporcje</label><input type="text" id="u-zd-aspect" name="zdjecia_parametry.aspect_ratio" list="lista-proporcji" placeholder="np. 3:4"></div>
+                <div class="pole" data-zaawansowane><label for="u-zd-res">Rozdzielczość</label><input type="text" id="u-zd-res" name="zdjecia_parametry.resolution" placeholder="np. 1080p"></div>
+                <div class="pole" data-zaawansowane><label for="u-soul">Soul ID (modele *soul*)</label><input type="text" id="u-soul" name="soul_id" placeholder="puste = bez Soul"></div>
               </div>
-              <div class="pole"><label for="u-zdjecia-prompty">Prompty zdjęć (jedna linia = jeden prompt, autopilot bierze po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
+              <div class="pole"><label for="u-zdjecia-prompty">Jakie zdjęcia robić (jedna linia = jedno zdjęcie, po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
+          </details>
 
-            <!-- Lipsync -->
-            <form class="karta" data-ustawienia novalidate id="form-lipsync-ust">
-              <div class="karta-naglowek"><div><h2>Lipsync i głos</h2><p>Domyślne ustawienia lipsyncu i głosu TTS.</p></div></div>
+          <!-- Lipsync i głos -->
+          <details class="sekcja" id="sekcja-lipsync" data-zaawansowane>
+            <summary><span class="ikona" data-ikona="lipsync"></span><span class="sekcja-tytul">Lipsync i głos</span><span class="sekcja-opis">Domyślny model lipsyncu i głos do czytania tekstu.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-lipsync-ust">
               <div class="pola-siatka">
-                <div class="pole"><label for="u-lipsync-dostawca">Dostawca lipsyncu</label>
+                <div class="pole"><label for="u-lipsync-dostawca">Kto robi lipsync</label>
                   <select id="u-lipsync-dostawca" name="lipsync_dostawca"><option value="sync">sync.so (API, klucz)</option><option value="higgsfield">Higgsfield (model z CLI)</option></select></div>
                 <div class="pole"><label for="u-lipsync-model">Model lipsyncu</label>
                   <select id="u-lipsync-model" name="lipsync_model" data-lista="modele?dostawca=sync"></select>
@@ -388,69 +455,54 @@
                   <select id="u-sync-mode" name="lipsync_parametry.sync_mode">
                     <option value="bounce">bounce</option><option value="loop">loop</option><option value="cut_off">cut_off</option><option value="silence">silence</option><option value="remap">remap</option>
                   </select></div>
-                <div class="pole"><label for="u-tts-glos">Głos TTS (sync.so)</label>
+                <div class="pole"><label for="u-tts-glos">Głos do czytania tekstu (sync.so)</label>
                   <select id="u-tts-glos" name="tts_glos" data-lista="glosy?dostawca=sync" data-pusta="— brak —"></select>
                   <input type="text" name="tts_glos" data-zapas placeholder="voice id" hidden disabled>
                   <small class="pole-info" data-lista-info></small></div>
+                <div class="pole"><label for="u-tts-model">Model TTS Higgsfield (job_type)</label><input type="text" id="u-tts-model" name="tts_model" placeholder="puste = brak"></div>
+                <div class="pole"><label for="u-tts-typ">Typ głosu Higgsfield</label>
+                  <select id="u-tts-typ" name="tts_glos_typ"><option value="preset">preset (wbudowany)</option><option value="element">element (sklonowany)</option></select></div>
               </div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
+          </details>
 
-            <!-- Profil -->
-            <form class="karta" id="form-profil">
-              <div class="karta-naglowek"><div><h2>Profil</h2><p>Informacje o personie (do podpisów i notatek).</p></div></div>
-              <div class="pola-siatka">
-                <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
-                <div class="pole"><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
-                <div class="pole szerokie"><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
+          <!-- Teksty -->
+          <details class="sekcja" id="sekcja-teksty">
+            <summary><span class="ikona" data-ikona="podpis"></span><span class="sekcja-tytul">Teksty (podpisy)</span><span class="sekcja-opis">Bank podpisów pod rolki. Fabryka dobiera z niego nieużyte.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <div class="sekcja-tresc">
+              <div class="siatka siatka-2">
+                <div class="kolumna">
+                  <h3>Bank podpisów</h3>
+                  <p class="muted">Jeden podpis na linię (albo bloki oddzielone linią <span class="mono">---</span>). Powtórki są pomijane.</p>
+                  <form id="form-teksty" class="kolumna">
+                    <textarea id="teksty-pole" placeholder="Wklej podpisy – jeden na linię" required></textarea>
+                    <div class="rzad"><input type="text" id="teksty-zrodlo" placeholder="Skąd (np. @uroczanoemi)"><button class="btn btn-glowny" type="submit">Dodaj do banku</button></div>
+                  </form>
+                  <div class="rzad"><button class="btn" type="button" data-akcja="losuj-tekst"><span class="ikona" data-ikona="kopiuj"></span>Wylosuj nieużyty podpis (kopiuje)</button><span class="muted" id="teksty-info"></span></div>
+                  <div class="wynik-tekst" id="wylosowany" hidden></div>
+                  <div class="teksty-lista" id="teksty-lista"></div>
+                </div>
+                <div class="kolumna" data-zaawansowane>
+                  <h3>Szablony promptów</h3>
+                  <p class="muted">Prompt z polami w klamrach, np. <span class="mono">noemi w {ubior}, {scena}</span>.</p>
+                  <form id="form-szablon" class="kolumna">
+                    <input type="text" id="szablon-nazwa" placeholder="Nazwa, np. spacer" required>
+                    <textarea id="szablon-tresc" class="mono" placeholder="noemi w {ubior}, {scena}, golden hour, 9:16" required></textarea>
+                    <div class="rzad rzad-prawo"><button class="btn btn-glowny" type="submit">Zapisz szablon</button></div>
+                  </form>
+                  <div class="kolumna" id="szablony-lista"></div>
+                </div>
               </div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
-            </form>
-          </div>
-        </section>
-
-        <!-- ===================== KONTA ===================== -->
-        <section class="strona" id="strona-konta" hidden>
-          <div class="naglowek-strony">
-            <div><h1>Konta</h1><p>Dostawcy generacji, lipsyncu i głosu.</p></div>
-          </div>
-          <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Klucze API zostają <b>tylko na tym komputerze</b> (plik <span class="mono">klucze.json</span> w folderze programu) i są wysyłane wyłącznie do swojego dostawcy.</span></div>
-          <div class="siatka siatka-2" id="konta-lista"></div>
-        </section>
-
-        <!-- ===================== TEKSTY ===================== -->
-        <section class="strona" id="strona-teksty" hidden>
-          <div class="naglowek-strony">
-            <div><h1>Teksty</h1><p>Bank podpisów do rolek i szablony promptów.</p></div>
-          </div>
-          <div class="siatka siatka-2">
-            <div class="karta">
-              <div class="karta-naglowek"><div><h2>Bank tekstów</h2><p>Jeden podpis na linię (albo bloki oddzielone linią <span class="mono">---</span>). Duplikaty są pomijane.</p></div></div>
-              <form id="form-teksty" class="kolumna">
-                <textarea id="teksty-pole" placeholder="Wklej podpisy z IG – jeden na linię" required></textarea>
-                <div class="rzad"><input type="text" id="teksty-zrodlo" placeholder="Źródło (np. @uroczanoemi)"><button class="btn btn-glowny" type="submit">Dodaj do banku</button></div>
-              </form>
-              <div class="rzad"><button class="btn" type="button" data-akcja="losuj-tekst"><span class="ikona" data-ikona="kopiuj"></span>Losuj nieużyty tekst (kopiuje do schowka)</button><span class="muted" id="teksty-info"></span></div>
-              <div class="wynik-tekst" id="wylosowany" hidden></div>
-              <div class="teksty-lista" id="teksty-lista"></div>
             </div>
-            <div class="karta">
-              <div class="karta-naglowek"><div><h2>Szablony promptów</h2><p>Prompt z polami w klamrach, np. <span class="mono">noemi w {ubior}, {scena}</span>.</p></div></div>
-              <form id="form-szablon" class="kolumna">
-                <input type="text" id="szablon-nazwa" placeholder="Nazwa, np. spacer" required>
-                <textarea id="szablon-tresc" class="mono" placeholder="noemi w {ubior}, {scena}, golden hour, 9:16" required></textarea>
-                <div class="rzad rzad-prawo"><button class="btn btn-glowny" type="submit">Zapisz szablon</button></div>
-              </form>
-              <div class="kolumna" id="szablony-lista"></div>
-            </div>
-          </div>
+          </details>
         </section>
 
-        <!-- ===================== DZIENNIK ===================== -->
-        <section class="strona" id="strona-dziennik" hidden>
+        <!-- ===================== HISTORIA ===================== -->
+        <section class="strona" id="strona-historia" hidden>
           <div class="naglowek-strony">
-            <div><h1>Dziennik</h1><p>Wszystko, co zrobiła fabryka i autopilot. Odświeża się co 10 s.</p></div>
-            <div class="rzad">
+            <div><h1>Historia</h1><p>Co robiła fabryka i autopilot. Odświeża się co 10 s.</p></div>
+            <div class="rzad" data-zaawansowane>
               <select id="dz-typ" class="w-auto">
                 <option value="">wszystkie typy</option>
                 <option value="info">info</option>
@@ -460,13 +512,15 @@
                 <option value="kredyty">kredyty</option>
               </select>
               <select id="dz-modelka" class="w-auto"><option value="">wszystkie persony</option></select>
-              <button class="btn btn-ikona" type="button" data-akcja="odswiez-dziennik" title="Odśwież" aria-label="Odśwież dziennik"><span class="ikona" data-ikona="odswiez"></span></button>
+              <button class="btn btn-ikona" type="button" data-akcja="odswiez-dziennik" title="Odśwież" aria-label="Odśwież historię"><span class="ikona" data-ikona="odswiez"></span></button>
             </div>
           </div>
-          <div class="tabela-wrap">
+          <div class="chipy" id="historia-filtry" data-tylko-prosty></div>
+          <ul class="wpisy duze karta" id="historia-lista" data-tylko-prosty></ul>
+          <div class="tabela-wrap" data-zaawansowane>
             <table class="tabela">
               <thead><tr><th>Czas</th><th>Typ</th><th>Persona</th><th>Zdarzenie</th></tr></thead>
-              <tbody id="dziennik-tabela"></tbody>
+              <tbody id="historia-tabela"></tbody>
             </table>
           </div>
         </section>
@@ -476,17 +530,21 @@
   </div><!-- /glowna -->
 </div><!-- /aplikacja -->
 
-<!-- ===================== KONSOLA ===================== -->
+<!-- ===================== CO SIĘ DZIEJE (konsola) ===================== -->
 <div class="konsola" id="konsola">
   <div class="konsola-pasek">
-    <button class="konsola-przelacz" type="button" data-akcja="konsola-przelacz" aria-expanded="false" aria-controls="konsola-log"><span class="ikona" data-ikona="chevron"></span>Konsola</button>
+    <button class="konsola-przelacz" type="button" data-akcja="konsola-przelacz" aria-expanded="false" aria-controls="konsola-tresc"><span class="ikona" data-ikona="chevron"></span>Co się dzieje</button>
     <span class="kropka" id="konsola-kropka"></span>
-    <span class="konsola-tytul" id="konsola-tytul">bezczynna</span>
+    <span class="konsola-tytul" id="konsola-tytul">Nic się teraz nie dzieje</span>
     <span class="konsola-czas" id="konsola-czas"></span>
+    <span class="konsola-surowe mono" id="konsola-surowe" data-zaawansowane></span>
     <span class="rozpychacz"></span>
     <button class="btn btn-maly btn-zly" type="button" id="konsola-stop" data-akcja="stop" hidden><span class="ikona" data-ikona="stop"></span>STOP</button>
   </div>
-  <pre class="konsola-log" id="konsola-log"></pre>
+  <div class="konsola-tresc" id="konsola-tresc">
+    <div class="konsola-skrot" id="konsola-skrot" data-tylko-prosty></div>
+    <pre class="konsola-log" id="konsola-log" data-zaawansowane></pre>
+  </div>
 </div>
 
 <div class="toasty" id="toasty" aria-live="polite"></div>
@@ -496,12 +554,12 @@
 <dialog id="dlg-persona">
   <form id="form-nowa-persona" class="dialog-formularz" method="dialog">
     <h2>Nowa persona</h2>
-    <div class="pole"><label for="np-nazwa">Nazwa</label><input type="text" id="np-nazwa" name="nazwa" placeholder="np. Noemi" required autocomplete="off"></div>
-    <div class="pole"><label for="np-ig">Instagram (opcjonalnie)</label><input type="text" id="np-ig" name="instagram" placeholder="@uroczanoemi" autocomplete="off"></div>
-    <p class="muted">Powstanie folder <span class="mono">modelki/&lt;nazwa&gt;/</span> z wrzutnią, referencjami i promptami. Potem uzupełnij Persona → Prompty i Referencje.</p>
+    <div class="pole"><label for="np-nazwa">Jak ma się nazywać</label><input type="text" id="np-nazwa" name="nazwa" placeholder="np. Noemi" required autocomplete="off"></div>
+    <div class="pole"><label for="np-ig">Instagram (można pominąć)</label><input type="text" id="np-ig" name="instagram" placeholder="@uroczanoemi" autocomplete="off"></div>
+    <p class="muted">Potem dodasz jej zdjęcia i prompt w Ustawieniach.</p>
     <div class="dialog-przyciski">
       <button class="btn" type="button" data-akcja="zamknij-dialog">Anuluj</button>
-      <button class="btn btn-glowny" type="submit">Utwórz</button>
+      <button class="btn btn-glowny" type="submit">Dodaj</button>
     </div>
   </form>
 </dialog>
@@ -520,15 +578,15 @@
 
 <dialog id="dlg-lipsync">
   <form id="form-lipsync-dialog" class="dialog-formularz" method="dialog">
-    <h2 id="ls-dlg-tytul">Lipsync</h2>
+    <h2 id="ls-dlg-tytul">Dopasuj usta</h2>
     <input type="hidden" id="ls-dlg-id">
-    <div class="pole"><label for="ls-dlg-audio">Głos (audio)</label>
+    <div class="pole"><label for="ls-dlg-audio">Nagranie głosu</label>
       <select id="ls-dlg-audio"><option value="">— wpisz ścieżkę poniżej —</option></select>
       <input type="text" id="ls-dlg-sciezka" placeholder="C:\…\glos.mp3" autocomplete="off"></div>
-    <p class="dialog-tresc">Model i tryb z ustawień persony (Persona → Lipsync). <span class="dialog-uwaga">To wyda kredyty.</span></p>
+    <p class="dialog-tresc">Model i tryb z Ustawień persony. <span class="dialog-uwaga">To wyda kredyty.</span></p>
     <div class="dialog-przyciski">
       <button class="btn" type="button" data-akcja="zamknij-dialog">Anuluj</button>
-      <button class="btn btn-glowny" type="submit">Start lipsync</button>
+      <button class="btn btn-glowny" type="submit">Dopasuj usta</button>
     </div>
   </form>
 </dialog>
