@@ -135,6 +135,7 @@ const IKONY = {
   tarcza: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/>',
   teksty: '<path d="M4 6h16M4 12h10M4 18h14"/>',
   podpis: '<path d="M4 20h16"/><path d="m5 16 10-10 3 3-10 10H5v-3z"/>',
+  telefon: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
 };
 function ikona(nazwa) {
   const p = IKONY[nazwa];
@@ -164,6 +165,10 @@ const SLOWNIK_BLEDOW = [
   [/nie znaleziono cli/i, 'Program Higgsfield nie jest zainstalowany. Kliknij dwa razy instaluj.bat.'],
   [/nie jest zalogowane|auth login|not authenticated|session expired/i, 'Zaloguj się do Higgsfield: kliknij dwa razy zaloguj-higgsfield.bat.'],
   [/no workspace|wybranego workspace|workspace set/i, 'Higgsfield: wybierz workspace (zaloguj-higgsfield.bat).'],
+  [/hamulec|pauz[aąęy]/i, 'Autopilot jest zatrzymany — kliknij Wznów na stronie Start.'],
+  [/telegram nie jest sparowany|brak sparowanego czatu|nie jest sparowany/i, 'Najpierw napisz /start do bota na telefonie.'],
+  [/ponad 20 ?MB|plik za du[zż]y dla telegrama/i, 'Plik za duży dla Telegrama (max 20 MB).'],
+  [/brak tokena bota/i, 'Podłącz telefon: wklej token bota w Ustawienia → Konta.'],
   [/min_kredyty/i, 'Za mało kredytów na koncie, żeby bezpiecznik pozwolił.'],
   [/limit dzienny/i, 'Dzisiejszy limit kredytów wyczerpany.'],
   [/max\/rolka/i, 'Ta rolka kosztowałaby więcej niż dozwolone na jedną rolkę.'],
@@ -190,8 +195,8 @@ function prostyBlad(tekst) {
 }
 
 // Zadania w tle: nazwy i proste podsumowania wyników.
-const CO_ROBIE = { skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot' };
-const NAZWY_AKCJI = { skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot' };
+const CO_ROBIE = { skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon' };
+const NAZWY_AKCJI = { skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon' };
 const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia' };
 
 function prostyWynik(typ, w) {
@@ -230,6 +235,7 @@ function prostyWynik(typ, w) {
     }
     case 'podpis': return w.tekst ? `podpis: „${skroc(w.tekst, 80)}”` : 'bank podpisów jest pusty albo wszystko użyte';
     case 'lipsync': return w.url || w.plik ? 'usta dopasowane' : (w.status ? `status: ${w.status}` : 'gotowe');
+    case 'telegram_wyslij': return w.wyslano !== undefined && w.wyslano !== null ? `rolka #${Number(w.wyslano)} poleciała na telefon` : 'wysłane na telefon';
     case 'autopilot_raz':
     case 'autopilot': {
       const lista = Array.isArray(w) ? w : [w];
@@ -260,7 +266,7 @@ function postepZadania(z, linie) {
   return {
     skanuj: 'Sprawdzam nowe filmiki…', koszt: 'Liczę koszt…', pierz: 'Piorę rolkę w Media Tool…',
     lipsync: 'Dopasowuję usta do głosu… to może potrwać kilka minut', zdjecia: 'Robię zdjęcia…',
-    podpis: 'Dobieram podpis…', tts: 'Robię głos z tekstu…',
+    podpis: 'Dobieram podpis…', tts: 'Robię głos z tekstu…', telegram_wyslij: 'Wysyłam rolkę na telefon…',
   }[typ] || 'Pracuję…';
 }
 
@@ -275,6 +281,16 @@ function prostyTekstWpisu(w) {
   if ((m = t.match(/^#(\d+): (\d+) kr \(/)) && w.typ === 'kredyty') return `Rolka #${m[1]}: wydano ${kredytow(m[2])}`;
   if ((m = t.match(/^#(\d+): (.*)$/))) return `Rolka #${m[1]}: ${prostyBlad(m[2])}`;
   if ((m = t.match(/^#(\d+)\s+(\S.*?\.(?:mp4|mov|m4v|webm|avi|mkv))\b/i))) return `Nowy filmik #${m[1]}: ${m[2]}`;
+  // hamulec i telefon (Telegram)
+  if ((m = t.match(/^HAMULEC: autopilot (\S+) zatrzymany - (.*?)\.? Sprawdz w panelu/i))) return `Autopilot (${m[1]}) zatrzymał się: ${m[2]}. Kliknij Wznów na Starcie.`;
+  if ((m = t.match(/^autopilot (\S+): wznowiony z panelu/))) return `Autopilot (${m[1]}) wznowiony.`;
+  if (/^autopilot zatrzymany z telefonu/.test(t)) return 'Autopilot zatrzymany z telefonu (/stop).';
+  if (/^autopilot wznowiony z telefonu/.test(t)) return 'Autopilot wznowiony z telefonu (/wznow).';
+  if ((m = t.match(/^z telefonu: glos (.*)$/))) return `Z telefonu przyszło nagranie głosu: ${m[1]}`;
+  if ((m = t.match(/^z telefonu: (.*?) -> wrzutnia (\S+)/))) return `Z telefonu przyszedł filmik ${m[1]} (do ${m[2]})`;
+  if ((m = t.match(/^telegram: nie wyslalem rolki #(\d+) \((.*)\)$/))) return `Nie udało się wysłać rolki #${m[1]} na telefon: ${prostyBlad(m[2])}`;
+  if ((m = t.match(/^telegram: nie wyslalem wiadomosci \((.*)\)$/))) return `Nie udało się wysłać wiadomości na telefon: ${prostyBlad(m[1])}`;
+  if ((m = t.match(/^telegram: (.*)$/))) return `Telefon (Telegram): ${prostyBlad(m[1])}`;
   if (/^autopilot wlaczony/.test(t)) return 'Autopilot włączony';
   if (/^autopilot wylaczony/.test(t)) return 'Autopilot wyłączony';
   if ((m = t.match(/^autopilot dla (\S+): (wlaczony|wylaczony)/))) return `Autopilot dla ${m[1]}: ${m[2] === 'wlaczony' ? 'włączony' : 'wyłączony'}`;
@@ -341,9 +357,13 @@ function bladToast(e) {
 const state = {
   stan: null,            // /api/stan -> "stan" (null = brak aktywnej persony)
   modelki: [], aktywna: null, saldo: {}, autopilot: {}, zadanie: {}, konta: {}, dziennikOstatni: null, wersja: '',
+  autopilotStan: {},     // hamulec aktywnej persony: {bledy_z_rzedu, pauza, pauza_od}
+  telegram: {},          // bot Telegram: {skonfigurowany, sparowany, czat}
+  dzis: null,            // podsumowanie dnia: {rolki, zdjecia, bledy, kredyty{...}}
   strona: 'start', sekcja: null,
   // rolki
   pomysly: [], statusy: STATUSY.slice(), pomyslyJson: '', filtr: 'wszystkie',
+  odbierzTelefon: false, rolkiTelefon: false,   // czy listy były rysowane z podłączonym telefonem (przycisk „Wyślij na telefon”)
   otwartePrompty: new Set(), odtwarzane: new Set(),
   // reszta stron
   zdjecia: [], lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
@@ -445,9 +465,12 @@ async function odswiez(wymusSaldo = false) {
     state.autopilot = d.autopilot || {};
     if (!(state.konsola.timer && state.zadanie && state.zadanie.trwa)) state.zadanie = d.zadanie || state.zadanie || {};
     state.konta = d.konta || {};
+    state.autopilotStan = d.autopilot_stan || {};
+    state.telegram = d.telegram || {};
+    state.dzis = d.dzis || null;
     state.dziennikOstatni = d.dziennik_ostatni || null;
     state.wersja = d.wersja || '';
-    renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan();
+    renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan(); renderHamulecRolek();
     $('#wersja').textContent = state.wersja ? `rolki-ai v${state.wersja}` : '';
     const jest = !!state.stan;
     $('#brak-persony').hidden = jest;
@@ -646,6 +669,8 @@ async function ladujStart(cicho) {
     if (json !== state.pomyslyJson) { state.pomysly = p.pomysly || []; state.pomyslyJson = json; zmiana = true; }
     if (p.statusy && p.statusy.length) state.statusy = p.statusy;
   }
+  const telefon = telefonGotowy();
+  if (telefon !== state.odbierzTelefon) { state.odbierzTelefon = telefon; zmiana = true; }
   const gra = $$('#odbierz-lista video').some(v => !v.paused);
   if ((zmiana || !cicho || !$('#odbierz-lista').children.length) && !gra) renderOdbierz();
   if (d) renderWpisy($('#start-ostatnio'), (d.wpisy || []).slice().reverse());
@@ -666,6 +691,7 @@ function renderStart() {
   $('#folder-gotowe').textContent = s.gotowe_dir || '—';
   renderKrok2();
   renderAutopilot();
+  renderDzis();
 }
 
 // Sygnalizator na Starcie: czerwony = coś blokuje robienie rolek, pomarańczowy = coś wymaga uwagi, zielony = wszystko gra.
@@ -687,6 +713,9 @@ function stanBanera() {
   } else if (saldo.blad) {
     return { kolor: 'zle', tekst: `yapper.so nie odpowiada: ${esc(prostyBlad(saldo.blad))}`, przycisk: { tekst: 'Zobacz konta', hash: '#ustawienia/konta' } };
   }
+  // 1b. hamulec: autopilot zatrzymał się (np. kilka nieudanych rolek z rzędu) – stoi, dopóki user nie kliknie Wznów
+  const pauza = (state.autopilotStan || {}).pauza;
+  if (pauza) return { kolor: 'zle', tekst: tekstHamulca(pauza), przycisk: { tekst: 'Wznów', akcja: 'autopilot-wznow' } };
   // 2. za mało kredytów / limit dzienny
   const minKr = Number(b.min_kredyty !== undefined ? b.min_kredyty : u.min_kredyty) || 0;
   if (saldo.kredyty !== null && saldo.kredyty !== undefined && saldo.kredyty < minKr) {
@@ -713,9 +742,65 @@ function renderBanner() {
   if (!b) return;
   $('#banner').className = 'banner ' + (b.kolor || '') + (b.praca ? ' praca' : '');
   $('#banner-tekst').innerHTML = b.tekst;
-  $('#banner-akcja').innerHTML = b.przycisk
-    ? `<a class="btn${b.kolor === 'zle' ? ' btn-glowny' : ''}" href="${esc(b.przycisk.hash)}">${esc(b.przycisk.tekst)}</a>`
-    : '';
+  let akcja = '';
+  if (b.przycisk && b.przycisk.akcja) akcja = `<button class="btn btn-glowny" type="button" data-akcja="${esc(b.przycisk.akcja)}">${esc(b.przycisk.tekst)}</button>`;
+  else if (b.przycisk) akcja = `<a class="btn${b.kolor === 'zle' ? ' btn-glowny' : ''}" href="${esc(b.przycisk.hash)}">${esc(b.przycisk.tekst)}</a>`;
+  $('#banner-akcja').innerHTML = akcja;
+}
+
+// Hamulec autopilota: ten sam tekst na Starcie (duży baner) i na Rolkach (mały pasek).
+function tekstHamulca(pauza) {
+  return `Autopilot zatrzymał się: <b>${esc(pauza)}</b>. Sprawdź <a href="#rolki?status=blad">rolki, które nie wyszły</a>, i kliknij Wznów.`;
+}
+
+function renderHamulecRolek() {
+  const el = $('#rolki-hamulec');
+  if (!el) return;
+  const pauza = state.stan ? (state.autopilotStan || {}).pauza : null;
+  el.hidden = !pauza;
+  if (pauza) $('#rolki-hamulec-tekst').innerHTML = tekstHamulca(pauza);
+}
+
+async function wznowAutopilot(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/autopilot/wznow', 'POST', {});
+    state.autopilotStan = d.autopilot_stan || { bledy_z_rzedu: 0, pauza: null, pauza_od: null };
+    toast('Wznowione', 'ok');
+    renderBanner(); renderHamulecRolek();
+    odswiez();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function telefonGotowy() {
+  const t = state.telegram || {};
+  return !!(t.skonfigurowany && t.sparowany);
+}
+
+async function wyslijNaTelefon(id) {
+  if (!telefonGotowy()) { toast('Najpierw podłącz telefon: Ustawienia → Konta → Telefon (Telegram).', 'uwaga'); return; }
+  await akcja({ typ: 'telegram_wyslij', id }, 'wysyłam na telefon');
+}
+
+// Karta „Dziś” na Starcie: rolki, zdjęcia, kredyty i problemy z dzisiejszego dnia (wszystkie persony razem).
+function renderDzis() {
+  const d = state.dzis, karta = $('#karta-dzis');
+  if (!karta) return;
+  if (!d) { karta.hidden = true; return; }
+  karta.hidden = false;
+  const kr = d.kredyty || {};
+  const rolki = Number(d.rolki) || 0, zdjecia = Number(d.zdjecia) || 0, bledy = Number(d.bledy) || 0;
+  const hf = Number(kr.higgsfield) || 0, yapper = Number(kr.yapper) || 0;
+  const poz = [
+    { id: 'rolki', n: rolki, e: odmiana(rolki, 'rolka', 'rolki', 'rolek') },
+    { id: 'zdjecia', n: zdjecia, e: odmiana(zdjecia, 'zdjęcie', 'zdjęcia', 'zdjęć') },
+    { id: 'kredyty', n: hf, e: odmiana(hf, 'kredyt', 'kredyty', 'kredytów'), dop: yapper > 0 ? `+ ${liczba(yapper)} yapper` : '' },
+    { id: 'problemy', n: bledy, e: odmiana(bledy, 'problem', 'problemy', 'problemów'), klasa: bledy ? 'zle' : '' },
+  ];
+  $('#dzis-liczby').innerHTML = poz.map(p => `<div class="dzis-poz${p.klasa ? ' ' + p.klasa : ''}" id="dzis-${p.id}"><b>${esc(liczba(p.n))}</b><span>${esc(p.e)}</span>${p.dop ? `<small>${esc(p.dop)}</small>` : ''}</div>`).join('');
+  $('#dzis-podtytul').textContent = state.modelki.length > 1 ? 'wszystkie persony razem' : '';
 }
 
 function ustawWynikKroku(tekst, klasa) {
@@ -762,20 +847,28 @@ function renderOdbierz() {
   kont.innerHTML = lista.map(kartaOdbioru).join('');
 }
 
+// Siatka klatek GOTOWEJ rolki (wynik), a gdy jej nie ma – klatki filmiku źródłowego.
+function miniaturaRolki(p) {
+  return p.wynik_miniatura_url || p.miniatura_url || null;
+}
+
 function kartaOdbioru(p) {
   const id = Number(p.id);
   const gra = state.odtwarzane.has(id);
   const nazwa = tytulRolki(p);
+  const mini = miniaturaRolki(p);
+  const telefon = telefonGotowy() && p.wideo_url;
   return `<div class="odbior" data-id="${id}">
-    <button class="odbior-miniatura" type="button" data-akcja="odtworz" data-id="${id}" aria-label="Odtwórz ${esc(nazwa)}">${p.miniatura_url ? `<img src="${esc(p.miniatura_url)}" alt="" loading="lazy">` : ikona('film')}<span class="odbior-play">${ikona('play')}</span></button>
+    <button class="odbior-miniatura" type="button" data-akcja="odtworz" data-id="${id}" aria-label="Odtwórz ${esc(nazwa)}">${mini ? `<img src="${esc(mini)}" alt="" loading="lazy">` : ikona('film')}<span class="odbior-play">${ikona('play')}</span></button>
     <div class="odbior-tresc">
       <div class="odbior-nazwa" title="${esc(nazwa)}">${esc(nazwa)}</div>
-      <div class="odbior-status"><span class="kropka ${kolorStatusu(p.status)}"></span>${esc(slowoStatusu(p.status))}${p.lipsync_plik ? ' · usta dopasowane' : ''}</div>
+      <div class="odbior-status"><span class="kropka ${kolorStatusu(p.status)}"></span>${esc(slowoStatusu(p.status))}${p.lipsync_plik ? ' · usta dopasowane' : ''}${p.telegram_wyslano ? `<span class="wyslane" title="Ta rolka poleciała już na telefon">${ikona('ok')}wysłane na telefon</span>` : ''}</div>
       <div class="odbior-akcje">
         <button class="btn btn-maly" type="button" data-akcja="odtworz" data-id="${id}">${ikona('play')}${gra ? 'Ukryj' : 'Odtwórz'}</button>
         ${p.podpis
     ? `<button class="btn btn-maly" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="${esc(p.podpis)}">${ikona('kopiuj')}Kopiuj podpis</button>`
     : `<button class="btn btn-maly" type="button" data-akcja="podpis" data-id="${id}">Daj podpis</button>`}
+        ${telefon ? `<button class="btn btn-maly" type="button" data-akcja="telegram-wyslij" data-id="${id}" title="${p.telegram_wyslano ? 'Wyślij tę rolkę na telefon jeszcze raz' : 'Wyślij gotową rolkę na telefon (Telegram)'}">${ikona('telefon')}${p.telegram_wyslano ? 'Wyślij jeszcze raz' : 'Wyślij na telefon'}</button>` : ''}
       </div>
     </div>
     ${gra ? `<video class="odbior-wideo" controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}
@@ -804,6 +897,21 @@ function renderAutopilot() {
   const el = $('#autopilot-status');
   el.innerHTML = `<span class="kropka ${klasa === 'praca' ? 'kredyty pulsuje' : (klasa ? 'ok' : '')}"></span>${esc(txt)}`;
   el.className = 'autopilot-status' + (klasa ? ' ' + klasa : '');
+  // telefon (Telegram): podłączony / czeka na /start / nie podłączony
+  const t = state.telegram || {};
+  const tel = $('#autopilot-telefon');
+  if (t.skonfigurowany && t.sparowany) {
+    tel.innerHTML = u.telegram_wysylaj === false
+      ? `${ikona('telefon')}<span>Telefon podłączony — wysyłanie gotowych rolek jest wyłączone (<a href="#ustawienia/autopilot">Ustawienia → Autopilot</a>)</span>`
+      : `${ikona('telefon')}<span>Telefon podłączony — gotowe rolki lecą na Telegram</span>`;
+    tel.className = 'autopilot-telefon ok';
+  } else if (t.skonfigurowany) {
+    tel.innerHTML = `${ikona('telefon')}<a href="#ustawienia/konta">Telefon: napisz /start do bota</a>`;
+    tel.className = 'autopilot-telefon uwaga';
+  } else {
+    tel.innerHTML = '<a href="#ustawienia/konta">Podłącz telefon →</a>';
+    tel.className = 'autopilot-telefon cicho';
+  }
 }
 
 // Przełącznik na Starcie: włącza pętlę w tle ORAZ zaznacza personę (ustawienie `autopilot`), bo pętla obsługuje
@@ -846,19 +954,22 @@ async function ladujRolki(cicho) {
   catch (e) { if (!cicho) throw e; return; }
   const json = JSON.stringify(d.pomysly || []);
   state.statusy = (d.statusy && d.statusy.length) ? d.statusy : STATUSY.slice();
+  const telefon = telefonGotowy();
   if (cicho) {
-    if (json === state.pomyslyJson) return;
+    if (json === state.pomyslyJson && telefon === state.rolkiTelefon) return;
     const akt = document.activeElement;
     if (akt && akt.tagName === 'TEXTAREA' && $('#rolki-lista').contains(akt)) return; // nie przerywaj edycji promptu
     if ($$('#rolki-lista video').some(v => !v.paused)) return;                        // ani odtwarzania
   }
   state.pomysly = d.pomysly || [];
   state.pomyslyJson = json;
+  state.rolkiTelefon = telefon;
   renderRolki();
 }
 
 function renderRolki() {
   const u = (state.stan && state.stan.ustawienia) || {};
+  renderHamulecRolek();
   $('#pomysl-tekst-hint').hidden = !!u.mode_bez_zrodla;
   if (!FILTRY_ROLEK.some(f => f.id === state.filtr)) state.filtr = 'wszystkie';
   const liczby = {};
@@ -893,6 +1004,7 @@ function kartaRolki(p) {
   if (p.koszt !== null && p.koszt !== undefined) fakty.push(esc(kredytow(p.koszt)));
   if (p.audio_nazwa || p.audio) fakty.push(`${ikona('audio')}z głosem`);
   if (p.lipsync_plik) fakty.push('usta dopasowane');
+  if (p.telegram_wyslano) fakty.push(`<span class="ok" title="Ta rolka poleciała już na telefon">${ikona('ok')}wysłane na telefon</span>`);
   if (status === 'nowy' && !p.prompt_higgsfield) fakty.push('<span class="zle">brak promptu</span>');
   const meta = [];
   if (state.pelny) {
@@ -909,10 +1021,18 @@ function kartaRolki(p) {
   const bezPromptu = status === 'nowy' && !p.prompt_higgsfield;
   const promptOtwarty = state.otwartePrompty.has(id) || bezPromptu;
   const gra = state.odtwarzane.has(id) && p.wideo_url;
-  let glowny = '';
+  const telefon = telefonGotowy() && !!p.wideo_url;
+  const mini = miniaturaRolki(p);
+  const obraz = mini ? `<img src="${esc(mini)}" alt="" loading="lazy">` : ikona('film');
+  // miniatura gotowej rolki = przycisk „Odtwórz” (klik otwiera film na karcie)
+  const miniatura = p.wideo_url
+    ? `<button class="rolka-miniatura klik" type="button" data-akcja="odtworz" data-id="${id}" title="${gra ? 'Ukryj film' : 'Odtwórz'}" aria-label="${gra ? 'Ukryj film' : 'Odtwórz'} ${esc(nazwa)}">${obraz}<span class="rolka-play">${ikona(gra ? 'stop' : 'play')}</span></button>`
+    : `<div class="rolka-miniatura">${obraz}</div>`;
+  let glowny = '', drugi = '';
   if (status === 'nowy') glowny = przyciskRolki('generuj-pomysl', id, 'Zrób tę rolkę', 'btn-glowny');
   else if (status === 'blad') glowny = przyciskRolki('ponow', id, 'Spróbuj jeszcze raz', 'btn-glowny');
   else if (p.wideo_url) glowny = przyciskRolki('odtworz', id, gra ? 'Ukryj film' : `${ikona('play')}Odtwórz`, 'btn-glowny');
+  if (telefon && !p.telegram_wyslano) drugi = przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon`);
   const menu = [przyciskRolki('prompt-pokaz', id, p.prompt_higgsfield ? 'Pokaż / zmień prompt' : 'Wpisz prompt')];
   if (status === 'nowy') menu.push(przyciskRolki('koszt-pomysl', id, 'Ile kosztuje?'));
   if (['wygenerowany', 'postprodukcja', 'gotowe'].includes(status)) {
@@ -921,12 +1041,13 @@ function kartaRolki(p) {
     menu.push(przyciskRolki('podpis', id, p.podpis ? 'Daj nowy podpis' : 'Daj podpis'));
   }
   if (p.lipsync_url) menu.push(`<a class="btn btn-maly" href="${esc(p.lipsync_url)}" target="_blank" rel="noopener">Otwórz wersję z dopasowanymi ustami</a>`);
+  if (telefon && p.telegram_wyslano) menu.push(przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon jeszcze raz`));
   menu.push(przyciskRolki('usun-pomysl', id, 'Usuń', 'btn-zly'));
   let powod = '';
   if (status === 'blad' && p.notatki) powod = `<div class="rolka-powod"><b>Dlaczego:</b> ${esc(prostyBlad(p.notatki))}${state.pelny ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
   else if (p.notatki && state.pelny) powod = `<div class="rolka-meta">${esc(p.notatki)}</div>`;
   return `<article class="rolka" data-id="${id}">
-    <div class="rolka-miniatura">${p.miniatura_url ? `<img src="${esc(p.miniatura_url)}" alt="" loading="lazy">` : ikona('film')}</div>
+    ${miniatura}
     <div class="rolka-tresc">
       <div class="rolka-gora"><h3 class="rolka-nazwa">${esc(nazwa)}</h3><span class="status ${kolorStatusu(status)}"><span class="kropka ${kolorStatusu(status)}"></span>${esc(slowoStatusu(status))}</span></div>
       ${meta.length ? `<div class="rolka-meta">${meta.join(' · ')}</div>` : ''}
@@ -936,7 +1057,7 @@ function kartaRolki(p) {
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
       ${promptOtwarty ? `<div class="rolka-prompt"><label for="prompt-${id}">Prompt – opis dla AI, co zrobić z tym filmikiem</label><textarea id="prompt-${id}" data-prompt="${id}" spellcheck="false" placeholder="Wklej prompt persony albo własny…">${esc(p.prompt_higgsfield || '')}</textarea><div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="zapisz-prompt" data-id="${id}">Zapisz prompt</button>${bezPromptu ? '' : `<button class="btn btn-maly" type="button" data-akcja="prompt-pokaz" data-id="${id}">Zwiń</button>`}</div></div>` : ''}
       ${gra ? `<video controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}
-      <div class="rolka-akcje">${glowny}<details class="menu"><summary class="btn btn-maly">więcej ${ikona('chevron-dol')}</summary><div class="menu-lista">${menu.join('')}</div></details></div>
+      <div class="rolka-akcje">${glowny}${drugi}<details class="menu"><summary class="btn btn-maly">więcej ${ikona('chevron-dol')}</summary><div class="menu-lista">${menu.join('')}</div></details></div>
     </div>
   </article>`;
 }
@@ -1521,7 +1642,7 @@ async function ladujKonta() {
 
 function renderKonta() {
   const k = state.kontaPelne || {};
-  const kolejnosc = ['higgsfield', 'yapper', 'sync', 'elevenlabs'];
+  const kolejnosc = ['higgsfield', 'telegram', 'yapper', 'sync', 'elevenlabs'];
   const ids = kolejnosc.filter(x => k[x]).concat(Object.keys(k).filter(x => !kolejnosc.includes(x)));
   $('#konta-lista').innerHTML = ids.length ? ids.map(id => kartaKonta(id, k[id])).join('') : '<div class="pusto"><b>Brak danych o kontach</b></div>';
 }
@@ -1531,22 +1652,44 @@ const OPISY_KONT = {
   yapper: 'Zapasowy sposób robienia rolek (Wan 3.0). Potrzebne tylko, jeśli wybierzesz go w „Jak robić rolki”.',
   sync: 'Dopasowanie ust do głosu (lipsync) i głos z tekstu.',
   elevenlabs: 'Opcjonalnie: głos z tekstu.',
+  telegram: 'Wysyłasz botowi filmik → fabryka robi rolkę → bot odsyła gotową z podpisem. Komendy: /status, /raport, /stop, /wznow.',
 };
 
-function prostyWynikTestu(w) {
+function prostyWynikTestu(w, id = '') {
   if (!w) return '';
   if (!w.dziala) return prostyBlad(w.komunikat || 'nie działa');
+  if (id === 'telegram') {
+    // komunikat bota jest już po ludzku („bot @x, sparowany z czatem …”) – tylko polskie znaki
+    const k = String(w.komunikat || '').replace('wyslalem testowa wiadomosc', 'wysłałem testową wiadomość na telefon')
+      .replace('dziala - napisz do niego /start na telefonie, zeby sparowac', 'działa – teraz napisz do niego /start na telefonie');
+    return `Działa. ${k}`.trim();
+  }
   const m = String(w.komunikat || '').match(/(\d+)\s*kr/);
   return 'Działa.' + (m ? ` Masz ${kredytow(m[1])}.` : '');
 }
 
 function kartaKonta(id, k) {
   k = k || {};
-  const nazwa = k.nazwa || id;
+  const nazwa = id === 'telegram' ? 'Telefon (Telegram)' : (k.nazwa || id);
   const wynik = state.testyKont[id];
-  const wynikHtml = `<span class="konto-wynik ${wynik ? (wynik.dziala ? 'ok' : 'blad') : ''}" data-test-wynik="${esc(id)}">${wynik ? esc(state.pelny ? wynik.komunikat : prostyWynikTestu(wynik)) : ''}</span>`;
+  const wynikHtml = `<span class="konto-wynik ${wynik ? (wynik.dziala ? 'ok' : 'blad') : ''}" data-test-wynik="${esc(id)}">${wynik ? esc(state.pelny ? wynik.komunikat : prostyWynikTestu(wynik, id)) : ''}</span>`;
   let stanKlasa, stanTekst, srodek;
-  if (k.typ === 'oauth') {
+  if (id === 'telegram') {
+    // telefon jako pilot: token bota (klucz „telegram”) + parowanie przez /start
+    if (k.sparowany) { stanKlasa = 'ok'; stanTekst = `Sparowany z: ${k.czat || 'telefon'}`; }
+    else if (k.jest) { stanKlasa = 'uwaga'; stanTekst = 'Token jest. Teraz na telefonie napisz do swojego bota: /start'; }
+    else { stanKlasa = ''; stanTekst = 'nie podłączony'; }
+    srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}
+      <ol class="kroki-lista">
+        <li>W Telegramie napisz do <b>@BotFather</b>: <span class="mono">/newbot</span>, nadaj nazwę – dostaniesz <b>token</b>.</li>
+        <li>Wklej token poniżej i kliknij <b>Zapisz</b>.</li>
+        <li>Na telefonie napisz do swojego bota: <span class="mono">/start</span>. Od tej chwili wysyłasz mu filmiki, a on odsyła gotowe rolki.</li>
+      </ol>
+      <div class="konto-jak" data-zaawansowane>${linkuj(k.jak || '')}${k.komunikat ? `\n${esc(k.komunikat)}` : ''}</div>
+      ${k.jest ? `<div class="konto-maska" data-zaawansowane>token: ${esc(k.maska || '••••')}${k.z_env ? ' (ze zmiennej środowiskowej)' : ''}</div>` : ''}
+      <form class="rzad" data-konto-form="telegram"><input type="password" name="klucz" placeholder="${k.jest ? 'wklej nowy token, żeby podmienić' : 'wklej token bota (od @BotFather)'}" autocomplete="off" aria-label="Token bota Telegram"><button class="btn btn-glowny" type="submit">Zapisz</button></form>
+      <div class="rzad"><button class="btn btn-maly" type="button" data-akcja="konto-test" data-dostawca="telegram"${k.jest ? '' : ' disabled'}>Testuj</button>${k.jest && !k.z_env ? '<button class="btn btn-maly btn-zly" type="button" data-akcja="konto-usun" data-dostawca="telegram">Usuń token</button>' : ''}${wynikHtml}</div>`;
+  } else if (k.typ === 'oauth') {
     stanKlasa = k.ok ? 'ok' : 'blad';
     stanTekst = k.ok ? 'połączone' : 'nie połączone';
     srodek = `${!k.ok && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}
@@ -1583,12 +1726,17 @@ async function zapiszKlucz(dostawca, klucz) {
 }
 
 async function usunKlucz(dostawca) {
-  const w = await potwierdz({ tytul: 'Usunąć klucz?', tresc: '<p>Ten serwis przestanie działać, dopóki nie wkleisz nowego klucza.</p>', ok: 'Usuń', klasa: 'btn-zly' });
+  const telefon = dostawca === 'telegram';
+  const w = await potwierdz({
+    tytul: telefon ? 'Usunąć token bota?' : 'Usunąć klucz?',
+    tresc: telefon ? '<p>Telefon przestanie dostawać rolki, dopóki nie wkleisz nowego tokena.</p>' : '<p>Ten serwis przestanie działać, dopóki nie wkleisz nowego klucza.</p>',
+    ok: 'Usuń', klasa: 'btn-zly',
+  });
   if (!w) return;
   const d = await api('/api/konta', 'POST', { dostawca, klucz: '' });
   state.kontaPelne = d.konta || state.kontaPelne;
   delete state.testyKont[dostawca];
-  toast('Klucz usunięty.', 'ok');
+  toast(telefon ? 'Token usunięty.' : 'Klucz usunięty.', 'ok');
   renderKonta();
   odswiez();
 }
@@ -1600,7 +1748,8 @@ async function testujKonto(dostawca, btn) {
   try {
     const d = await api('/api/konta/test', 'POST', { dostawca });
     state.testyKont[dostawca] = { dziala: !!d.dziala, komunikat: d.komunikat || (d.dziala ? 'działa' : 'nie działa') };
-    toast(`${(state.kontaPelne && state.kontaPelne[dostawca] && state.kontaPelne[dostawca].nazwa) || dostawca}: ${prostyWynikTestu(state.testyKont[dostawca])}`, d.dziala ? 'ok' : 'uwaga');
+    const nazwa = dostawca === 'telegram' ? 'Telefon (Telegram)' : ((state.kontaPelne && state.kontaPelne[dostawca] && state.kontaPelne[dostawca].nazwa) || dostawca);
+    toast(`${nazwa}: ${prostyWynikTestu(state.testyKont[dostawca], dostawca)}`, d.dziala ? 'ok' : 'uwaga');
   } catch (e) {
     state.testyKont[dostawca] = { dziala: false, komunikat: e.message };
     bladToast(e);
@@ -1916,6 +2065,8 @@ document.addEventListener('click', async e => {
       case 'skanuj': await akcja({ typ: 'skanuj' }, 'sprawdzam nowe filmiki'); break;
       case 'koszt': await policzKosztWszystkich(); break;
       case 'autopilot-raz': await akcja({ typ: 'autopilot_raz' }, 'przebieg autopilota'); break;
+      case 'autopilot-wznow': await wznowAutopilot(el); break;
+      case 'telegram-wyslij': await wyslijNaTelefon(id); break;
       // rolki
       case 'filtr': state.filtr = el.dataset.filtr || 'wszystkie'; renderRolki(); break;
       case 'koszt-pomysl': await akcja({ typ: 'koszt', ids: [id] }, 'liczę koszt'); break;

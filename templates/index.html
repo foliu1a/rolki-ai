@@ -129,15 +129,23 @@
                 </label>
               </div>
               <div class="autopilot-status" id="autopilot-status">—</div>
+              <div class="autopilot-telefon" id="autopilot-telefon"></div>
               <div class="rzad" data-zaawansowane>
                 <button class="btn btn-maly" type="button" data-akcja="autopilot-raz">Jeden przebieg autopilota teraz</button>
               </div>
             </section>
 
-            <section class="karta" id="karta-ostatnio">
-              <div class="karta-naglowek"><div><h2>Ostatnio</h2></div><a href="#historia" class="link-dalej">cała historia →</a></div>
-              <ul class="wpisy" id="start-ostatnio"></ul>
-            </section>
+            <div class="kolumna">
+              <section class="karta karta-dzis" id="karta-dzis" hidden aria-labelledby="dzis-tytul">
+                <div class="karta-naglowek"><div><h2 id="dzis-tytul">Dziś</h2></div><span class="muted" id="dzis-podtytul"></span></div>
+                <div class="dzis" id="dzis-liczby"></div>
+              </section>
+
+              <section class="karta" id="karta-ostatnio">
+                <div class="karta-naglowek"><div><h2>Ostatnio</h2></div><a href="#historia" class="link-dalej">cała historia →</a></div>
+                <ul class="wpisy" id="start-ostatnio"></ul>
+              </section>
+            </div>
           </div>
         </section>
 
@@ -145,6 +153,12 @@
         <section class="strona" id="strona-rolki" hidden>
           <div class="naglowek-strony">
             <div><h1>Rolki</h1><p>Każdy filmik z folderu to jedna rolka. Tu widzisz, która czeka, która się robi, a która jest gotowa.</p></div>
+          </div>
+
+          <div class="banner maly zle" id="rolki-hamulec" role="status" hidden>
+            <span class="banner-kropka"></span>
+            <div class="banner-tekst" id="rolki-hamulec-tekst"></div>
+            <div class="banner-akcja"><button class="btn btn-glowny btn-maly" type="button" data-akcja="autopilot-wznow">Wznów</button></div>
           </div>
 
           <div class="strefa" data-upload="zrodlo" tabindex="0" role="button" aria-label="Wrzuć filmiki">
@@ -266,7 +280,7 @@
 
           <!-- Konta -->
           <details class="sekcja" id="sekcja-konta">
-            <summary><span class="ikona" data-ikona="klucz"></span><span class="sekcja-tytul">Konta</span><span class="sekcja-opis">Logowanie do Higgsfield i klucze do yapper.so i sync.so.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <summary><span class="ikona" data-ikona="klucz"></span><span class="sekcja-tytul">Konta</span><span class="sekcja-opis">Logowanie do Higgsfield, telefon (Telegram) i klucze do yapper.so i sync.so.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
             <div class="sekcja-tresc">
               <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Klucze zostają <b>tylko na tym komputerze</b> (plik <span class="mono">klucze.json</span> w folderze programu). Panel wysyła je wyłącznie do ich dostawcy.</span></div>
               <div class="siatka siatka-3" id="konta-lista"></div>
@@ -417,6 +431,12 @@
                 <div class="pole"><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
               </div>
               <label class="check"><input type="checkbox" name="lipsync_auto"><span>Jeśli obok filmiku leży <span class="mono">nazwa.audio.mp3</span>, dopasuj usta automatycznie</span></label>
+              <label class="check"><input type="checkbox" name="telegram_wysylaj"><span>Wysyłaj gotowe rolki na telefon (Telegram)<small>bot odsyła każdą gotową rolkę z podpisem – telefon podłączasz w <a href="#ustawienia/konta">Konta</a></small></span></label>
+              <label class="check"><input type="checkbox" name="dziel_dlugie"><span>Filmik dłuższy niż 30 s potnij na kawałki po 30 s<small>Seedance robi najwyżej 30 s naraz – każdy kawałek stanie się osobną rolką</small></span></label>
+              <div class="pola-siatka">
+                <div class="pole"><label for="u-stop-bledy">Zatrzymaj autopilot po … nieudanych rolkach z rzędu</label><input type="number" id="u-stop-bledy" name="autopilot_stop_po_bledach" min="0" max="100" data-domyslne="3"><small class="pole-info">0 = nigdy. Po zatrzymaniu na Starcie pojawi się czerwony pasek z przyciskiem „Wznów”.</small></div>
+              </div>
+              <div class="callout info" id="autostart-info"><span class="ikona" data-ikona="info"></span><span>Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy w plik <b>autostart.bat</b> (w folderze programu rolki-ai). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
           </details>

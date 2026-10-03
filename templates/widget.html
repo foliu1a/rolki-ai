@@ -35,6 +35,7 @@
   .ostatni { color: var(--szary); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ostatni.blad { color: var(--zle); } .ostatni.ok { color: var(--ok); }
   .blad-polaczenia { color: var(--zle); font-size: 12px; }
+  .hamulec { color: var(--zle); font-weight: 700; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -50,6 +51,7 @@
     <div class="kafel zle"><div class="n" id="k-blad">–</div><div class="e">błędy</div></div>
   </div>
   <div class="stopka"><span class="kropka" id="kropka"></span><span id="autopilot">autopilot —</span></div>
+  <div class="hamulec" id="hamulec" hidden></div>
   <div class="ostatni" id="ostatni"></div>
   <div class="blad-polaczenia" id="offline" hidden>Panel nie odpowiada — włącz panel.bat</div>
 <script>
@@ -86,6 +88,9 @@ async function odswiez() {
     : a.wlaczony ? `autopilot włączony${a.nastepny ? ' · ' + odstep(a.nastepny - Date.now() / 1000) : ''}` : 'autopilot wyłączony';
   const o = d.dziennik_ostatni;
   const el = $('#ostatni'); el.textContent = o ? o.tekst : ''; el.className = 'ostatni ' + (o ? o.typ : '');
+  // hamulec: autopilot zatrzymał się (np. kilka nieudanych rolek z rzędu) – czeka na „Wznów” w panelu
+  const ap = d.autopilot_stan || {}, h = $('#hamulec');
+  h.hidden = !ap.pauza; h.textContent = ap.pauza ? `STOP: ${ap.pauza}` : ''; h.title = ap.pauza ? 'Autopilot zatrzymany – kliknij Wznów w panelu' : '';
 }
 odswiez();
 setInterval(odswiez, 10000);
