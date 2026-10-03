@@ -612,8 +612,11 @@ def _funkcja_akcji(typ, slug, dane):
         opcje = dict(dane.get("opcje") or {})
         if dane.get("sync_mode"):
             opcje["sync_mode"] = dane["sync_mode"]
+        styl = (dane.get("styl") or "").strip().lower() or None     # telefon | czysty | brak (None = ustawienie persony)
+        if styl and styl not in lipsync.STYLE_GLOSU:
+            raise ValueError(f"Nieznany styl glosu '{styl}' (telefon, czysty, brak).")
         return lambda log, stop: lipsync.zrob(slug, wideo, audio, pomysl_id=pid, log=log,
-                                              model=dane.get("model") or None, opcje=opcje)
+                                              model=dane.get("model") or None, opcje=opcje, styl=styl)
     if typ == "zdjecia":
         import zdjecia
         stroj = dane.get("stroj")      # None = wg ustawien (co drugie w stroju), "bez", "auto" albo nazwa pliku ze stroje/

@@ -69,7 +69,9 @@ autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dz
                     Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
                     (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
 zdjecia.py          zdjecia persony: zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt w kolko
-lipsync.py          zrob(slug, wideo, audio) -> sync.so (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield; tts_z_tekstu
+lipsync.py          zrob(slug, wideo, audio, styl=) -> przygotuj_glos (ffmpeg: styl telefon = pasmo mikrofonu + krotkie odbicia pokoju +
+                    kompresja + szum + loudnorm -16 LUFS; czysty = loudnorm; brak = bez zmian; ogg z Telegrama -> mp3) -> sync.so
+                    (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield; tts_z_tekstu. Ustawienie lipsync_glos_styl.
 dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobierz): higgsfield.py (CLI), yapper.py (REST),
                     sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
                     telegram.json obok stan.json: chat_id = czat glowny (pierwszy, ktory napisal), `czaty` = sparowane konta person

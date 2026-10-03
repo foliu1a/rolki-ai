@@ -68,6 +68,8 @@ USTAWIENIA_DOMYSLNE = {
     "lipsync_dostawca": "sync",     # sync (sync.so API) | higgsfield (model lipsync z CLI)
     "lipsync_model": "lipsync-2",   # model sync.so albo job_type modelu Higgsfield
     "lipsync_auto": False,          # przy RECZNYM "Zrob rolke": jesli obok zrodla lezy <nazwa>.audio.mp3 -> od razu lipsync (autopilot pomija)
+    "lipsync_glos_styl": "telefon", # jak przerobic glos przed lipsynciem: telefon (jak nagranie z telefonu w pokoju: pasmo mikrofonu,
+                                    # lekki poglos, szum tla, wyrownana glosnosc) | czysty (tylko glosnosc) | brak (plik bez zmian)
     "lipsync_parametry": {},        # np. {"sync_mode": "loop"}
     "tts_model": "",                # job_type modelu text-to-speech Higgsfield (z `model list --audio`), "" = brak
     "tts_glos": "",                 # voice id z `higgsfield voices list`

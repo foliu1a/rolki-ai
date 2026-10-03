@@ -105,7 +105,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 {"typ": "koszt", "ids": [5, 6]}            // ids opcjonalne = wszystkie 'nowe' z promptem
 {"typ": "generuj", "ids": [5], "limit": 3, "dry_run": false}
 {"typ": "pierz", "id": 5}                    // Media Tool na wyniku pomysłu
-{"typ": "lipsync", "id": 5, "audio": "C:\\...\\glos.mp3"}       // albo {"wideo": "...", "audio": "..."}
+{"typ": "lipsync", "id": 5, "audio": "C:\\...\\glos.mp3", "styl": "telefon"}   // albo {"wideo": "...", "audio": "..."}; styl: telefon|czysty|brak (brak pola = ustawienie lipsync_glos_styl)
 {"typ": "zdjecia", "ile": 2, "prompt": "opcjonalny prompt", "stroj": "auto"}   // stroj: brak = automatycznie, "bez", "auto", "plik.png"
 {"typ": "podpis", "id": 5}
 {"typ": "tts", "tekst": "Cześć!", "voice_id": "EXAVITQu4vr4xnSDxMaL", "nazwa": "intro"}   // sync.so -> audio/<nazwa>.mp3
@@ -160,7 +160,11 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 ## Zdjęcia, lipsync, dziennik, budżet, autopilot
 - `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki", "stroj"}]}`
 - `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik)
-- `GET /api/lipsync` → `{"lipsync": [{"id", "wideo", "audio", "dostawca", "model", "pomysl_id", "status", "plik_wynikowy", "url", "koszt", "notatki", "utworzono"}]}`
+- `GET /api/lipsync` → `{"lipsync": [{"id", "wideo", "audio", "dostawca", "model", "pomysl_id", "status", "plik_wynikowy", "url", "koszt", "notatki", "utworzono", "styl"?, "audio_przygotowane"?}]}`
+- Brzmienie głosu (2.2): przed wysłaniem do sync.so głos jest przerabiany ffmpegiem wg ustawienia `lipsync_glos_styl`
+  (`telefon` = jak nagranie z telefonu w pokoju: pasmo mikrofonu, lekki pogłos, szum tła, wyrównana głośność – domyślnie;
+  `czysty` = tylko głośność; `brak` = plik bez zmian). Głosówki z Telegrama (.ogg) też przechodzą. Wynik w `modelki/<slug>/audio/_przygotowane/`.
+  GUI: select „Brzmienie głosu” w dialogu Lipsync (pole `styl` akcji) + ustawienie w sekcji Lipsync (tryb pełny).
 - `DELETE /api/lipsync/<id>`
 - `GET /api/dziennik?ile=100&typ=blad` → `{"wpisy": [{"czas", "typ", "modelka", "tekst", "dane"}]}` (najnowszy na końcu)
 - `GET /api/budzet` → `{"budzet": {...plik budzet.json...}, "dzis": {"higgsfield": {"wydano": 90, "limit": 300, "jednostka": "kr"}, "yapper": {"wydano": 0, "limit": 0, "jednostka": "kr"}, "sync": {"wydano": 50, "limit": 0, "jednostka": "c"}}}`

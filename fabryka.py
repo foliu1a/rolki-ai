@@ -1177,7 +1177,7 @@ def cmd_lipsync(args):
     if not audio or not os.path.isfile(audio):
         print("Podaj --audio <glos.mp3> (albo wrzuc <nazwa>.audio.mp3 obok filmiku zrodlowego).")
         return 1
-    wynik = lipsync.zrob(slug, wideo, audio, pomysl_id=args.id)
+    wynik = lipsync.zrob(slug, wideo, audio, pomysl_id=args.id, styl=args.styl)
     print(wynik or "nie wyszlo")
     return 0 if wynik else 1
 
@@ -1255,7 +1255,7 @@ def main(argv=None):
     s = sub.add_parser("wgraj", help="wgraj referencje/stroje raz (UUID w cache, szybsze koszt/generuj)"); s.add_argument("--od-nowa", action="store_true"); s.set_defaults(f=cmd_wgraj)
     s = sub.add_parser("pierz", help="Media Tool na wyniku pomyslu (albo --plik dowolny.mp4)"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--plik"); s.set_defaults(f=cmd_pierz)
     s = sub.add_parser("zdjecia", help="zdjecia persony (model obrazu z referencjami; --stroj auto|bez|plik = strój ze stroje/)"); s.add_argument("--ile", type=int, default=1); s.add_argument("--prompt"); s.add_argument("--stroj"); s.add_argument("--dry-run", action="store_true"); s.set_defaults(f=cmd_zdjecia)
-    s = sub.add_parser("lipsync", help="wideo + glos -> lipsync (sync.so) - tylko recznie, autopilot tego nie robi"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--wideo"); s.add_argument("--audio"); s.set_defaults(f=cmd_lipsync)
+    s = sub.add_parser("lipsync", help="wideo + glos -> lipsync (sync.so) - tylko recznie, autopilot tego nie robi"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--wideo"); s.add_argument("--audio"); s.add_argument("--styl", choices=("telefon", "czysty", "brak"), help="brzmienie glosu (domyslnie z ustawien: telefon)"); s.set_defaults(f=cmd_lipsync)
     s = sub.add_parser("autopilot", help="petla: telefon -> skanuj -> generuj -> pranie -> zdjecia -> podpisy (--raz = jeden przebieg; bez lipsyncu)"); s.add_argument("--raz", action="store_true"); s.set_defaults(f=cmd_autopilot)
     s = sub.add_parser("foldery", help="foldery na pulpicie: tu wrzucasz rolki / tu rolki zrobione / tu zdjecia zrobione (per persona)"); s.set_defaults(f=cmd_foldery)
     s = sub.add_parser("nsfw", help="czemu filtr tresci odrzuca rolki tej persony (slowa w promptach, liczba odrzucen, wskazowki)"); s.set_defaults(f=cmd_nsfw)

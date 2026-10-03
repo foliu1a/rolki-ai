@@ -6,7 +6,10 @@
 Dostawca z ustawien modelki (`lipsync_dostawca`): sync (sync.so API, domyslnie) albo higgsfield (model lipsync z CLI,
 `lipsync_model` = job_type). Rejestr prob w modelki/<slug>/lipsync.json (panel pokazuje historie).
 Glos: <nazwa>.audio.mp3 obok filmiku zrodlowego (lipsync_auto po generacji), plik z modelki/<slug>/audio/ (panel),
-albo TTS z tekstu (tts_z_tekstu -> sync.so /tts z glosem ElevenLabs).
+glosowka z Telegrama (.ogg) albo TTS z tekstu (tts_z_tekstu -> sync.so /tts z glosem ElevenLabs).
+Przed wyslaniem glos jest przerabiany (przygotuj_glos, ffmpeg) wg `lipsync_glos_styl`: "telefon" = brzmi jak nagranie
+z telefonu w pokoju (pasmo mikrofonu, krotkie odbicia, lekka kompresja, szum tla, glosnosc jak z glosowki), "czysty" =
+tylko wyrownana glosnosc, "brak" = plik bez zmian. Wynik w modelki/<slug>/audio/_przygotowane/.
 """
 import os
 import shutil
@@ -18,6 +21,50 @@ import dostawcy
 from dostawcy import sync_so
 
 LIMIT_MB = 19
+
+STYLE_GLOSU = {
+    "telefon": "jak nagranie z telefonu w pokoju (naturalnie, z lekkim poglosem i szumem tla)",
+    "czysty": "czysty glos, tylko wyrownana glosnosc",
+    "brak": "bez zmian - plik idzie taki, jaki jest",
+}
+# Lancuch ffmpeg dla "telefon": pasmo mikrofonu telefonu (150 Hz - 7,6 kHz), krotkie odbicia malego pokoju (11/23/37 ms),
+# lekka kompresja jak w aplikacji nagrywania, ledwo slyszalny rozowy szum tla, glosnosc -16 LUFS (jak glosowka).
+_FILTR_TELEFON = ("[0:a]aresample=48000,highpass=f=150,lowpass=f=7600,"
+                  "aecho=0.9:0.3:11|23|37:0.22|0.14|0.09,"
+                  "acompressor=threshold=-20dB:ratio=3:attack=8:release=140:makeup=4dB[g];"
+                  "anoisesrc=color=pink:amplitude=0.004:sample_rate=48000[n];"
+                  "[g][n]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+                  "loudnorm=I=-16:TP=-1.5:LRA=9[out]")
+_FILTR_CZYSTY = "[0:a]aresample=48000,loudnorm=I=-16:TP=-1.5:LRA=11[out]"
+
+
+def przygotuj_glos(slug, audio, styl="telefon", log=None):
+    """Glos (mp3/wav/m4a/ogg) -> mp3 mono 48 kHz w stylu `styl` (STYLE_GLOSU), zapisany w modelki/<slug>/audio/_przygotowane/.
+    Zwraca sciezke pliku do lipsyncu. Gdy styl == "brak", brak ffmpeg albo ffmpeg padl -> oryginal (z ostrzezeniem w dzienniku)."""
+    log = log or _log
+    styl = (styl or "telefon").strip().lower()
+    if styl not in STYLE_GLOSU:
+        raise ValueError(f"Nieznany styl glosu '{styl}' (dozwolone: {', '.join(STYLE_GLOSU)}).")
+    if styl == "brak":
+        return audio
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        _zdarzenie(log, slug, "uwaga", "glos: brak ffmpeg w PATH - wysylam oryginalne nagranie bez przerobki")
+        return audio
+    folder = os.path.join(baza.folder_audio(slug), "_przygotowane")
+    os.makedirs(folder, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(audio))[0]
+    filtr = _FILTR_TELEFON if styl == "telefon" else _FILTR_CZYSTY
+    for rozsz, kodek in ((".mp3", ["-c:a", "libmp3lame", "-b:a", "160k"]), (".wav", ["-c:a", "pcm_s16le"])):
+        cel = os.path.join(folder, f"{stem}.{styl}{rozsz}")
+        out = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", audio, "-filter_complex", filtr, "-map", "[out]", "-ac", "1", *kodek, cel],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        if out.returncode == 0 and os.path.isfile(cel) and os.path.getsize(cel) > 0:
+            log(f"glos: {os.path.basename(audio)} -> {os.path.basename(cel)} (styl: {styl})")
+            return cel
+        blad = (out.stderr or "").strip()[:300]
+    _zdarzenie(log, slug, "uwaga", f"glos: nie udalo sie przerobic {os.path.basename(audio)} ({blad or 'ffmpeg'}) - wysylam oryginal")
+    return audio
 
 
 def _log(msg):
@@ -56,26 +103,33 @@ def _nazwa_wyniku(slug, wideo, pomysl_id):
     return f"{stem}_lipsync.mp4"
 
 
-def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None):
-    """Caly obieg: rejestr -> (zmniejsz) -> dostawca -> pobierz do folderu gotowych -> aktualizuj pomysl.
+def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None, styl=None):
+    """Caly obieg: rejestr -> glos w stylu (przygotuj_glos) -> (zmniejsz wideo) -> dostawca -> pobierz do folderu gotowych
+    -> aktualizuj pomysl. `styl`: telefon | czysty | brak (None = ustawienie lipsync_glos_styl).
     Rzuca wyjatek przy bledzie (fabryka lapie); zwraca sciezke wyniku."""
     log = log or _log
     ust = baza.ustawienia_modelki(slug)
     dostawca = (ust.get("lipsync_dostawca") or "sync").strip().lower()
     model = model or ust.get("lipsync_model") or "lipsync-2"
     opcje = dict(ust.get("lipsync_parametry") or {}, **(opcje or {}))
+    styl = (styl or ust.get("lipsync_glos_styl") or "telefon").strip().lower()
+    if styl not in STYLE_GLOSU:
+        raise ValueError(f"Nieznany styl glosu '{styl}' (dozwolone: {', '.join(STYLE_GLOSU)}).")
     if not os.path.isfile(wideo):
         raise FileNotFoundError(wideo)
     if not os.path.isfile(audio):
         raise FileNotFoundError(audio)
     lid = baza.dodaj_lipsync(slug, wideo, audio, dostawca, model, pomysl_id=pomysl_id)
     cel = os.path.join(baza.folder_gotowych(slug), _nazwa_wyniku(slug, wideo, pomysl_id))
-    _zdarzenie(log, slug, "info", f"lipsync #{lid}: {os.path.basename(wideo)} + {os.path.basename(audio)} ({dostawca} {model})", lipsync=lid)
+    _zdarzenie(log, slug, "info", f"lipsync #{lid}: {os.path.basename(wideo)} + {os.path.basename(audio)} ({dostawca} {model}, glos: {styl})", lipsync=lid)
     try:
+        glos = przygotuj_glos(slug, audio, styl, log=log)
+        if glos != audio:
+            baza.aktualizuj_lipsync(slug, lid, audio_przygotowane=glos, styl=styl)
         if dostawca == "sync":
-            wynik = _przez_sync(slug, wideo, audio, model, opcje, log)
+            wynik = _przez_sync(slug, wideo, glos, model, opcje, log)
         elif dostawca == "higgsfield":
-            wynik = _przez_higgsfield(slug, wideo, audio, model, opcje, log)
+            wynik = _przez_higgsfield(slug, wideo, glos, model, opcje, log)
         else:
             raise ValueError(f"nieznany lipsync_dostawca '{dostawca}' (sync | higgsfield)")
         if not wynik.get("url"):

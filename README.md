@@ -46,8 +46,9 @@ Ręcznie (panel albo konsola):
 2. **Skanuj** - każdy filmik dostaje numer, podgląd klatek i Twój prompt (A albo B).
 3. **Policz koszt** - ile kredytów zejdzie. **Generuj** - z bezpiecznikiem (min_kredyty, max/rolka, limit dzienny, powtórki po odrzuceniu).
 4. Gotowy plik ląduje w `tu rolki zrobione\<persona>\NNN_nazwa.mp4` (po Media Tool). Surowy wynik zostaje w `modelki\<slug>\wyniki\`.
-5. Opcjonalnie: **Lipsync** (wideo + głos z folderu `audio/` albo TTS z tekstu), **Zdjęcia** (model obrazu z referencjami, co drugie
-   w stroju z folderu *Stroje*), **Podpis** z banku tekstów.
+5. Opcjonalnie: **Lipsync** (wideo + głos z folderu `audio/`, głosówka z Telegrama albo TTS z tekstu; głos jest najpierw
+   przerabiany, żeby brzmiał jak nagranie z telefonu w pokoju – `lipsync_glos_styl`: telefon / czysty / brak), **Zdjęcia**
+   (model obrazu z referencjami, co drugie w stroju z folderu *Stroje*), **Podpis** z banku tekstów.
 
 Automatycznie - **Autopilot** (przełącznik w panelu albo `autopilot.bat`): co `autopilot_co_minut` minut robi
 skanuj → generuj (Higgsfield albo yapper) → Media Tool → zdjęcia (`zdjecia_dziennie`) → podpisy → rolka na Telegram, dla każdej
