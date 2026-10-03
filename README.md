@@ -41,6 +41,11 @@ z włączonym `autopilot`. Pilnuje `autopilot_max_rolek_dziennie`, limitu dzienn
   na telefon i czeka na „Wznów” w panelu (albo `/wznow` z Telegrama) - nie pali kredytów w kółko.
 - **Długie filmiki**: źródło dłuższe niż 30 s (limit Seedance) jest cięte na kawałki po 30 s (`dziel_dlugie`), każdy to osobna rolka.
 - **Podpisy**: z banku tekstów + hashtagi persony (Ustawienia → Persona).
+- **Tani podgląd**: zanim wydasz 45–72 kr na rolkę, „Tani podgląd (~21 kr)” w Rolkach pokaże, czy prompt działa (Seedance draft).
+- **Porządki**: raz dziennie kasuje surowe pliki `.raw.mp4` starsze niż `sprzataj_po_dniach` (gdy gotowy plik jest)
+  i robi kopię zapasową danych person (`modelki/_kopie/<data>/`, 7 dni).
+- **Diagnoza**: panel (Start → „Pierwsze kroki”) i `python fabryka.py diagnoza` mówią, czego brakuje (ffmpeg, logowanie,
+  Media Tool, Telegram, zdjęcia/prompty person). Prompty są sprawdzane pod kątem numerów `@[Image N]`.
 - **Autostart z Windows**: `autostart.bat` (raz) - panel z autopilotem startuje po zalogowaniu, w tle. `autostart-usun.bat` wyłącza.
 
 ## Telefon jako pilot (Telegram)

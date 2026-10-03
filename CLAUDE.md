@@ -40,9 +40,12 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 ## Pliki
 
 ```
-fabryka.py          logika + CLI (status, skanuj, prompt, koszt, generuj, pierz, zdjecia, lipsync, autopilot, ocen, warianty,
-                    podpis, wgraj, ustaw, budzet, model, modele, glosy, konto). Funkcje skanuj()/koszt()/generuj()/pierz()/podpis()
-                    przyjmuja (slug, ..., log=, stop=) - wola je CLI, panel i autopilot.
+fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, generuj, pierz, zdjecia, lipsync, autopilot, ocen,
+                    warianty, podpis, wgraj, ustaw, budzet, model, modele, glosy, konto). Funkcje skanuj()/koszt()/generuj()/
+                    pierz()/podpis()/podglad() przyjmuja (slug, ..., log=, stop=) - wola je CLI, panel i autopilot.
+                    podglad(slug, pid) = tani draft (~21 kr), pomysl zostaje 'nowy' (podglad_plik). sprawdz_prompt(slug) =
+                    ostrzezenia o @Image vs liczba zdjec (nie blokuje). diagnoza() = ffmpeg/Higgsfield/Media Tool/Telegram/persony.
+                    skanuj: zrodlo > 30 s -> klatki.potnij na kawalki (dziel_dlugie), _klatki_wyniku po generacji.
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
                     -> lipsync -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na telefon -> raport dnia po 20:00.
                     Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
@@ -61,7 +64,8 @@ sekrety.py          klucze API (yapper, sync, elevenlabs, telegram = token bota)
 baza.py             warstwa danych (modelki/<slug>/*.json, budzet, dziennik.jsonl) - zawsze przez nia, nie edytuj JSON-ow recznie
 postprocess.py      most do ..\VideoRemixer (NIE modyfikowac VideoRemixera)
 app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle naraz (Konsola), autopilot jako watek,
-                    /api/plik serwuje tylko z folderow modelek/wrzutni/gotowych/zdjec
+                    /api/plik serwuje tylko z folderow modelek/wrzutni/gotowych/zdjec; /api/zamknij (aktualizuj.bat),
+                    /api/statystyki, /api/diagnoza, /api/autopilot/wznow; saldo w tle (stale-while-revalidate)
 templates/, static/ index.html + style.css + app.js (SPA, vanilla JS, bez CDN), widget.html (/widget - male okno)
 panel.py            stary panel w konsoli
 modelki/<slug>/
