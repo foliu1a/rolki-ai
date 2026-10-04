@@ -36,21 +36,27 @@ def test_sekrety_plik_i_env(dane, monkeypatch):
 
 # ---------------- udawany HTTP ----------------
 
+Y = "https://yapper.so/api/v1"        # yapper - adresy w testach sa PELNE i porownywane dokladnie (endswith ukryl kiedys
+S = "https://api.sync.so/v2"          # sklejony adres https://yapper.so/api/v1https://...)
+E = "https://api.elevenlabs.io/v1"
+
+
 class UdawanyHTTP:
-    """Zbiera wywolania i odpowiada wg prostych regul (lista odpowiedzi per (metoda, koncowka sciezki))."""
+    """Zbiera wywolania i odpowiada wg regul: lista odpowiedzi per (metoda, DOKLADNY url). Nieznany adres = 404."""
 
     def __init__(self):
         self.wywolania = []
         self.odpowiedzi = {}
         self.pobrane = []
 
-    def ustaw(self, metoda, koncowka, *odpowiedzi):
-        self.odpowiedzi[(metoda, koncowka)] = list(odpowiedzi)
+    def ustaw(self, metoda, url, *odpowiedzi):
+        assert url.startswith("http"), "w testach podawaj pelny adres"
+        self.odpowiedzi[(metoda, url)] = list(odpowiedzi)
 
     def _odp(self, metoda, url):
-        for (m, k), lista in self.odpowiedzi.items():
-            if m == metoda and url.endswith(k) and lista:
-                return lista.pop(0) if len(lista) > 1 else lista[0]
+        lista = self.odpowiedzi.get((metoda, url))
+        if lista:
+            return lista.pop(0) if len(lista) > 1 else lista[0]
         raise http.BladHTTP(404, json.dumps({"error": {"code": "not_found", "message": url}}), url)
 
     def zapytanie(self, metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None, powtorki=3):
@@ -66,6 +72,9 @@ class UdawanyHTTP:
 
     def wyslij_plik(self, url, sciezka, naglowki=None, metoda="PUT", timeout=900):
         self.wywolania.append((metoda, url, sciezka, naglowki))
+        odp = self.odpowiedzi.get((metoda, url))
+        if odp and isinstance(odp[0], Exception):
+            raise odp[0]
         return ""
 
     def pobierz(self, url, sciezka, naglowki=None, timeout=600):
@@ -75,13 +84,55 @@ class UdawanyHTTP:
         self.pobrane.append((url, sciezka))
         return sciezka
 
+    def posty(self, url):
+        return [w for w in self.wywolania if w[0] == "POST" and w[1] == url]
+
 
 @pytest.fixture
 def udawany_http(monkeypatch):
     u = UdawanyHTTP()
     for nazwa in ("zapytanie", "multipart", "wyslij_plik", "pobierz"):
         monkeypatch.setattr(http, nazwa, getattr(u, nazwa))
-    return u
+    yapper.wyczysc_cache()
+    yield u
+    yapper.wyczysc_cache()
+
+
+# prawdziwe ksztalty z yapper.so (GET /models, /models/wan-3.0/schema.json, 2026-10-04)
+MODEL_WAN = {"id": "wan-3.0", "type": "video-generation", "displayName": "WAN 3.0",
+             "capabilities": {"aspectRatios": ["16:9", "4:3", "1:1", "3:4", "9:16"], "resolutions": [480, 720, 1080],
+                              "videoLengths": list(range(2, 31)), "maxReferenceImages": 10,
+                              "referenceVideos": {"maxCount": 5, "maxCombinedDurationSeconds": 15}, "maxPromptLength": 5000},
+             "pricing": {"unit": "video", "creditsByLength": {"10": 490}, "pricedResolution": 1080}}
+SCHEMAT_WAN = {"type": "object", "additionalProperties": False, "required": ["prompt"], "properties": {
+    "prompt": {"type": "string"}, "aspectRatio": {"type": "string", "enum": ["16:9", "4:3", "1:1", "3:4", "9:16", "auto"]},
+    "resolution": {"type": "number", "enum": [480, 720, 1080]}, "videoLength": {"type": "number", "enum": list(range(2, 31))},
+    "durationMode": {"type": "string", "enum": ["fixed", "auto"]}, "referenceImages": {"type": "array"},
+    "referenceVideos": {"type": "array"}, "referenceAudios": {"type": "array"}, "disableAutoRetries": {"type": "boolean"}}}
+SCHEMAT_EDIT = {"type": "object", "properties": {"prompt": {"type": "string"}, "aspectRatio": {"const": "auto"},
+                                                 "durationMode": {"const": "auto"}, "referenceVideos": {"type": "array"},
+                                                 "referenceImages": {"type": "array"}, "generateAudio": {"type": "boolean"}}}
+
+
+def _dry(kr, can_start=True, blocked=None, model="wan-3.0"):
+    return {"dryRun": True, "type": "video-generation", "model": model, "creditsEstimated": kr, "canStart": can_start,
+            "blockedBy": blocked, "credits": {"available": 7000}}
+
+
+def _bilety(u, *ids):
+    """POST /assets/uploads -> kolejne bilety (assetId, podpisany PUT, naglowki, completeUrl ABSOLUTNY) + complete per asset."""
+    u.ustaw("POST", Y + "/assets/uploads", *[{
+        "assetId": a, "uploadUrl": f"https://storage.googleapis.com/yapper-up/{a}?X-Goog-Signature=abc", "method": "PUT",
+        "headers": {"Content-Type": "video/mp4" if a.startswith("v") else "image/png", "x-goog-content-length-range": "0,104857600"},
+        "maxBytes": 104857600, "expiresAt": "2026-10-04T12:00:00Z", "completeUrl": f"{Y}/assets/uploads/{a}/complete"} for a in ids])
+    for a in ids:
+        u.ustaw("POST", f"{Y}/assets/uploads/{a}/complete", {"id": a, "type": "video" if a.startswith("v") else "image",
+                                                              "createdAt": "2026-10-04T10:00:00Z"})
+
+
+def _modele(u, model=MODEL_WAN, schemat=SCHEMAT_WAN):
+    u.ustaw("GET", Y + "/models", [model])
+    u.ustaw("GET", f"{Y}/models/{model['id']}/schema.json", schemat)
 
 
 # ---------------- yapper ----------------
@@ -94,67 +145,192 @@ def test_yapper_bez_klucza(dane):
 
 def test_yapper_saldo_modele_naglowki(dane, udawany_http):
     sekrety.zapisz_klucz("yapper", "yk_test")
-    udawany_http.ustaw("GET", "/credits", {"totalCredits": 5000, "usedCredits": 1240, "availableCredits": 3760})
-    udawany_http.ustaw("GET", "/models", {"models": [{"id": "wan-3.0", "name": "WAN 3.0", "processType": "video-generation"},
-                                                      {"id": "gpt-image-2", "name": "GPT Image", "processType": "image-generation"}]})
+    udawany_http.ustaw("GET", Y + "/credits", {"totalCredits": 5000, "usedCredits": 1240, "availableCredits": 3760})
+    udawany_http.ustaw("GET", Y + "/models", {"models": [{"id": "wan-3.0", "name": "WAN 3.0", "processType": "video-generation"},
+                                                         {"id": "gpt-image-2", "name": "GPT Image", "processType": "image-generation"}]})
     assert yapper.saldo() == 3760
     assert yapper.gotowy() == (True, "3760 kr dostepnych")
-    assert udawany_http.wywolania[0][3]["Authorization"] == "Bearer yk_test"
+    assert udawany_http.wywolania[0][1] == Y + "/credits" and udawany_http.wywolania[0][3]["Authorization"] == "Bearer yk_test"
     assert [m["id"] for m in yapper.modele_wideo()] == ["wan-3.0"]
 
 
-def test_yapper_koszt_generuj_z_uploadem_i_cache(modelka, udawany_http):
+def _zlecenie_wan(modelka, czas=6.0, nazwa="klip.mp4"):
     sekrety.zapisz_klucz("yapper", "yk_test")
-    baza.zapisz_ustawienia(modelka, dostawca="yapper", yapper={"model": "wan-3.0", "resolution": "1080p"})
-    zrodlo = os.path.join(baza.folder_zrodel(modelka), "klip.mp4")
+    baza.zapisz_ustawienia(modelka, dostawca="yapper", yapper={"model": "wan-3.0", "resolution": "720p"})
+    baza.zapisz_prompt(modelka, "wan.txt", "Replace the woman with the woman from the reference photos.")
+    zrodlo = os.path.join(baza.folder_zrodel(modelka), nazwa)
     open(zrodlo, "wb").write(b"mp4")
-    p = {"id": 1, "prompt_higgsfield": "tancz", "zrodlo": zrodlo, "info_zrodla": {"czas": 6.0}}
-    z = fabryka.zlecenie(modelka, p)
-    udawany_http.ustaw("POST", "/assets/uploads", {"uploadUrl": "https://s3/put", "headers": {"x-a": "1"}, "completeUrl": "/api/v1/assets/uploads/u1/complete"})
-    udawany_http.ustaw("POST", "/complete", {"asset": {"id": "asset_1"}})
-    udawany_http.ustaw("POST", "/processes", {"creditsUsed": 300},                       # dryRun
-                       {"id": "proc_1", "status": "queued"})                               # prawdziwy
-    udawany_http.ustaw("GET", "/processes/proc_1", {"id": "proc_1", "status": "processing"},
-                       {"id": "proc_1", "status": "completed", "creditsUsed": 300,
-                        "outputs": [{"type": "video", "url": "https://cdn/wynik.mp4"}]})
-    assert yapper.koszt(z) == 300
-    # 3 pliki (2 referencje + zrodlo) wgrane raz, dryRun z assetId
-    dry = [w for w in udawany_http.wywolania if w[0] == "POST" and w[1].endswith("/processes")][0]
-    assert dry[2]["dryRun"] is True and dry[2]["model"] == "wan-3.0"
-    assert dry[2]["input"]["referenceVideos"] == [{"assetId": "asset_1"}]
-    assert len(dry[2]["input"]["referenceImages"]) == 2
-    assert dry[2]["input"]["resolution"] == 1080 and dry[2]["input"]["videoLength"] == 6
-    uploady = [w for w in udawany_http.wywolania if w[0] == "PUT"]
-    assert len(uploady) == 3
-    wynik = yapper.generuj(z, timeout="1m")
-    assert wynik["status"] == "completed" and wynik["urls"] == ["https://cdn/wynik.mp4"] and wynik["job_id"] == "proc_1"
-    # cache: zadnych nowych uploadow
-    assert len([w for w in udawany_http.wywolania if w[0] == "PUT"]) == 3
-    realny = [w for w in udawany_http.wywolania if w[0] == "POST" and w[1].endswith("/processes")][1]
-    assert "dryRun" not in realny[2] and realny[3]["Idempotency-Key"].startswith("rolki-")
+    p = {"id": 1, "prompt_higgsfield": "PROMPT A @[Image 1](image_1)", "zrodlo": zrodlo, "info_zrodla": {"czas": czas}}
+    return fabryka.zlecenie(modelka, p), zrodlo
+
+
+def test_yapper_wgraj_dokladne_adresy_i_naglowki_biletu(modelka, udawany_http):
+    """Bilet: PUT na uploadUrl z naglowkami 1:1 (bez nadpisanego Content-Type), completeUrl ABSOLUTNY wolany bez doklejania
+    https://yapper.so/api/v1 drugi raz, cialo biletu tylko {type, mimeType, name}; drugi raz z cache (zero wywolan)."""
+    z, zrodlo = _zlecenie_wan(modelka)
+    _bilety(udawany_http, "v_asset")
+    assert yapper.wgraj(modelka, zrodlo) == "v_asset"
+    w = udawany_http.wywolania
+    assert w[0][:2] == ("POST", Y + "/assets/uploads") and w[0][2] == {"type": "video", "mimeType": "video/mp4", "name": "klip.mp4"}
+    assert w[1][0] == "PUT" and w[1][1] == "https://storage.googleapis.com/yapper-up/v_asset?X-Goog-Signature=abc"
+    assert w[1][3] == {"Content-Type": "video/mp4", "x-goog-content-length-range": "0,104857600"}   # dokladnie z biletu
+    assert w[2][:2] == ("POST", Y + "/assets/uploads/v_asset/complete")
+    assert not any("api/v1https" in x[1] for x in w)
+    ile = len(w)
+    assert yapper.wgraj(modelka, zrodlo) == "v_asset" and len(udawany_http.wywolania) == ile
+    # m4v -> video/mp4 (yapper nie zna video/x-m4v); obcy host w completeUrl -> klucz API tam NIE idzie
+    with pytest.raises(dostawcy.BladDostawcy, match="spoza yapper.so"):
+        yapper._url("https://zly.example/api/v1/assets/uploads/x/complete")
+    assert yapper._url("/api/v1/assets/uploads/x/complete") == Y + "/assets/uploads/x/complete"
+    assert yapper._url("/processes") == Y + "/processes"
+
+
+def test_http_wyslij_plik_nie_nadpisuje_content_type(monkeypatch, tmp_path):
+    plik = tmp_path / "a.m4v"
+    plik.write_bytes(b"v")
+    zlapane = {}
+
+    def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=None, typ_ciala=None, powtorki=3):
+        zlapane.update(naglowki=naglowki, typ_ciala=typ_ciala)
+        return ""
+    monkeypatch.setattr(http, "zapytanie", zapytanie)
+    http.wyslij_plik("https://s/put", str(plik), naglowki={"Content-Type": "video/mp4", "x-goog-content-length-range": "0,9"})
+    assert zlapane["typ_ciala"] is None and zlapane["naglowki"]["Content-Type"] == "video/mp4"
+    http.wyslij_plik("https://s/put", str(plik))           # bilet bez Content-Type -> zgadujemy
+    assert zlapane["typ_ciala"]
+
+
+def test_yapper_wycena_dryrun_i_cialo_wan(modelka, udawany_http):
+    """dryRun w prawdziwym ksztalcie (creditsEstimated); cialo Wan wg schematu: bez generateAudio, durationMode auto zamiast
+    videoLength, rozdzielczosc rolki (6 s -> 1080p), prompt z wan.txt (bez @[Image]), filmik i referencje jako assetId."""
+    z, _ = _zlecenie_wan(modelka, czas=6.0)
+    z["generate_audio"] = True
+    _modele(udawany_http)
+    _bilety(udawany_http, "i1", "i2", "v_asset")
+    udawany_http.ustaw("POST", Y + "/processes", _dry(250))
+    assert yapper.koszt(z) == 250
+    dry = udawany_http.posty(Y + "/processes")[0][2]
+    assert dry["dryRun"] is True and dry["model"] == "wan-3.0" and dry["type"] == "video-generation"
+    wej = dry["input"]
+    assert "generateAudio" not in wej and "videoLength" not in wej and wej["durationMode"] == "auto"
+    assert wej["resolution"] == 1080 and wej["aspectRatio"] == "9:16"
+    assert wej["prompt"] == "Replace the woman with the woman from the reference photos."
+    assert wej["referenceImages"] == [{"assetId": "i1"}, {"assetId": "i2"}] and wej["referenceVideos"] == [{"assetId": "v_asset"}]
+    # 10 s klip -> 720p (zasada <= 8 s -> 1080p)
+    z10, _ = _zlecenie_wan(modelka, czas=10.0, nazwa="dlugi.mp4")
+    assert yapper._cialo(z10, uploady=False)["input"]["resolution"] == 720
+
+
+def test_yapper_wycena_odmawia_canstart_false(modelka, udawany_http):
+    z, _ = _zlecenie_wan(modelka)
+    _modele(udawany_http)
+    _bilety(udawany_http, "i1", "i2", "v_asset")
+    udawany_http.ustaw("POST", Y + "/processes", _dry(250, can_start=False, blocked="team_limit"))
+    with pytest.raises(dostawcy.BladDostawcy, match="odmawia startu \\(team_limit"):
+        yapper.koszt(z)
+    udawany_http.ustaw("POST", Y + "/processes", _dry(250, can_start=False))
+    with pytest.raises(dostawcy.BladDostawcy, match="canStart=false"):
+        yapper.koszt(z)
+    udawany_http.ustaw("POST", Y + "/processes", {"dryRun": True, "canStart": True})
+    with pytest.raises(dostawcy.BladDostawcy, match="bez creditsEstimated"):
+        yapper.koszt(z)
+
+
+def test_yapper_zasady_wan_prompt_i_filmik(modelka, udawany_http):
+    """Wan: prompt max 5000 znakow i bez @[Image N] (blad PRZED jakimkolwiek POST), filmik referencyjny max 15 s."""
+    z, _ = _zlecenie_wan(modelka)
+    _modele(udawany_http)
+    z["yapper"]["prompt"] = "Ona z @[Image 1](image_1) tanczy"
+    with pytest.raises(dostawcy.BladDostawcy, match="@\\[Image N\\]"):
+        yapper._cialo(z, uploady=False)
+    z["yapper"]["prompt"] = "x" * 5001
+    with pytest.raises(dostawcy.BladDostawcy, match="5001 znakow.*max 5000"):
+        yapper._cialo(z, uploady=False)
+    z["yapper"]["prompt"] = ""
+    z["prompt"] = "PROMPT A @[Image 1](image_1)"            # pusty wan.txt -> prompt Higgsfielda -> odmowa
+    with pytest.raises(dostawcy.BladDostawcy, match="Higgsfielda"):
+        yapper._cialo(z, uploady=False)
+    z["yapper"]["prompt"] = "ok prompt"
+    z["video_czas"] = 16.0
+    with pytest.raises(dostawcy.BladDostawcy, match="max 15 s"):
+        yapper._cialo(z, uploady=False)
+    assert not udawany_http.posty(Y + "/processes")
+    # bez /models i schematu (API milczy) - znane zasady Wan dalej pilnuja
+    yapper.wyczysc_cache()
+    udawany_http.odpowiedzi.clear()
+    z["video_czas"] = 6.0
+    wej = yapper._cialo(dict(z, generate_audio=False), uploady=False)["input"]
+    assert "generateAudio" not in wej and wej["durationMode"] == "auto"
+
+
+def test_yapper_seedance_edit_aspect_auto(modelka, udawany_http):
+    z, _ = _zlecenie_wan(modelka)
+    z["yapper"]["model"] = "seedance-2.5-edit"
+    _modele(udawany_http, model={"id": "seedance-2.5-edit", "type": "video-generation", "capabilities": {}}, schemat=SCHEMAT_EDIT)
+    wej = yapper._cialo(dict(z, generate_audio=False), uploady=False)["input"]
+    assert wej["aspectRatio"] == "auto" and wej["durationMode"] == "auto" and wej["generateAudio"] is False
+    assert "resolution" not in wej
+
+
+def test_yapper_zlec_sprawdz_koszt_procesu(modelka, udawany_http):
+    """POST /processes ze stalym Idempotency-Key + metadata; GET /processes/{id}; koszt = creditsUsed - zwrot."""
+    z, _ = _zlecenie_wan(modelka)
+    _modele(udawany_http)
+    _bilety(udawany_http, "i1", "i2", "v_asset")
+    udawany_http.ustaw("POST", Y + "/processes", {"id": "proc_1", "status": "queued", "model": "wan-3.0", "creditsEstimated": 250})
+    znaczniki = []
+    w = yapper.zlec(z, klucz="rolki-noemi-1-wan-3.0-1", znacznik=lambda **k: znaczniki.append(k))
+    assert w["job_id"] == "proc_1" and w["status"] == "queued" and "gotowy" not in w and znaczniki == [{"wysylam": True}]
+    post = udawany_http.posty(Y + "/processes")[0]
+    assert post[3]["Idempotency-Key"] == "rolki-noemi-1-wan-3.0-1" and post[2]["metadata"] == {"rolki_klucz": "rolki-noemi-1-wan-3.0-1"}
+    assert "dryRun" not in post[2]
+    udawany_http.ustaw("GET", Y + "/processes/proc_1", {"id": "proc_1", "status": "processing"},
+                       {"id": "proc_1", "status": "completed", "creditsUsed": 250, "refunded": False,
+                        "outputs": [{"type": "video", "assetId": "o1", "url": "https://cdn/wynik.mp4"}]})
+    assert yapper.sprawdz("proc_1")["status"] == "processing"
+    k = yapper.sprawdz("proc_1")
+    assert k["status"] == "completed" and k["urls"] == ["https://cdn/wynik.mp4"] and yapper.koszt_joba(k, 999) == 250
+    assert yapper.koszt_joba({"status": "completed", "surowe": {"creditsUsed": 250, "refunded": True}}) == 0
+    assert yapper.koszt_joba({"status": "failed", "surowe": {"creditsUsed": 250, "refunded": False}}) == 0   # zwrot automatyczny
+    assert yapper.koszt_joba({"status": "completed", "surowe": {"creditsUsed": 300, "refunded": 50}}) == 250
+    assert yapper.koszt_joba({"status": "completed", "surowe": {}}, 250) == 250
+
+
+def test_yapper_konflikt_klucza_szuka_po_metadanych(modelka, udawany_http):
+    z, _ = _zlecenie_wan(modelka)
+    _modele(udawany_http)
+    _bilety(udawany_http, "i1", "i2", "v_asset")
+    udawany_http.ustaw("POST", Y + "/processes", http.BladHTTP(409, json.dumps({"error": {"code": "idempotency_conflict",
+                                                                                        "message": "same key, other body"}})))
+    udawany_http.ustaw("GET", Y + "/processes?model=wan-3.0&limit=50", {"data": [
+        {"id": "obcy", "status": "completed", "metadata": {"rolki_klucz": "inny"}},
+        {"id": "proc_7", "status": "processing", "metadata": {"rolki_klucz": "rolki-noemi-1-wan-3.0-1"}}], "nextCursor": None})
+    assert yapper.zlec(z, klucz="rolki-noemi-1-wan-3.0-1")["job_id"] == "proc_7"
 
 
 def test_yapper_blad_kredytow(dane, udawany_http):
     sekrety.zapisz_klucz("yapper", "yk_test")
-    udawany_http.ustaw("POST", "/processes", http.BladHTTP(402, json.dumps({"error": {"code": "insufficient_credits", "message": "no credits"}})))
+    udawany_http.ustaw("POST", Y + "/processes", http.BladHTTP(402, json.dumps({"error": {"code": "insufficient_credits", "message": "no credits"}})))
     z = {"slug": None, "prompt": "x", "images": [], "video": None, "yapper": {"model": "wan-3.0"}, "resolution": "720p", "duration": 5}
     with pytest.raises(dostawcy.BladDostawcy, match="insufficient_credits"):
         yapper.koszt(z)
 
 
 def test_fabryka_generuje_przez_yapper(modelka, monkeypatch):
-    """Caly obieg fabryki z dostawca=yapper na udawanym module yapper (bez HTTP)."""
+    """Caly obieg fabryki z dostawca=yapper na udawanym module yapper (bez HTTP): koszt z procesu, nie z salda."""
     baza.zapisz_ustawienia(modelka, dostawca="yapper", mediatool=False, yapper={"model": "wan-3.0", "min_kredyty": 500, "max_kredyty_na_rolke": 600})
     baza.zapisz_limit_dzienny(1000, "yapper")
-    stan = {"saldo": 2000, "generacje": []}
+    stan = {"saldo": 2000, "zlecenia": []}
     monkeypatch.setattr(yapper, "saldo", lambda: stan["saldo"])
     monkeypatch.setattr(yapper, "koszt", lambda z: 300)
 
-    def generuj(z, timeout="30m", log=None):
-        stan["generacje"].append(z)
-        stan["saldo"] -= 300
-        return {"job_id": "proc_9", "status": "completed", "urls": ["https://cdn/w.mp4"], "blad": "", "surowe": {}}
-    monkeypatch.setattr(yapper, "generuj", generuj)
+    def zlec(z, klucz=None, znacznik=None, log=None):
+        stan["zlecenia"].append((z, klucz))
+        stan["saldo"] -= 777            # saldo spada inaczej (np. reczna generacja na koncie) - nie wplywa na rozliczenie
+        return {"job_id": "proc_9", "status": "queued", "surowe": {}}
+    monkeypatch.setattr(yapper, "zlec", zlec)
+    monkeypatch.setattr(yapper, "sprawdz", lambda jid: {"job_id": jid, "status": "completed", "urls": ["https://cdn/w.mp4"], "blad": "",
+                                                        "surowe": {"id": jid, "status": "completed", "creditsUsed": 300, "refunded": False}})
     monkeypatch.setattr(yapper, "pobierz", lambda url, sciezka: (open(sciezka, "wb").write(b"x"), sciezka)[1])
     monkeypatch.setattr(fabryka.klatki, "info", lambda p: {"czas": 5.0, "szer": 720, "wys": 1280, "fps": 30})
     monkeypatch.setattr(fabryka.klatki, "wytnij", lambda *a, **k: [])
@@ -164,10 +340,13 @@ def test_fabryka_generuje_przez_yapper(modelka, monkeypatch):
     w = fabryka.generuj(modelka)
     assert w["wygenerowane"] == 1
     p = baza.pomysl(modelka, 1)
-    assert p["status"] == "gotowe" and p["dostawca"] == "yapper" and p["koszt"] == 300
+    assert p["status"] == "gotowe" and p["dostawca"] == "yapper" and p["koszt"] == 300 and p["model"] == "wan-3.0"
+    assert p["resolution"] == "1080p" and p["proby"][0]["job_id"] == "proc_9" and p["proby"][0]["kr"] == 300
     assert baza.wydano_dzis("yapper") == 300 and baza.wydano_dzis("higgsfield") == 0
-    assert stan["generacje"][0]["mode"] == "video_edit" and stan["generacje"][0]["video"].endswith("a.mp4")
-    # bezpiecznik yappera (nie Higgsfielda): druga rolka zostawilaby 1400 >= 500, ale 300 > max 250 -> pominieta
+    z, klucz = stan["zlecenia"][0]
+    assert z["mode"] == "video_edit" and z["video"].endswith("a.mp4") and z["resolution"] == "1080p"
+    assert klucz == f"rolki-{modelka}-1-wan-3.0-1"
+    # bezpiecznik yappera (nie Higgsfielda): druga rolka zostawilaby >= 500, ale 300 > max 250 -> pominieta
     baza.zapisz_ustawienia(modelka, yapper={"max_kredyty_na_rolke": 250})
     open(os.path.join(baza.folder_zrodel(modelka), "b.mp4"), "wb").write(b"mp4")
     fabryka.skanuj(modelka)
@@ -204,8 +383,8 @@ def test_sync_generuj_multipart_i_poll(dane, udawany_http, tmp_path):
     sekrety.zapisz_klucz("sync", "sk_test")
     wideo, audio = tmp_path / "w.mp4", tmp_path / "a.mp3"
     wideo.write_bytes(b"v"); audio.write_bytes(b"a")
-    udawany_http.ustaw("POST", "/generate", {"id": "gen_1", "status": "PENDING"})
-    udawany_http.ustaw("GET", "/generate/gen_1", {"id": "gen_1", "status": "PROCESSING"},
+    udawany_http.ustaw("POST", S + "/generate", {"id": "gen_1", "status": "PENDING"})
+    udawany_http.ustaw("GET", S + "/generate/gen_1", {"id": "gen_1", "status": "PROCESSING"},
                        {"id": "gen_1", "status": "COMPLETED", "outputUrl": "https://cdn/out.mp4", "outputDuration": 6.0})
     w = sync_so.generuj(str(wideo), str(audio), model="lipsync-2", opcje={"sync_mode": "loop"})
     assert w["status"] == "completed" and w["url"] == "https://cdn/out.mp4" and w["sekundy"] == 6.0
@@ -218,21 +397,21 @@ def test_sync_generuj_multipart_i_poll(dane, udawany_http, tmp_path):
 
 def test_sync_generuj_url_json_i_blad(dane, udawany_http):
     sekrety.zapisz_klucz("sync", "sk_test")
-    udawany_http.ustaw("POST", "/generate", {"id": "gen_2", "status": "PENDING"})
-    udawany_http.ustaw("GET", "/generate/gen_2", {"id": "gen_2", "status": "FAILED", "error": "no face", "errorCode": "face_not_found"})
+    udawany_http.ustaw("POST", S + "/generate", {"id": "gen_2", "status": "PENDING"})
+    udawany_http.ustaw("GET", S + "/generate/gen_2", {"id": "gen_2", "status": "FAILED", "error": "no face", "errorCode": "face_not_found"})
     w = sync_so.generuj("https://x/w.mp4", "https://x/a.mp3")
     assert w["status"] == "failed" and "face_not_found" in w["blad"] and w["url"] is None
     post = [x for x in udawany_http.wywolania if x[0] == "POST"][0]
     assert post[2]["input"] == [{"type": "video", "url": "https://x/w.mp4"}, {"type": "audio", "url": "https://x/a.mp3"}]
-    udawany_http.ustaw("POST", "/analyze/cost", [{"estimatedFrameCount": 150, "estimatedGenerationCost": 0.3}])
+    udawany_http.ustaw("POST", S + "/analyze/cost", [{"estimatedFrameCount": 150, "estimatedGenerationCost": 0.3}])
     assert sync_so.koszt("https://x/w.mp4", "https://x/a.mp3") == 30
-    udawany_http.ustaw("POST", "/tts", {"id": "t1", "url": "https://cdn/t.mp3", "duration": 2.5})
+    udawany_http.ustaw("POST", S + "/tts", {"id": "t1", "url": "https://cdn/t.mp3", "duration": 2.5})
     assert sync_so.tts("czesc", "voice1")["url"] == "https://cdn/t.mp3"
 
 
 def test_sync_opis_bledu_401(dane, udawany_http):
     sekrety.zapisz_klucz("sync", "zly")
-    udawany_http.ustaw("GET", "/models", http.BladHTTP(401, "Unauthorized"))
+    udawany_http.ustaw("GET", S + "/models", http.BladHTTP(401, "Unauthorized"))
     ok, kom = sync_so.gotowy()
     assert ok is False and "401" in kom
 
@@ -243,13 +422,13 @@ def test_elevenlabs_saldo_i_gotowy(dane, udawany_http):
     from dostawcy import elevenlabs
     assert elevenlabs.gotowy() == (False, "brak klucza API ElevenLabs (panel -> Konta)")
     sekrety.zapisz_klucz("elevenlabs", "el-123")
-    udawany_http.ustaw("GET", "/user/subscription", {"tier": "starter", "character_count": 1200, "character_limit": 30000})
+    udawany_http.ustaw("GET", E + "/user/subscription", {"tier": "starter", "character_count": 1200, "character_limit": 30000})
     assert elevenlabs.saldo() == 28800
     s = elevenlabs.saldo_szczegoly()
     assert s == {"kredyty": 28800, "limit": 30000, "plan": "starter", "jednostka": "zn"}
     assert udawany_http.wywolania[-1][3]["xi-api-key"] == "el-123"
     assert elevenlabs.gotowy() == (True, "klucz dziala, plan starter: zostalo 28800 z 30000 znakow w tym miesiacu")
-    udawany_http.ustaw("GET", "/user/subscription", http.BladHTTP(401, json.dumps({"detail": {"status": "invalid_api_key", "message": "Invalid API key"}}), "u"))
+    udawany_http.ustaw("GET", E + "/user/subscription", http.BladHTTP(401, json.dumps({"detail": {"status": "invalid_api_key", "message": "Invalid API key"}}), "u"))
     with pytest.raises(dostawcy.BladDostawcy, match="ElevenLabs 401: Invalid API key"):
         elevenlabs.saldo()
     assert elevenlabs.gotowy()[0] is False

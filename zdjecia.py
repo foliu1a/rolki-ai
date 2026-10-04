@@ -9,10 +9,13 @@ Stroje (character elements): zdjecia w modelki/<slug>/stroje/ - `stroj`:
     None  = wg ustawienia zdjecia_stroje (co drugie zdjecie w kolejnym stroju, gdy stroje sa),
     "bez" = bez stroju, "auto" = kolejny stroj po kolei, albo nazwa pliku / sciezka.
   Zdjecie stroju idzie jako OSTATNI obraz, a do promptu doklejany jest `zdjecia_prompt_stroj`.
-Bezpiecznik: ten sam min_kredyty / limit dzienny Higgsfield co rolki; `zdjecia_dziennie` dla autopilota.
+Bezpiecznik: ten sam min_kredyty / limit dzienny Higgsfield co rolki (z rezerwa rolek w toku); `zdjecia_dziennie` dla autopilota.
+Blad generacji, po ktorym job MOGL powstac (timeout, siec - nie odrzucenie filtra), daje status 'niepewne': koszt jest
+zarezerwowany w limicie dziennym, przebieg konczy sie, a autopilot liczy je jak zrobione - zadnego automatycznego drugiego joba.
 Zdjecia NIE przechodza przez Media Tool (user ma do tego osobna apke).
 """
 import os
+import re
 import time
 
 import baza
@@ -112,7 +115,7 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None, stroj=
         wynik["stop"] = f"saldo: {e}"
         return wynik
     limit_dnia = baza.limit_dzienny("higgsfield")
-    wydano = baza.wydano_dzis("higgsfield")
+    wydano = baza.wydano_z_rezerwa("higgsfield")
     for i in range(int(ile)):
         if stop is not None and stop.is_set():
             wynik["stop"] = "stop"
@@ -156,18 +159,26 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None, stroj=
         try:
             job = d.generuj(z, timeout="15m", log=log)
         except dostawcy.BladDostawcy as e:
-            _zdarzenie(log, slug, "blad", f"zdjecie: nie wyszlo ({e})")
-            baza.dodaj_zdjecie(slug, tekst, status="blad", notatki=str(e)[:500], stroj=plik_stroju)
-            continue
-        try:
-            nowe_saldo = d.saldo()
-            zuzyte = max(0, saldo - nowe_saldo)
-            saldo = nowe_saldo
-        except dostawcy.BladDostawcy:
-            zuzyte = k if job.get("urls") else 0
-            saldo -= zuzyte
-        wydano = baza.dopisz_wydatek(zuzyte, "higgsfield")
+            if _odrzucone(str(e)):
+                # filtr tresci odrzucil (kredyty wracaja) - nastepne zdjecie ma inny prompt, mozna isc dalej
+                _zdarzenie(log, slug, "blad", f"zdjecie: odrzucone przez filtr ({e})")
+                baza.dodaj_zdjecie(slug, tekst, status="blad", notatki=str(e)[:500], stroj=plik_stroju)
+                continue
+            # job MOGL powstac (timeout --wait, zerwane polaczenie): rezerwujemy koszt, konczymy przebieg i NIE robimy
+            # automatycznie drugiego (zdjecia_z_dnia(z_niepewnymi=True) liczy je jak zrobione)
+            jid = _job_id_z_bledu(str(e))
+            zid = baza.dodaj_zdjecie(slug, tekst, job_id=jid, koszt=k, status="niepewne", stroj=plik_stroju,
+                                     notatki=(f"job mogl powstac mimo bledu - sprawdz w apce Higgsfield ({e})")[:500])
+            wydano = baza.dopisz_wydatek(k, "higgsfield", job_id=jid or f"zdjecie-niepewne-{slug}-{zid}")
+            _zdarzenie(log, slug, "uwaga", f"zdjecie #{zid}: blad po wyslaniu ({e}) - job mogl powstac; {k} kr zarezerwowane, "
+                       f"nie robie kolejnego automatycznie. Sprawdz w apce Higgsfield.")
+            wynik["stop"] = "niepewne"
+            break
+        # koszt z wyceny joba (udany = k, odrzucony = 0), nie z roznicy salda - reczne generacje w apce nie zjadaja limitu fabryki
         urls = job.get("urls") or []
+        zuzyte = d.koszt_joba(job, k)
+        saldo -= zuzyte
+        wydano = baza.dopisz_wydatek(zuzyte, "higgsfield", job_id=job.get("job_id"))
         if not urls:
             _zdarzenie(log, slug, "blad", f"zdjecie: job {job.get('job_id')} bez URL ({job.get('status')}; {job.get('blad')})")
             baza.dodaj_zdjecie(slug, tekst, job_id=job.get("job_id"), koszt=zuzyte, status="blad", notatki=(job.get("blad") or "")[:500],
@@ -192,9 +203,18 @@ def generuj(slug, ile=1, prompt=None, dry_run=False, log=None, stop=None, stroj=
 
 
 def _ustaw(slug, zid, **pola):
-    plik = baza._plik_zdjec(slug)
-    lista = baza._wczytaj_json(plik, [])
-    for z in lista:
-        if z["id"] == zid:
-            z.update(pola)
-    baza._zapisz_json(plik, lista)
+    baza.ustaw_zdjecie(slug, zid, **pola)
+
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def _job_id_z_bledu(tekst):
+    """'Error: job 9d21...-... ended with status ...' -> id joba (albo None)."""
+    m = _UUID.search(tekst or "")
+    return m.group(0) if m else None
+
+
+def _odrzucone(tekst):
+    t = (tekst or "").lower()
+    return any(x in t for x in ("nsfw", "moderat", "content policy", "content_policy", "ip_detected", "copyright"))

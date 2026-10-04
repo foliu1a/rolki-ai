@@ -44,35 +44,48 @@ Ręcznie (panel albo konsola):
 1. Wrzuć filmiki do wrzutni (`tu wrzucasz rolki\<persona>\`). Obok filmiku możesz położyć `<nazwa>.stroj.png` (strój ze zdjęcia, wariant B)
    i `<nazwa>.audio.mp3` (głos do lipsyncu - robisz go potem ręcznie w zakładce *Lipsync*).
 2. **Skanuj** - każdy filmik dostaje numer, podgląd klatek i Twój prompt (A albo B).
-3. **Policz koszt** - ile kredytów zejdzie. **Generuj** - z bezpiecznikiem (min_kredyty, max/rolka, limit dzienny, powtórki po odrzuceniu).
+3. **Policz koszt** - ile kredytów zejdzie. **Generuj** - z bezpiecznikiem (min_kredyty, max/rolka, limit dzienny).
+   Rozdzielczość wybiera długość klipu: **≤ 8 s → 1080p, dłuższy → 720p** (Higgsfield i yapper).
 4. Gotowy plik ląduje w `tu rolki zrobione\<persona>\NNN_nazwa.mp4` (po Media Tool). Surowy wynik zostaje w `modelki\<slug>\wyniki\`.
 5. Opcjonalnie: **Lipsync** (wideo + głos z folderu `audio/`, głosówka z Telegrama albo TTS z tekstu; głos jest najpierw
    przerabiany, żeby brzmiał jak nagranie z telefonu w pokoju – `lipsync_glos_styl`: telefon / czysty / brak), **Zdjęcia**
    (model obrazu z referencjami, co drugie w stroju z folderu *Stroje*), **Podpis** z banku tekstów.
 
-Automatycznie - **Autopilot** (przełącznik w panelu albo `autopilot.bat`): co `autopilot_co_minut` minut robi
+Automatycznie - **Autopilot** (przełącznik w panelu): co `autopilot_co_minut` minut robi
 skanuj → generuj (Higgsfield albo yapper) → Media Tool → zdjęcia (`zdjecia_dziennie`) → podpisy → rolka na Telegram, dla każdej
 modelki z włączonym `autopilot`. Pilnuje `autopilot_max_rolek_dziennie`, limitu dziennego i salda. Ty tylko wrzucasz filmiki.
 **Autopilot nie robi lipsyncu** - dopasowanie ust jest tylko ręczne (zakładka *Lipsync*).
 
-- **Hamulec**: po `autopilot_stop_po_bledach` (3) nieudanych rolkach z rzędu autopilot zatrzymuje personę, alarmuje
-  na telefon i czeka na „Wznów” w panelu (albo `/wznow` z Telegrama) - nie pali kredytów w kółko.
+- **Hamulec**: po `autopilot_stop_po_bledach` (3) nieudanych rolkach z rzędu (awarie techniczne - odrzucenia przez filtr NSFW się
+  nie liczą) autopilot zatrzymuje personę, alarmuje na telefon i czeka na „Wznów” w panelu (albo `/wznow` z Telegrama).
+- **Nigdy dwa razy za jedną rolkę**: rolka idzie do Higgsfield/yapper bez czekania, numer joba zapisuje się od razu (status
+  „generuje się”), a fabryka tylko sprawdza ten job. Zamknięcie panelu, aktualizacja, błąd sieci czy STOP nie wysyłają rolki drugi raz -
+  po ponownym uruchomieniu panel sam dokończy rolki w toku (ręcznie: `python fabryka.py wznow`). „Zamknij program” i `aktualizuj.bat`
+  czekają, aż skończy się wysyłanie. Gdy nie wiadomo, czy rolka dotarła do Higgsfield (błąd w trakcie wysyłania), fabryka szuka jej
+  przez godzinę, a potem prosi, żebyś sprawdził w apce – sama nigdy nie wysyła drugi raz („więcej → Przestań czekać”, gdy utknie).
+  Koszt liczony z joba, więc Twoje ręczne generacje w apce Higgsfield nie zjadają limitu fabryki; limit dzienny liczy też rolki w toku.
 - **Długie filmiki i koszt**: koszt rolki rośnie z długością (720p ≈ 7,5 kr/s, 1080p ≈ 12 kr/s), więc źródło dłuższe niż
   `max_sekund_rolki` (domyślnie 15 s, max 30) jest cięte na kawałki tej długości (`dziel_dlugie`) – każdy to osobna rolka.
-  Panel → Ustawienia → **Jakość i koszt**: *Oszczędnie* (720p, 10 s, ~75 kr) / *Normalnie* (720p, 15 s, ~110 kr) / *Najlepiej*
-  (1080p, 15 s, ~180 kr). Start pokazuje, ile rolek jeszcze „wejdzie” dziś w limit.
+  Rozdzielczość wybiera długość kawałka: **≤ 8 s → 1080p, dłuższy → 720p**.
+  Panel → Ustawienia → **Jakość i koszt**: *Oszczędnie* (rolki do 10 s, ~75 kr) / *Normalnie* (do 15 s, ~112 kr) / *Najlepiej*
+  (do 8 s, zawsze 1080p, ~96 kr). Start pokazuje, ile rolek jeszcze „wejdzie” dziś w limit.
 - **Podpisy**: z banku tekstów + hashtagi persony (Ustawienia → Persona).
 - **Tani podgląd**: zanim wydasz 45–72 kr na rolkę, „Tani podgląd (~21 kr)” w Rolkach pokaże, czy prompt działa (Seedance draft).
 - **Porządki**: raz dziennie kasuje surowe pliki `.raw.mp4` starsze niż `sprzataj_po_dniach` (gdy gotowy plik jest)
   i robi kopię zapasową danych person (`modelki/_kopie/<data>/`, 7 dni).
 - **Diagnoza**: panel (Start → „Pierwsze kroki”) i `python fabryka.py diagnoza` mówią, czego brakuje (ffmpeg, logowanie,
   Media Tool, Telegram, zdjęcia/prompty person, foldery, konto Telegram persony). Prompty są sprawdzane pod kątem numerów `@[Image N]`.
-- **Filtr NSFW**: odrzucona rolka dostaje `powod: nsfw` (kredyty wracają); po dwóch odrzuceniach z rzędu fabryka nie próbuje dalej.
+- **Filtr NSFW**: odrzucona rolka dostaje `powod: nsfw` (kredyty wracają) i nie jest powtarzana na tym samym modelu.
+  **Zapas po NSFW** (Ustawienia → Jak robić rolki, tryb pełny → „Gdy filtr odrzuci rolkę”): fabryka próbuje tę samą rolkę na yapper.so
+  (Wan 3.0 Prime, potem Wan 3.0) – raz na model, z promptem `prompty/wan.txt` persony, w limicie dziennym yappera (bez ustawionego
+  limitu zapas nic nie wyda). Gotowa rolka ma plakietkę „zrobione na wan-3.0-prime (zapas)”; „Spróbuj jeszcze raz” przy odrzuconej
+  rolce zaczyna od zapasu. Domyślnie wyłączone.
   Panel → Pomoc → „Filtr NSFW” (albo `python fabryka.py nsfw`) pokazuje, co u Ciebie może go uruchamiać: ryzykowne słowa w promptach
   (mesh, sheer, lingerie...), zdjęcia strojów z prześwitami/bielizną, dużo skóry na referencjach - filtr sprawdza wszystko naraz,
   więc jedno ryzykowne zdjęcie stroju psuje niewinny filmik.
 - **Autostart z Windows**: `autostart.bat` (raz, bez praw administratora - skrót w folderze Autostart) - panel z autopilotem startuje
   po zalogowaniu, w tle. `autostart-usun.bat` wyłącza. Skrót na pulpit: `skrot-na-pulpit.bat` (ikona `static/rolki.ico`).
+- **Aktualizacja**: `aktualizuj.bat` zamyka panel (czeka, aż skończy wysyłać rolkę), pobiera nową wersję, puszcza testy i uruchamia panel.
 
 ## Telefon jako pilot (Telegram)
 
@@ -90,7 +103,7 @@ napisać `/start` do bota (Telegram nie pozwala botom pisać pierwszym) - bot pa
 Od tej chwili gotowe rolki i zdjęcia tej persony lecą na to konto; filmik wysłany z tego konta trafia do jej wrzutni.
 `/stop` i `/wznow` działają tylko z czatu głównego.
 
-Konsola robi to samo: `python fabryka.py status | skanuj | koszt | generuj --tak | zdjecia | lipsync | autopilot --raz`.
+Konsola robi to samo: `python fabryka.py status | skanuj | koszt | generuj --tak | wznow | zdjecia | lipsync | autopilot --raz`.
 `python fabryka.py generuj --dry-run` pokazuje komendy bez wydawania kredytów.
 
 ## Dostawcy
@@ -102,18 +115,20 @@ Konsola robi to samo: `python fabryka.py status | skanuj | koszt | generuj --tak
 | Lipsync + TTS (ElevenLabs) | sync.so API | klucz API (sync.so/settings/api-keys) | Konta + Lipsync |
 | Zdjęcia persony | Higgsfield CLI (np. `nano_banana_2`, `text2image_soul_v2` z Soul ID) | jak wyżej | Persona → Zdjęcia |
 
-Kredyty każdego dostawcy liczymy osobno (`budzet.json`). Uwaga: kredyty yapper mają inną skalę niż Higgsfield
-(Wan 3.0 1080p ≈ 50 kr/s, Prime ≈ 25 kr/s), dlatego yapper ma własny bezpiecznik (`yapper.min_kredyty`, `yapper.max_kredyty_na_rolke`).
+Kredyty każdego dostawcy liczymy osobno (`budzet.json`, poza gitem) - z jobów, nie z różnicy salda. Uwaga: kredyty yapper mają inną skalę
+niż Higgsfield (6 s klip w 1080p: Wan 3.0 Prime ≈ 130 kr, Wan 3.0 ≈ 250 kr), dlatego yapper ma własny bezpiecznik (`yapper.min_kredyty`,
+`yapper.max_kredyty_na_rolke` - domyślnie 400) i własny limit dzienny (ustawiony: 500 kr; `python fabryka.py budzet max_kredyty_dziennie=500 --dostawca yapper`).
+Wan potrzebuje własnego krótkiego promptu (`modelki/<persona>/prompty/wan.txt`, max 5000 znaków, bez `@[Image N]`).
 
 ## Struktura
 
 ```
 rolki-ai/
-  panel.bat / widget.bat / autopilot.bat / instaluj.bat / aktualizuj.bat / zaloguj-higgsfield.bat
+  panel.bat / instaluj.bat / aktualizuj.bat / zaloguj-higgsfield.bat
   skroty.vbs / rolki.vbs / skrot-na-pulpit.bat   skrót "Rolki AI" na pulpicie (ikona static/rolki.ico; panel w tle + przeglądarka)
   autostart.bat / autostart-usun.bat / start-cicho.vbs   autostart panelu z autopilotem (folder Autostart, bez admina)
   app.py + templates/ + static/   panel Flask :5077 (API w API.md), /widget = małe okno z saldem i kolejką
-  fabryka.py             logika: status / skanuj / koszt / generuj / pierz / zdjecia / lipsync / podpis / autopilot / foldery / nsfw / ustaw / budzet
+  fabryka.py             logika: status / skanuj / koszt / generuj / wznow / pierz / zdjecia / lipsync / podpis / autopilot / foldery / nsfw / ustaw / budzet
   autopilot.py           pętla: telefon -> skanuj -> generuj (hamulec) -> pranie -> zdjęcia -> podpisy -> rolka na Telegram (konto persony); bez lipsyncu
   zdjecia.py             zdjęcia persony (model obrazu + referencje albo Soul ID; co drugie w stroju ze stroje/)
   lipsync.py             wideo + głos -> sync.so (albo model Higgsfield); TTS z tekstu
@@ -122,11 +137,10 @@ rolki-ai/
   mediatool.py           most do Media Tool (pranie wideo bez GUI)
   klatki.py              klatki + arkusz podglądu z wideo (ffmpeg)
   baza.py                warstwa danych; sekrety.py = klucze API (klucze.json, w .gitignore)
-  postprocess.py         most do ..\VideoRemixer (warianty, wyłączone)
-  budzet.json            limity dzienne i wydatki per dostawca; dziennik.jsonl = log zdarzeń (panel → Dziennik)
+  budzet.json            limity dzienne i wydatki per dostawca; dziennik.jsonl = log zdarzeń (panel → Dziennik) - oba poza gitem
   modelki/<slug>/
     ustawienia.json      model, dostawca, prompty, bezpiecznik, autopilot, zdjęcia, lipsync
-    prompty/             stroj_z_filmu.txt (A), stroj_ze_zdjecia.txt (B), zdjecia.txt (1 linia = 1 zdjęcie)
+    prompty/             stroj_z_filmu.txt (A), stroj_ze_zdjecia.txt (B), zdjecia.txt (1 linia = 1 zdjęcie), wan.txt (prompt dla Wan / zapasu)
     zrodla/              wrzutnia (gdy zrodla_dir puste - normalnie Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>); <nazwa>.stroj.png / <nazwa>.audio.mp3 obok filmiku
     referencje/          zdjęcia persony 01_, 02_... = kolejność @[Image N] w prompcie
     stroje/, audio/      stroje do wariantu B; głosy do lipsyncu
@@ -144,5 +158,5 @@ Testy nie łączą się z Higgsfieldem, yapperem ani sync.so i nie wydają kredy
 
 ## Przenosiny na inny komputer
 
-Skopiuj `rolki-ai` (+ `VideoRemixer` obok, jeśli używasz), zainstaluj Pythona i Node.js, odpal `instaluj.bat`,
+Skopiuj `rolki-ai`, zainstaluj Pythona i Node.js, odpal `instaluj.bat`,
 potem `zaloguj-higgsfield.bat` i wpisz klucze w panelu (Konta). `klucze.json`, `modelki/` i `budzet.json` przenieś ręcznie.

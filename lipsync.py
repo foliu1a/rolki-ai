@@ -143,7 +143,7 @@ def zrob(slug, wideo, audio, pomysl_id=None, log=None, model=None, opcje=None, s
         raise
     koszt = wynik.get("koszt")
     if koszt:
-        baza.dopisz_wydatek(koszt, dostawca)
+        baza.dopisz_wydatek(koszt, dostawca, job_id=wynik.get("job_id"))
     baza.aktualizuj_lipsync(slug, lid, status="gotowe", plik_wynikowy=cel, job_id=wynik.get("job_id"), koszt=koszt)
     if pomysl_id:
         try:
@@ -185,18 +185,30 @@ def _przez_higgsfield(slug, wideo, audio, model, opcje, log):
     d = dostawcy.dostawca("higgsfield")
     z = {"slug": slug, "model": model, "prompt": opcje.pop("prompt", ""), "video": wideo, "audio": audio,
          "images": [], "parametry": opcje, "mode": None, "aspect_ratio": None, "resolution": None}
-    saldo_przed = None
+    # koszt z wyceny joba (nie z roznicy salda - reczne generacje w apce nie zjadaja limitu) + limit dzienny z rezerwa rolek w toku
     try:
-        saldo_przed = d.saldo()
+        k = d.koszt(z)
     except dostawcy.BladDostawcy:
-        pass
+        k = None
+    limit, wydano = baza.limit_dzienny("higgsfield"), baza.wydano_z_rezerwa("higgsfield")
+    if limit and wydano + (k or 0) > limit or (limit and wydano >= limit):
+        raise ValueError(f"lipsync ({k if k is not None else '?'} kr) przekroczylby limit dzienny Higgsfield ({wydano}/{limit} kr)")
+    saldo_przed = None
+    if k is None:
+        try:
+            saldo_przed = d.saldo()
+        except dostawcy.BladDostawcy:
+            pass
     w = d.generuj(z, timeout="30m", log=log)
     koszt = None
-    try:
-        if saldo_przed is not None:
-            koszt = max(0, saldo_przed - d.saldo())
-    except dostawcy.BladDostawcy:
-        pass
+    if k is not None:
+        koszt = d.koszt_joba(w, k)
+    else:
+        try:
+            if saldo_przed is not None:
+                koszt = max(0, saldo_przed - d.saldo())
+        except dostawcy.BladDostawcy:
+            pass
     return {"job_id": w.get("job_id"), "status": w.get("status"), "url": (w.get("urls") or [None])[0],
             "blad": w.get("blad"), "koszt": koszt}
 

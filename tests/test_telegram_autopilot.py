@@ -188,7 +188,9 @@ def test_hamulec_zatrzymuje_po_bledach(tg, modelka, cli, bez_ffmpeg, monkeypatch
     baza.zapisz_ustawienia(modelka, mediatool=False, autopilot=True, autopilot_stop_po_bledach=3, powtorki=0)
     tg.wiadomosc(text="/start")
     autopilot.obsluz_telegram()
-    monkeypatch.setattr(higgsfield_cli, "generuj", lambda *a, **k: (_ for _ in ()).throw(higgsfield_cli.HiggsfieldBlad("nsfw")))
+    # awaria techniczna (nie filtr tresci) PRZED wyslaniem (wgranie filmiku) - takie koncza sie 'blad' i licza do hamulca
+    # (blad PO wyslaniu zostawia rolke w toku - job mogl powstac, wiec nic nie wysylamy drugi raz)
+    monkeypatch.setattr(higgsfield_cli, "upload", lambda *a, **k: (_ for _ in ()).throw(higgsfield_cli.HiggsfieldBlad("blad sieci: timeout")))
     for n in ("a.mp4", "b.mp4", "c.mp4", "d.mp4"):
         open(os.path.join(baza.folder_zrodel(modelka), n), "wb").write(b"v")
     w = autopilot.przebieg(modelka)

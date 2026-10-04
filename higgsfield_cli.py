@@ -262,20 +262,22 @@ def _wyciagnij_koszt(dane):
 def generuj(jst, params=None, media=None, wait=True, wait_timeout="30m", wait_interval="5s"):
     """Tworzy job. Z wait=True blokuje do konca i zwraca obiekt joba:
     {id, job_type, display_name, status, created_at, params, result_url, min_result_url, thumbnail_url?}
-    (CLI 1.1.26 z --wait --json drukuje liste takich obiektow; bez --wait - liste UUID-ow jako stringi)."""
+    (CLI 1.1.26 z --wait --json drukuje liste takich obiektow; bez --wait - liste UUID-ow jako stringi).
+    wait=False (rolki): tylko wysyla i od razu zwraca {"id", "status": "queued"} - fabryka zapisuje id i odpytuje `generate get`."""
     args = ["generate", "create", jst] + _flagi(params, media)
     if wait:
         args += ["--wait", "--wait-timeout", wait_timeout, "--wait-interval", wait_interval]
-    dane = _uruchom(args, timeout=TIMEOUT_GENERACJA)
+    dane = _uruchom(args, timeout=TIMEOUT_GENERACJA if wait else TIMEOUT_UPLOAD)
     if isinstance(dane, list):
         dane = dane[0] if dane else {}
     if isinstance(dane, str):
         # bez --wait: sam identyfikator joba
-        return {"id": dane, "status": "queued"}
+        return {"id": dane.strip(), "status": "queued"}
     return dane if isinstance(dane, dict) else {"surowe": dane}
 
 
 def job(job_id):
+    """`generate get <id>` - stan joba (0 kr). Job odrzucony (nsfw/failed) tez wraca normalnie, ze statusem."""
     dane = _uruchom(["generate", "get", str(job_id)])
     if isinstance(dane, list):
         dane = dane[0] if dane else {}

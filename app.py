@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.5"
+WERSJA = "2.7"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -363,8 +363,8 @@ def api_stan():
     jakosc = fabryka.jakosc_i_koszt(aktywna) if aktywna else None
     dzis = _dzis(aktywna)
     if jakosc and jakosc["koszt_rolki"]:
-        # ile rolek jeszcze "wejdzie" dzis: limit dzienny Higgsfield i saldo (ponad min_kredyty), co nizsze
-        limit, wydano = baza.limit_dzienny("higgsfield"), dzis["kredyty"]["higgsfield"]
+        # ile rolek jeszcze "wejdzie" dzis: limit dzienny Higgsfield (z rezerwa rolek w toku) i saldo (ponad min_kredyty), co nizsze
+        limit, wydano = baza.limit_dzienny("higgsfield"), baza.wydano_z_rezerwa("higgsfield")
         zostalo = [(limit - wydano) // jakosc["koszt_rolki"]] if limit else []
         kredyty = (salda.get("higgsfield") or {}).get("kredyty")
         if kredyty is not None:
@@ -519,6 +519,15 @@ def _pomysl_dla_panelu(p):
     p["stroj_url"] = _url_pliku(p.get("stroj"))
     p["audio_nazwa"] = os.path.basename(p["audio"]) if p.get("audio") else None
     p["wariant"] = "B" if p.get("stroj") else ("A" if p.get("zrodlo") else "tekst")
+    # rozdzielczosc tej rolki (zasada: <= 8 s -> 1080p, dluzsze -> 720p) - zapisana przy generacji albo wyliczona z dlugosci klipu
+    if not p.get("resolution") and fabryka.czas_klipu(p):
+        p["resolution"] = fabryka.rozdzielczosc_dla_czasu(fabryka.czas_klipu(p))
+    marker = p.get("w_toku") if p.get("status") == "w_toku" else None
+    if marker:
+        p["w_toku_opis"] = (f"{marker.get('dostawca')} {marker.get('model') or ''}".strip()
+                            + (f", job {marker['job_id']}" if marker.get("job_id") else ", wysylanie"))
+    if p.get("zapas") and p.get("model"):
+        p["zapas_opis"] = f"zrobione na {p['model']} (zapas)"
     return p
 
 
@@ -554,19 +563,57 @@ def api_aktualizuj_pomysl(pid):
     dane = {k: v for k, v in (request.json or {}).items()
             if k in ("status", "opis", "prompt_higgsfield", "plik_wynikowy", "notatki")}
     try:
+        if "status" in dane and baza.pomysl(aktywna, pid).get("status") == "w_toku":
+            return _blad(GENERUJE_SIE, 409)
         pomysl = baza.aktualizuj_pomysl(aktywna, pid, **dane)
     except ValueError as e:
         return _blad(e)
     return _ok(pomysl=_pomysl_dla_panelu(pomysl))
 
 
+GENERUJE_SIE = ("Ta rolka wlasnie sie generuje - fabryka dokonczy ja sama (takze po restarcie panelu). "
+                "Utknela? wiecej -> Przestan czekac.")
+
+
 @app.route("/api/pomysly/<int:pid>/ponow", methods=["POST"])
 def api_ponow_pomysl(pid):
+    """'Sprobuj jeszcze raz'. Rolka odrzucona przez filtr (NSFW/IP) przy wlaczonym zapas_nsfw zaczyna od pierwszego kroku zapasu
+    (Seedance odrzucilby te same wejscia) - chyba ze to rolka ze strojem ze zdjecia (wariant B), jej zapas nie dotyczy."""
     try:
         aktywna = _wymaga_modelki()
-        pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="nowy", notatki="")
+        p = baza.pomysl(aktywna, pid)
+        if p.get("status") == "w_toku":
+            return _blad(GENERUJE_SIE, 409)
+        zapas = baza.ustawienia_modelki(aktywna).get("zapas_nsfw") or []
+        krok = 1 if p.get("powod") in fabryka.POWODY_ZAPASU and zapas and not p.get("stroj") else None
+        pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="nowy", notatki="", krok_startowy=krok)
     except ValueError as e:
         return _blad(e)
+    return _ok(pomysl=_pomysl_dla_panelu(pomysl), od_zapasu=bool(krok))
+
+
+@app.route("/api/pomysly/<int:pid>/przerwij", methods=["POST"])
+def api_przerwij_czekanie(pid):
+    """'Przestan czekac' na rolke w toku (np. utknela bez numeru joba). Wymaga {"potwierdzam": true} - panel pyta wczesniej,
+    bo kredyty mogly juz zejsc. Rolka dostaje status 'blad' z prosba o sprawdzenie w apce; potem dziala Ponow/Usun.
+    Nie wolno w trakcie samego wysylania (wtedy 409)."""
+    if not (request.json or {}).get("potwierdzam"):
+        return _blad("Potwierdz: kredyty za te rolke mogly juz zejsc - sprawdz najpierw w apce Higgsfield/yapper.")
+    try:
+        aktywna = _wymaga_modelki()
+        p = baza.pomysl(aktywna, pid)
+        if p.get("status") != "w_toku":
+            return _blad("Ta rolka nie czeka na generacje.")
+        if fabryka.trwa_wysylanie():
+            return _blad("Rolka jest wlasnie wysylana - poczekaj chwile i sprobuj jeszcze raz.", 409)
+        marker = p.get("w_toku") or {}
+        job = marker.get("job_id") or p.get("job_id")
+        notatki = (f"Przerwane recznie (czekanie na {marker.get('dostawca') or '?'} {marker.get('model') or ''}"
+                   + (f", job {job}" if job else ", bez numeru joba") + f"). {fabryka.SPRAWDZ_W_APCE}")
+        pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="blad", w_toku=None, krok_startowy=None, powod="inny", notatki=notatki)
+    except ValueError as e:
+        return _blad(e)
+    baza.dziennik_zapisz("uwaga", f"#{pid}: {notatki}", modelka=aktywna, pomysl=pid)
     return _ok(pomysl=_pomysl_dla_panelu(pomysl))
 
 
@@ -575,6 +622,8 @@ def api_usun_pomysl(pid):
     try:
         aktywna = _wymaga_modelki()
         p = baza.pomysl(aktywna, pid)
+        if p.get("status") == "w_toku":
+            return _blad(GENERUJE_SIE + " Usuniecie teraz zgubiloby oplacony wynik - najpierw 'Przestan czekac'.", 409)
         if request.args.get("plik") == "1":
             for k in ("plik_wynikowy", "lipsync_plik"):
                 if p.get(k) and os.path.isfile(p[k]) and _plik_dozwolony(p[k]):
@@ -744,6 +793,13 @@ def api_ustawienia():
 def _rzutuj(klucz, wartosc):
     """Wartosc z formularza -> typ jak w USTAWIENIA_DOMYSLNE (bool/int/dict/str)."""
     dom = baza.USTAWIENIA_DOMYSLNE[klucz]
+    if klucz == "zapas_nsfw":
+        # [{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...] - z formularza moze przyjsc jako tekst JSON
+        if isinstance(wartosc, str):
+            wartosc = json.loads(wartosc or "[]")
+        if not isinstance(wartosc, list) or not all(isinstance(k, dict) and k.get("dostawca") and k.get("model") for k in wartosc):
+            raise ValueError('zapas_nsfw: lista krokow [{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...]')
+        return [{"dostawca": str(k["dostawca"]).strip().lower(), "model": str(k["model"]).strip()} for k in wartosc]
     if klucz in ("duration", "generate_audio"):
         if wartosc in ("", None, "null"):
             return None
@@ -1208,18 +1264,56 @@ def api_losuj_tekst():
 
 # ---------------- zamykanie / start ----------------
 
+CZEKAJ_NA_ZADANIE_PRZY_ZAMYKANIU_S = 20 * 60
+
+
+def _zamknij_gdy_wolne(czekaj_max=CZEKAJ_NA_ZADANIE_PRZY_ZAMYKANIU_S):
+    """Konczy proces, gdy zadanie w tle sie skonczy - NIGDY w trakcie wysylania rolki (upload + create): zamkniecie wtedy
+    osierocilo by job (wysylka z CLI zyje dalej) i po restarcie poszedlby drugi, platny. Job juz wyslany (job_id zapisany)
+    jest bezpieczny - po ponownym uruchomieniu panel dokonczy go sam (ten sam job)."""
+    start = time.time()
+    while True:
+        wysyla = fabryka.trwa_wysylanie()
+        if not wysyla and (not konsola.stan.get("trwa") or time.time() - start > czekaj_max):
+            break
+        time.sleep(0.5)
+    time.sleep(0.5)
+    os._exit(0)
+
+
 @app.route("/api/zamknij", methods=["POST"])
 def api_zamknij():
-    """Zamyka panel (aktualizuj.bat zatrzymuje nim stary panel w tle przed startem nowego). Tylko z tego komputera (bind 127.0.0.1)."""
+    """Zamyka panel (aktualizuj.bat zatrzymuje nim stary panel w tle przed startem nowego). Tylko z tego komputera (bind 127.0.0.1).
+    Gdy cos sie robi: autopilot i STOP od razu, a proces konczy sie dopiero po bezpiecznym punkcie (nie w trakcie wysylania rolki).
+    Rolka, ktora juz sie generuje u dostawcy, zostaje dokonczona po ponownym uruchomieniu (bez drugiej oplaty)."""
+    trwa = bool(konsola.stan.get("trwa")) or fabryka.trwa_wysylanie()
     autopilot_stop()
     konsola.stop.set()
+    if trwa:
+        komunikat = (f"Teraz trwa: {konsola.stan.get('typ') or 'wysylanie rolki'}. Zamkne panel, gdy skonczy sie biezacy krok "
+                     f"(wysylanie rolki do Higgsfield/yapper nie jest przerywane). Rolka, ktora juz sie generuje, dokonczy sie "
+                     f"po ponownym uruchomieniu - bez drugiej oplaty.")
+        baza.dziennik_zapisz("info", "panel zamknie sie po biezacym kroku (aktualizacja / zamknij) - " + komunikat)
+        threading.Thread(target=_zamknij_gdy_wolne, daemon=True).start()
+        return _ok(zamykam=True, czekam=True, komunikat=komunikat)
     baza.dziennik_zapisz("info", "panel zamkniety (aktualizacja / zamknij)")
+    threading.Thread(target=_zamknij_gdy_wolne, daemon=True).start()
+    return _ok(zamykam=True, czekam=False)
 
-    def _wyjdz():
-        time.sleep(0.5)
-        os._exit(0)
-    threading.Thread(target=_wyjdz, daemon=True).start()
-    return _ok(zamykam=True)
+
+def wznow_przy_starcie():
+    """Start panelu: rolki w toku (job wyslany przed zamknieciem/aktualizacja) dokanczamy w tle - ten sam job, nic nowego
+    nie wysylamy. Zwraca opis zadania albo None (nic do wznowienia / konsola zajeta - wtedy zrobi to autopilot/generuj)."""
+    w_toku = {s: [p["id"] for p in baza.pomysly_w_toku(s)] for s in baza.lista_modelek()}
+    w_toku = {s: ids for s, ids in w_toku.items() if ids}
+    if not w_toku:
+        return None
+    baza.dziennik_zapisz("info", "start panelu: dokanczam rolki w toku (bez wysylania drugi raz): "
+                         + ", ".join(f"{s} #{', #'.join(map(str, ids))}" for s, ids in w_toku.items()))
+    try:
+        return konsola.uruchom("wznow", None, lambda log, stop: fabryka.wznow_wszystkie(log=log, stop=stop))
+    except Zajete:
+        return None
 
 
 def _port_zajety():
@@ -1272,6 +1366,7 @@ def main():
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     _foldery_na_pulpicie()
     threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
+    wznow_przy_starcie()
     if "--autopilot" in sys.argv:
         autopilot_start()
     if "--bez-przegladarki" not in sys.argv:

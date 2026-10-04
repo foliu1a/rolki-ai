@@ -12,3 +12,12 @@ __pycache__/
 klucze.json
 dziennik.jsonl*
 uploady_yapper.json
+
+# Pliki robocze panelu/fabryki (zmieniaja sie same przy pracy - w gicie psulyby `git pull` w aktualizuj.bat)
+budzet.json
+stan.json
+telegram.json
+server.log
+*.log
+*.tmp
+*.lock

@@ -132,7 +132,8 @@ def _status_tekst():
         ust = baza.ustawienia_modelki(slug)
         ap = baza.autopilot_stan(slug)
         d = ust.get("dostawca") or "higgsfield"
-        linie.append(f"{slug}: czeka {st.get('nowy', 0)}, gotowe {st.get('gotowe', 0)}, nie wyszlo {st.get('blad', 0)}; "
+        linie.append(f"{slug}: czeka {st.get('nowy', 0)}, " + (f"robi sie {st['w_toku']}, " if st.get("w_toku") else "")
+                     + f"gotowe {st.get('gotowe', 0)}, nie wyszlo {st.get('blad', 0)}; "
                      f"dzis {len(baza.pomysly_z_dnia(slug))} rolek, {baza.wydano_dzis(d)}/{baza.limit_dzienny(d) or '-'} kr"
                      + (" | AUTOPILOT: " + ("PAUZA - " + ap["pauza"] if ap.get("pauza") else ("wlaczony" if ust.get("autopilot") else "wylaczony"))))
     return "\n".join(linie) or "Brak person."
@@ -462,8 +463,19 @@ def przebieg(slug, log=None, stop=None):
 
     ap = baza.autopilot_stan(slug)
     STAN["etap"] = "generuj"
+    if baza.pomysly_w_toku(slug):
+        # job wyslany przed restartem/timeoutem: dokonczyc (0 kr, ten sam job) - takze w pauzie i po limicie rolek
+        try:
+            w = fabryka.wznow_w_toku(slug, log=log, stop=stop, lipsync=False)
+            pods["wygenerowane"] += w["wygenerowane"]
+            pods["bledy"] += [f"#{i}" for i in w.get("bledy", [])]
+        except fabryka.Przerwano:
+            raise
+        except Exception as e:
+            pods["bledy"].append(f"wznow: {e}")
+            log(f"wznowienie nie wyszlo: {e}")
     max_dzis = int(ust.get("autopilot_max_rolek_dziennie") or 0)
-    zrobione_dzis = len(baza.pomysly_z_dnia(slug))
+    zrobione_dzis = len(baza.pomysly_z_dnia(slug)) + len(baza.pomysly_w_toku(slug))   # rolki w toku tez sie licza
     zostalo = (max_dzis - zrobione_dzis) if max_dzis else None
     if ap.get("pauza"):
         log(f"{slug}: autopilot w pauzie ({ap['pauza']}) - nie robie rolek, tylko zbieram filmiki")
@@ -474,8 +486,8 @@ def przebieg(slug, log=None, stop=None):
     else:
         try:
             # lipsync=False: autopilot nigdy nie dopasowuje ust (to tylko recznie w panelu -> Lipsync)
-            w = fabryka.generuj(slug, potwierdz=None, log=log, stop=stop, max_rolek=zostalo, lipsync=False)
-            pods["wygenerowane"] = w["wygenerowane"]
+            w = fabryka.generuj(slug, potwierdz=None, log=log, stop=stop, max_rolek=zostalo, lipsync=False, wznow=False)
+            pods["wygenerowane"] += w["wygenerowane"]
             pods["stop"] = w.get("stop")
             pods["bledy"] += [f"#{i}" for i in w.get("bledy", [])]
             _hamulec(slug, ust, w, log, pods)
@@ -497,7 +509,7 @@ def przebieg(slug, log=None, stop=None):
     STAN["etap"] = "zdjecia"
     ile_zdjec = int(ust.get("zdjecia_dziennie") or 0)
     if ile_zdjec and ust.get("zdjecia_model") and not ap.get("pauza"):
-        brakuje = ile_zdjec - len(baza.zdjecia_z_dnia(slug))
+        brakuje = ile_zdjec - len(baza.zdjecia_z_dnia(slug, z_niepewnymi=True))   # 'niepewne' = job mogl powstac - nie dublujemy
         if brakuje > 0:
             try:
                 import zdjecia
@@ -523,13 +535,18 @@ def przebieg(slug, log=None, stop=None):
 
 
 def _hamulec(slug, ust, w, log, pods):
-    """Liczy nieudane rolki z rzedu; po `autopilot_stop_po_bledach` zatrzymuje persone i alarmuje na telefon."""
+    """Liczy nieudane rolki z rzedu; po `autopilot_stop_po_bledach` zatrzymuje persone i alarmuje na telefon.
+    Odrzucenia przez filtr tresci (NSFW/IP, takze po zapasie) to nie awaria - nie licza sie do hamulca (kredyty wracaja)."""
     if w.get("wygenerowane"):
         baza.zapisz_autopilot_stan(slug, bledy_z_rzedu=0)
         return
-    if not w.get("bledy"):
+    odrzucone = set(w.get("odrzucone") or [])
+    techniczne = [i for i in (w.get("bledy") or []) if i not in odrzucone]
+    if odrzucone:
+        log(f"{slug}: filtr tresci odrzucil {len(odrzucone)} (NSFW/IP) - to nie awaria, hamulec tego nie liczy")
+    if not techniczne:
         return
-    n = int(baza.autopilot_stan(slug).get("bledy_z_rzedu") or 0) + len(w["bledy"])
+    n = int(baza.autopilot_stan(slug).get("bledy_z_rzedu") or 0) + len(techniczne)
     baza.zapisz_autopilot_stan(slug, bledy_z_rzedu=n)
     limit = int(ust.get("autopilot_stop_po_bledach") or 0)
     if limit and n >= limit:

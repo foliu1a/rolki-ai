@@ -61,10 +61,14 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   aktywnej persony), "elevenlabs": {"kredyty": zostało znaków, "limit", "plan", "jednostka": "zn", ...} (gdy klucz)}`. Pasek u góry pokazuje
   po jednej pastylce na konto (`.saldo-pill`, aktywne konto = ramka akcentu) + „dziś wydałeś X z Y” dla konta robiącego rolki.
   `POST /api/konta/test {"dostawca": "elevenlabs"}` sprawdza klucz przez `GET /v1/user/subscription` (dostawcy/elevenlabs.py: tylko gotowy/saldo).
-- Jakość i koszt (2.2): `/api/stan.jakosc` = `{"preset": "oszczednie"|"normalnie"|"najlepiej"|"wlasne", "resolution", "max_sekund_rolki",
-  "koszt_rolki": 112, "koszt_sekundy": 7.5, "za_drogo": false, "max_kredyty_na_rolke": 150, "presety": {"oszczednie": {"resolution": "720p",
-  "max_sekund_rolki": 10, "koszt_rolki": 75}, "normalnie": {...112}, "najlepiej": {...180}}}` (szacunek: sekundy × stawka; prawdziwą cenę
-  daje akcja `koszt`). `dzis.rolek_zostalo` = ile rolek jeszcze wejdzie dziś (limit dzienny i saldo ponad `min_kredyty`, co niższe; null bez danych).
+- Jakość i koszt (2.2, 2.6): `/api/stan.jakosc` = `{"preset": "oszczednie"|"normalnie"|"najlepiej"|"wlasne", "resolution": "720p (≤8 s → 1080p)",
+  "max_sekund_rolki", "koszt_rolki": 112, "koszt_sekundy": 7.5, "koszt_sekundy_1080p": 12.0, "koszt_sekundy_720p": 7.5, "prog_1080p_s": 8.0,
+  "zasada_rozdzielczosci": "≤8 s → 1080p, dłuższe → 720p", "za_drogo": false, "max_kredyty_na_rolke": 150, "presety": {"oszczednie":
+  {"resolution": "720p (≤8 s → 1080p)", "max_sekund_rolki": 10, "koszt_rolki": 75}, "normalnie": {...112}, "najlepiej": {"resolution": "1080p",
+  "max_sekund_rolki": 8, "koszt_rolki": 96}}}` (szacunek: sekundy × stawka rozdzielczości z zasady; prawdziwą cenę daje akcja `koszt`).
+  **Rozdzielczość rolki wybiera długość (pociętego) klipu: ≤ 8 s → 1080p, dłuższy → 720p** (Higgsfield i yapper; `fabryka.PROG_1080P_S`);
+  ustawienie `resolution` działa tylko dla pomysłów bez filmiku. Wybrana rozdzielczość jest w pomyśle (`resolution`) i idzie do wyceny,
+  bezpiecznika i zapytania. `dzis.rolek_zostalo` = ile rolek jeszcze wejdzie dziś (limit dzienny i saldo ponad `min_kredyty`, co niższe; null bez danych).
   `POST /api/ustawienia/preset {"nazwa": "oszczednie"}` → `{"ustawienia", "jakosc"}` (ustawia `resolution` + `max_sekund_rolki`).
   Ustawienie `max_sekund_rolki` (4–30, domyślnie 15): filmik dłuższy jest cięty na kawałki tej długości (`dziel_dlugie`) – krótsza rolka = mniej kredytów.
 - Skrót na pulpit i autostart bez admina: `skroty.vbs pulpit|autostart|autostart-usun` (wołane przez `skrot-na-pulpit.bat`, `autostart.bat`,
@@ -78,12 +82,24 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - Nowe ustawienia persony: `autopilot_stop_po_bledach` (int, 0 = nigdy), `telegram_wysylaj` (bool), `dziel_dlugie` (bool – filmik > 30 s tnij na kawałki).
 - Autostart (Windows): `autostart.bat` kładzie skrót w folderze Autostart (bez praw administratora); `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
 - `modelki[]` w `/api/stan` mają dodatkowo `autopilot_stan` (hamulec tej persony), `rolki_dzis` (int) i `avatar_url` (pierwsze zdjęcie persony albo null).
-- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"persona <slug>"|"foldery <slug>"|"telefon <slug>", "ok": true|false|null, "info": "..."}]}`
+- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"yapper"|"limit yappera"|"persona <slug>"|"foldery <slug>"|"telefon <slug>", "ok": true|false|null, "info": "..."}]}`
+  (`yapper` = GET /credits, `limit yappera` = czy jest dzienny limit – bez niego zapas po NSFW nic nie wyda; obie pozycje tylko, gdy jest klucz
+  yappera albo persona go używa)
   (null = opcjonalne, nie skonfigurowane). Lista kontrolna „pierwsze kroki”. `foldery <slug>` ma też `wrzutnia`, `gotowe` (ścieżki);
   `telefon <slug>` tylko gdy persona ma `telegram_czat` (ok = to konto napisało /start).
 - `GET /api/statystyki?dni=14` → `{"dni": [{"dzien": "2026-10-03", "rolki": 2, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 90, "yapper": 0, "sync": 0}}, ...], "razem": {...}}` (od najstarszego do dziś).
 - Akcja `{"typ": "podglad", "id": 5}` = tani podgląd rolki (Seedance draft, ~21 kr): pomysł zostaje „nowy”, dostaje `podglad_url` (wideo) i `podglad_miniatura_url` (siatka klatek) oraz `podglad_koszt`. Tylko dostawca Higgsfield.
-- `POST /api/zamknij` zamyka panel (używa go `aktualizuj.bat`).
+- `POST /api/zamknij` zamyka panel (używa go `aktualizuj.bat`) → `{"zamykam": true, "czekam": false|true, "komunikat"?}`. Gdy coś się robi:
+  autopilot i STOP od razu, a proces kończy się dopiero po bezpiecznym punkcie – nigdy w trakcie wysyłania rolki (upload + create);
+  rolka już wysłana dokończy się po ponownym uruchomieniu (ten sam job). `aktualizuj.bat` czeka, aż panel przestanie odpowiadać.
+- Generacja w toku (2.6): rolka wysłana do dostawcy ma status `w_toku` i `w_toku` = `{dostawca, model, krok, klucz, koszt, od, etap:
+  "wysylanie"|"czeka", job_id, wideo_id?, wysylam?}`; fabryka odpytuje TEN job (po restarcie też – start panelu odpala zadanie `wznow`),
+  nigdy nie wysyła drugiego. Pomysł ma `proby` = `[{dostawca, model, krok, job_id, status, powod, kr, czas, info?}]`, po zapasie `zapas: true`
+  + `model`; dla panelu `w_toku_opis` ("higgsfield seedance_2_5, job …") i `zapas_opis` ("zrobione na wan-3.0-prime (zapas)").
+  `/api/stan.stan` ma `w_toku` (lista id) i `zapas_nsfw` (opis kroków). Ponów/usuń/PATCH status rolki `w_toku` → 409 (komunikat
+  w `blad`). `POST /api/pomysly/<id>/przerwij {"potwierdzam": true}` = „Przestań czekać” na rolkę w toku (np. bez numeru joba): status
+  `blad` + notatka „sprawdź w apce”; bez potwierdzenia 400, w trakcie samego wysyłania 409. Zdjęcie może mieć status `niepewne`
+  (błąd po wysłaniu – job mógł powstać; liczy się jak zrobione, koszt zarezerwowany).
 - Profil persony ma pole `hashtagi` (tekst doklejany do każdego podpisu) – zapis przez `POST /api/profil`.
 
 ## Modelki (persony)
@@ -92,21 +108,24 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - `POST /api/profil` `{"instagram": "", "opis_stylu": "", "nazwa": "", "cechy": "a, b"}` → `{"profil": {...}}`
 
 ## Kolejka pomysłów (rolki)
-- `GET /api/pomysly` → `{"pomysly": [...], "statusy": ["nowy","wygenerowany","postprodukcja","gotowe","blad"]}`
+- `GET /api/pomysly` → `{"pomysly": [...], "statusy": ["nowy","w_toku","wygenerowany","postprodukcja","gotowe","blad"]}`
   Każdy pomysł: `id, opis, prompt_higgsfield, status, zrodlo, stroj, klatki, info_zrodla{czas,szer,wys,fps}, plik_wynikowy,
-  wynik_url, job_id, koszt, dostawca, audio, lipsync_plik, podpis, notatki, utworzono, zaktualizowano, wygenerowano`
+  wynik_url, job_id, koszt, dostawca, model?, resolution?, w_toku?, proby?, zapas?, krok_startowy?, audio, lipsync_plik, podpis, notatki,
+  utworzono, zaktualizowano, wygenerowano`
   + pola dla panelu: `miniatura_url` (arkusz klatek albo null), `wideo_url` (gotowy plik albo null),
   `zrodlo_url`, `lipsync_url`, `stroj_url`, `audio_nazwa`, `wariant` ("A" / "B" / "tekst").
 - `POST /api/pomysly` `{"opis": "...", "prompt": "..."}` → `{"id": 9}` (pomysł tekstowy, bez filmiku; generuje się trybem `mode_bez_zrodla`)
 - `PATCH /api/pomysly/<id>` `{"status"?, "opis"?, "prompt_higgsfield"?, "notatki"?}` → `{"pomysl": {...}}`
-- `POST /api/pomysly/<id>/ponow` → status `blad` → `nowy`
+- `POST /api/pomysly/<id>/ponow` → status `blad` → `nowy` → `{"pomysl", "od_zapasu": bool}`. Rolka odrzucona przez filtr (`powod` nsfw/ip)
+  przy włączonym `zapas_nsfw` dostaje `krok_startowy: 1` – następne „Zrób” idzie od razu na pierwszy krok zapasu (Seedance odrzuciłby
+  te same wejścia); akcja `koszt` wycenia ją wtedy u dostawcy zapasu (`pozycje: [[id, koszt, "yapper"]]`). Rolka `w_toku` → 409.
 - `DELETE /api/pomysly/<id>` (`?plik=1` kasuje też pliki wynikowe)
 
 ## Akcje (zadania w tle – jedno naraz)
 `POST /api/akcja` → `{"zadanie": {...}}` albo 409, gdy coś już trwa (również przebieg autopilota).
 ```json
 {"typ": "skanuj"}
-{"typ": "koszt", "ids": [5, 6]}            // ids opcjonalne = wszystkie 'nowe' z promptem
+{"typ": "koszt", "ids": [5, 6]}            // ids opcjonalne = wszystkie 'nowe' z promptem; wynik.pozycje = [[id, koszt|null, dostawca]]
 {"typ": "generuj", "ids": [5], "limit": 3, "dry_run": false}
 {"typ": "pierz", "id": 5}                    // Media Tool na wyniku pomysłu
 {"typ": "lipsync", "id": 5, "audio": "C:\\...\\glos.mp3", "styl": "telefon"}   // albo {"wideo": "...", "audio": "..."}; styl: telefon|czysty|brak (brak pola = ustawienie lipsync_glos_styl)
@@ -115,9 +134,12 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 {"typ": "tts", "tekst": "Cześć!", "voice_id": "EXAVITQu4vr4xnSDxMaL", "nazwa": "intro"}   // sync.so -> audio/<nazwa>.mp3
 {"typ": "autopilot_raz"}                     // jeden przebieg autopilota dla aktywnej modelki
 ```
+Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez wysyłania drugi raz). Wynik `generuj`:
+`{"wygenerowane", "bledy": [id], "odrzucone": [id] (NSFW/IP – podzbiór błędów, hamulec autopilota ich nie liczy), "pominiete", "w_toku", "stop"}`.
 - `GET /api/zadanie?od=0` → `{"trwa", "typ", "modelka", "start", "koniec", "wynik", "blad", "log": ["..."], "log_dlugosc": 42}`
   (`od` = indeks pierwszej linii logu, którą chcemy – panel dociąga tylko nowe)
-- `POST /api/zadanie/stop` → zatrzymuje między pozycjami (nie przerywa trwającej generacji u dostawcy)
+- `POST /api/zadanie/stop` → zatrzymuje między pozycjami albo w trakcie czekania na job (job zostaje `w_toku` i dokończy się później;
+  nie przerywa wysyłania ani generacji u dostawcy)
 
 ## Ustawienia aktywnej modelki
 - `GET /api/ustawienia` →
@@ -134,7 +156,8 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   Klucze ustawień i znaczenie: patrz `baza.USTAWIENIA_DOMYSLNE` (komentarze). Najważniejsze dla GUI:
   `dostawca` (higgsfield|yapper), `model`, `mode`, `mode_bez_zrodla`, `aspect_ratio`, `resolution`, `duration`,
   `yapper.model`, `yapper.resolution`, `yapper.duration`, `prompt_auto`, `stroj_domyslny`, `min_kredyty`,
-  `max_kredyty_na_rolke`, `powtorki`, `zrodla_dir`, `wyniki_dir`, `mediatool`, `autopilot`, `autopilot_co_minut`,
+  `max_kredyty_na_rolke`, `powtorki` (ponowne WYSŁANIE tylko, gdy job nie powstał), `zapas_nsfw` (lista kroków
+  `[{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...]` albo tekst JSON; `[]` = wyłączone), `zrodla_dir`, `wyniki_dir`, `mediatool`, `autopilot`, `autopilot_co_minut`,
   `autopilot_max_rolek_dziennie`, `telegram_wysylaj`, `telegram_czat`, `zdjecia_model`, `zdjecia_dziennie`, `zdjecia_parametry`, `zdjecia_dir`,
   `zdjecia_stroje`, `zdjecia_prompt_stroj`, `lipsync_dostawca` (sync|higgsfield), `lipsync_model`, `lipsync_auto` (tylko ręczne „Zrób rolkę”),
   `lipsync_parametry.sync_mode`, `tts_model`, `tts_glos`, `tts_glos_typ`.

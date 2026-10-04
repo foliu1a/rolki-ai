@@ -5,6 +5,7 @@
     wytnij(plik, folder, ile=4)      -> [sciezki PNG]
     arkusz(plik, sciezka_jpg, ile=6) -> jedna siatka JPG z `ile` klatkami (najwygodniejsza do ogladania)
     potnij(plik, folder, max_s=30)   -> [kawalki mp4 po max_s sekund] (dlugie zrodla dla Seedance)
+    przytnij(plik, cel, max_s)       -> kopia pierwszych max_s sekund (filmik referencyjny dla Wan, max 15 s)
 """
 import json
 import os
@@ -123,6 +124,20 @@ def potnij(plik, folder, max_s=30, min_s=4):
         except Exception:
             wynik.append(p)
     return wynik
+
+
+def przytnij(plik, cel, max_s):
+    """Kopia pierwszych `max_s` sekund filmiku (przekodowanie - dokladne ciecie; np. Wan przyjmuje max 15 s filmiku
+    referencyjnego). Oryginal zostaje bez zmian. Zwraca sciezke kopii."""
+    os.makedirs(os.path.dirname(os.path.abspath(cel)), exist_ok=True)
+    out = subprocess.run(
+        [_exe("ffmpeg"), "-v", "error", "-y", "-i", plik, "-t", f"{float(max_s):.2f}", "-map", "0:v:0", "-map", "0:a?",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", cel],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+    )
+    if out.returncode != 0 or not os.path.isfile(cel):
+        raise RuntimeError(f"ffmpeg przytnij: {out.stderr.strip()[:300]}")
+    return cel
 
 
 if __name__ == "__main__":

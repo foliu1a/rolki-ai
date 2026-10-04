@@ -4,6 +4,9 @@ import copy
 import json
 import os
 import re
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 KATALOG_SKRYPTU = os.path.dirname(os.path.abspath(__file__))
@@ -12,7 +15,8 @@ KATALOG_MODELEK = os.environ.get("ROLKI_MODELKI") or os.path.join(KATALOG_SKRYPT
 PLIK_STANU = os.path.join(KATALOG_MODELEK, "..", "stan.json") if os.environ.get("ROLKI_MODELKI") \
     else os.path.join(KATALOG_SKRYPTU, "stan.json")
 
-STATUSY = ["nowy", "wygenerowany", "postprodukcja", "gotowe", "blad"]
+# w_toku = job wyslany do dostawcy (job_id zapisany w pomysle) - fabryka tylko go odpytuje, NIGDY nie wysyla drugi raz
+STATUSY = ["nowy", "w_toku", "wygenerowany", "postprodukcja", "gotowe", "blad"]
 
 # Domyslne ustawienia generacji per modelka (modelki/<slug>/ustawienia.json).
 # fabryka.py czyta je przy kazdej generacji; agent moze je zmieniac przez zapisz_ustawienia().
@@ -32,17 +36,20 @@ USTAWIENIA_DOMYSLNE = {
     "prompt_zasady": "",            # co w promptach ma byc zawsze / czego nigdy (notatki agenta)
     "min_kredyty": 200,             # generacja odmawia, gdy po niej zostaloby mniej
     "max_kredyty_na_rolke": 150,    # bezpiecznik na pojedyncza generacje
-    "powtorki": 2,                  # ile razy powtorzyc, gdy Seedance odrzuci (kredyty wracaja)
+    "powtorki": 2,                  # ile razy ponowic WYSLANIE, gdy job nie powstal (blad sieci/CLI). Job, ktory powstal, nigdy
+                                    # nie jest wysylany drugi raz (odpytujemy ten sam); odrzucenie NSFW/IP -> bez powtorki (zapas_nsfw)
     "zrodla_dir": "",               # wrzutnia poza projektem, np. C:\Users\yux\Desktop\ROLKI AI\przed\noemi ("" = modelki/<slug>/zrodla)
     "wyniki_dir": "",               # gotowe rolki poza projektem, np. ...\ROLKI AI\po\noemi ("" = modelki/<slug>/wyniki)
     "mediatool": True,              # po generacji przepusc wideo przez Media Tool (iPhone meta, GPS, spoof)
-    "warianty": 0,                  # ile wariantow VideoRemixer po generacji (0 = pomin)
     "dodatkowe_parametry": {},      # cokolwiek ekstra dla CLI, np. {"seed": 42}
     # --- dostawca wideo ---
     "dostawca": "higgsfield",       # kto generuje rolki: higgsfield (Seedance, CLI) | yapper (Wan, API)
     "mode_bez_zrodla": "",          # tryb dla pomyslow BEZ filmiku (sam prompt + referencje), np. omni_reference; "" = pomijaj
     "yapper": {"model": "", "resolution": "720p", "duration": 5, "prompt": "", "parametry": {},   # ustawienia yapper.so (model Wan itd.)
-               "min_kredyty": 0, "max_kredyty_na_rolke": 1000},   # bezpiecznik w kredytach yapper (inna skala niz Higgsfield!)
+               "min_kredyty": 0, "max_kredyty_na_rolke": 400},    # bezpiecznik w kredytach yapper (inna skala niz Higgsfield!)
+                                    # yapper.prompt puste = prompty/wan.txt (prompt Wan: max 5000 znakow, bez @[Image N])
+    "zapas_nsfw": [],               # zapas po odrzuceniu NSFW/IP: kroki po kolei, np. [{"dostawca": "yapper", "model": "wan-3.0-prime"},
+                                    # {"dostawca": "yapper", "model": "wan-3.0"}]; [] = wylaczone. Wymaga dziennego limitu yappera.
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
@@ -101,17 +108,65 @@ def _zapisz_json(sciezka, dane):
     """Zapis atomowy (plik tymczasowy + os.replace): panel, autopilot i CLI pisza te same JSON-y, a przerwany zapis
     (zamkniecie okna, brak pradu) nie moze zostawic pol pliku kolejki."""
     os.makedirs(os.path.dirname(sciezka), exist_ok=True)
-    tmp = f"{sciezka}.{os.getpid()}.tmp"
+    tmp = f"{sciezka}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dane, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, sciezka)
+        for proba in range(6):
+            try:
+                os.replace(tmp, sciezka)
+                break
+            except PermissionError:
+                # Windows: plik chwilowo otwarty przez czytajacego (panel/CLI) - chwila i jeszcze raz
+                if proba == 5:
+                    raise
+                time.sleep(0.05 * (proba + 1))
     except BaseException:
         try:
             os.remove(tmp)
         except OSError:
             pass
         raise
+
+
+class _ZamekPliku:
+    def __init__(self):
+        self.rlock = threading.RLock()
+        self.glebokosc = 0
+        self.plik = None
+
+
+_zamki_plikow = {}
+_zamki_plikow_lock = threading.Lock()
+
+
+@contextmanager
+def _rmw(sciezka, timeout=30.0):
+    """Blokada read-modify-write jednego pliku JSON: watki tego procesu (RLock, mozna wejsc ponownie) i inne procesy
+    (plik <sciezka>.lock, msvcrt/fcntl). Bez niej panel (PATCH), autopilot i CLI moga nadpisac swiezy znacznik w_toku
+    albo wydatek stara kopia pliku. Po `timeout` s bez blokady zapisujemy mimo to (fabryka nie moze stanac na zawsze)."""
+    klucz = os.path.normcase(os.path.abspath(sciezka))
+    with _zamki_plikow_lock:
+        z = _zamki_plikow.setdefault(klucz, _ZamekPliku())
+    with z.rlock:
+        z.glebokosc += 1
+        try:
+            if z.glebokosc == 1:
+                os.makedirs(os.path.dirname(klucz), exist_ok=True)
+                f = open(klucz + ".lock", "a+")
+                koniec = time.time() + timeout
+                while not _zablokuj_plik(f):
+                    if time.time() > koniec:
+                        break
+                    time.sleep(0.05)
+                z.plik = f
+            yield
+        finally:
+            z.glebokosc -= 1
+            if z.glebokosc == 0 and z.plik is not None:
+                _odblokuj_plik(z.plik)
+                z.plik.close()
+                z.plik = None
 
 
 def _slug(nazwa):
@@ -190,9 +245,10 @@ def profil_modelki(slug):
 
 
 def zapisz_profil(slug, **pola):
-    profil = profil_modelki(slug)
-    profil.update(pola)
-    _zapisz_json(_plik_profilu(slug), profil)
+    with _rmw(_plik_profilu(slug)):
+        profil = profil_modelki(slug)
+        profil.update(pola)
+        _zapisz_json(_plik_profilu(slug), profil)
     return profil
 
 
@@ -214,14 +270,15 @@ def zapisz_ustawienia(slug, **pola):
     if nieznane:
         raise ValueError(f"Nieznane ustawienia: {', '.join(nieznane)}. "
                          f"Dozwolone: {', '.join(USTAWIENIA_DOMYSLNE)}")
-    dane = ustawienia_modelki(slug)
-    for k, v in pola.items():
-        # slowniki (yapper, zdjecia_parametry...) scalamy, zeby panel mogl zmienic jedno pole
-        if isinstance(USTAWIENIA_DOMYSLNE[k], dict) and isinstance(v, dict) and isinstance(dane.get(k), dict):
-            dane[k] = {**dane[k], **v}
-        else:
-            dane[k] = v
-    _zapisz_json(_plik_ustawien(slug), dane)
+    with _rmw(_plik_ustawien(slug)):
+        dane = ustawienia_modelki(slug)
+        for k, v in pola.items():
+            # slowniki (yapper, zdjecia_parametry...) scalamy, zeby panel mogl zmienic jedno pole
+            if isinstance(USTAWIENIA_DOMYSLNE[k], dict) and isinstance(v, dict) and isinstance(dane.get(k), dict):
+                dane[k] = {**dane[k], **v}
+            else:
+                dane[k] = v
+        _zapisz_json(_plik_ustawien(slug), dane)
     return dane
 
 
@@ -251,6 +308,16 @@ def prompt_bazowy(slug):
 def prompt_stroj(slug):
     """Wariant B: persona w stroju z dolaczonego zdjecia (ostatni --image)."""
     return _czytaj_prompt(slug, ustawienia_modelki(slug).get("prompt_stroj"))
+
+
+PLIK_PROMPTU_WAN = "prompty/wan.txt"
+
+
+def prompt_wan(slug):
+    """Prompt dla Wan (yapper): ustawienie yapper.prompt (tekst albo plik .txt), a gdy puste - prompty/wan.txt.
+    Wan przyjmuje max 5000 znakow i nie zna skladni @[Image N](image_N) z Higgsfielda. "" = brak."""
+    ustawienie = (ustawienia_modelki(slug).get("yapper") or {}).get("prompt") or ""
+    return _czytaj_prompt(slug, ustawienie) or _czytaj_prompt(slug, PLIK_PROMPTU_WAN)
 
 
 def zapisz_prompt(slug, nazwa_pliku, tekst):
@@ -357,18 +424,19 @@ def _przepisz_sciezki(slug, stary, nowy):
         return v
 
     for plik in (_plik_pomyslow(slug), _plik_zdjec(slug), _plik_lipsync(slug)):
-        lista = _wczytaj_json(plik, None)
-        if not isinstance(lista, list):
-            continue
-        zmienione = False
-        for w in lista:
-            if isinstance(w, dict):
-                for k, v in list(w.items()):
-                    nv = _zamien(v)
-                    if nv != v:
-                        w[k], zmienione = nv, True
-        if zmienione:
-            _zapisz_json(plik, lista)
+        with _rmw(plik):
+            lista = _wczytaj_json(plik, None)
+            if not isinstance(lista, list):
+                continue
+            zmienione = False
+            for w in lista:
+                if isinstance(w, dict):
+                    for k, v in list(w.items()):
+                        nv = _zamien(v)
+                        if nv != v:
+                            w[k], zmienione = nv, True
+            if zmienione:
+                _zapisz_json(plik, lista)
 
 
 def przygotuj_foldery_pulpitu(slug):
@@ -435,9 +503,10 @@ def budzet():
 
 
 def zapisz_budzet(**pola):
-    dane = budzet()
-    dane.update(pola)
-    _zapisz_json(PLIK_BUDZETU, dane)
+    with _rmw(PLIK_BUDZETU):
+        dane = budzet()
+        dane.update(pola)
+        _zapisz_json(PLIK_BUDZETU, dane)
     return dane
 
 
@@ -458,9 +527,10 @@ def limit_dzienny(dostawca=DOSTAWCA_GLOWNY):
 
 
 def zapisz_limit_dzienny(kredyty, dostawca=DOSTAWCA_GLOWNY):
-    dane = budzet()
-    _konto_budzetu(dane, dostawca)["max_kredyty_dziennie"] = int(kredyty)
-    _zapisz_json(PLIK_BUDZETU, dane)
+    with _rmw(PLIK_BUDZETU):
+        dane = budzet()
+        _konto_budzetu(dane, dostawca)["max_kredyty_dziennie"] = int(kredyty)
+        _zapisz_json(PLIK_BUDZETU, dane)
     return dane
 
 
@@ -469,21 +539,35 @@ def wydano_dzis(dostawca=DOSTAWCA_GLOWNY):
     return int((konto.get("wydatki") or {}).get(_dzis(), 0))
 
 
-def dopisz_wydatek(kredyty, dostawca=DOSTAWCA_GLOWNY):
-    """Dopisuje faktycznie zuzyte kredyty do dzisiejszego dnia (ujemne/zero ignorowane)."""
-    kredyty = int(kredyty)
+def dopisz_wydatek(kredyty, dostawca=DOSTAWCA_GLOWNY, job_id=None):
+    """Dopisuje faktycznie zuzyte kredyty do dzisiejszego dnia (ujemne/zero ignorowane).
+    job_id: koszt konkretnego joba liczy sie RAZ - drugie rozliczenie tego samego joba (np. po wznowieniu po restarcie)
+    nic nie dopisuje (lista `rozliczone` w budzet.json, ostatnie 500 jobow per dostawca)."""
+    kredyty = int(kredyty or 0)
     if kredyty <= 0:
         return wydano_dzis(dostawca)
-    dane = budzet()
-    konto = _konto_budzetu(dane, dostawca)
-    wydatki = konto.setdefault("wydatki", {})
-    dzis = _dzis()
-    wydatki[dzis] = int(wydatki.get(dzis, 0)) + kredyty
-    # trzymaj tylko ostatnie 60 dni
-    for k in sorted(wydatki)[:-60]:
-        wydatki.pop(k, None)
-    _zapisz_json(PLIK_BUDZETU, dane)
+    with _rmw(PLIK_BUDZETU):
+        dane = budzet()
+        konto = _konto_budzetu(dane, dostawca)
+        if job_id:
+            rozliczone = konto.setdefault("rozliczone", [])
+            if str(job_id) in rozliczone:
+                return int((konto.get("wydatki") or {}).get(_dzis(), 0))
+            rozliczone.append(str(job_id))
+            del rozliczone[:-500]
+        wydatki = konto.setdefault("wydatki", {})
+        dzis = _dzis()
+        wydatki[dzis] = int(wydatki.get(dzis, 0)) + kredyty
+        # trzymaj tylko ostatnie 60 dni
+        for k in sorted(wydatki)[:-60]:
+            wydatki.pop(k, None)
+        _zapisz_json(PLIK_BUDZETU, dane)
     return wydatki[dzis]
+
+
+def rozliczony(job_id, dostawca=DOSTAWCA_GLOWNY):
+    """Czy koszt tego joba jest juz w budzecie (dopisz_wydatek z job_id)."""
+    return bool(job_id) and str(job_id) in (_konto_budzetu(budzet(), dostawca).get("rozliczone") or [])
 
 
 # ---------------- dziennik zdarzen ----------------
@@ -595,11 +679,12 @@ def upload_id(slug, sciezka):
 
 
 def zapisz_upload_id(slug, sciezka, uid):
-    cache = _wczytaj_json(_plik_uploadow(slug), {})
-    st = os.stat(sciezka)
-    cache[os.path.normcase(os.path.abspath(sciezka))] = {"id": uid, "size": st.st_size, "mtime": st.st_mtime,
-                                                         "plik": os.path.basename(sciezka), "dodano": _teraz()}
-    _zapisz_json(_plik_uploadow(slug), cache)
+    with _rmw(_plik_uploadow(slug)):
+        cache = _wczytaj_json(_plik_uploadow(slug), {})
+        st = os.stat(sciezka)
+        cache[os.path.normcase(os.path.abspath(sciezka))] = {"id": uid, "size": st.st_size, "mtime": st.st_mtime,
+                                                             "plik": os.path.basename(sciezka), "dodano": _teraz()}
+        _zapisz_json(_plik_uploadow(slug), cache)
 
 
 def media_do_cli(slug, sciezki):
@@ -702,9 +787,10 @@ def jest_pociete(slug, zrodlo):
 
 
 def oznacz_pociete(slug, zrodlo, kawalki):
-    dane = _wczytaj_json(_plik_pocietych(slug), {})
-    dane[os.path.normcase(os.path.abspath(zrodlo))] = {"kawalki": list(kawalki), "kiedy": _teraz()}
-    _zapisz_json(_plik_pocietych(slug), dane)
+    with _rmw(_plik_pocietych(slug)):
+        dane = _wczytaj_json(_plik_pocietych(slug), {})
+        dane[os.path.normcase(os.path.abspath(zrodlo))] = {"kawalki": list(kawalki), "kiedy": _teraz()}
+        _zapisz_json(_plik_pocietych(slug), dane)
 
 
 def pomysl_po_zrodle(slug, zrodlo):
@@ -721,6 +807,11 @@ def dodaj_pomysl(slug, opis, prompt_higgsfield="", zrodlo=None, klatki=None, inf
     """Nowy pomysl. `zrodlo` = filmik wejsciowy do Seedance Edit, `klatki` = folder z podgladem,
     `stroj` = zdjecie stroju (wariant B) albo None (strój z filmu)."""
     plik = _plik_pomyslow(slug)
+    with _rmw(plik):
+        return _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj)
+
+
+def _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj):
     pomysly = _wczytaj_json(plik, [])
     nowy_id = (max((p["id"] for p in pomysly), default=0)) + 1
     pomysly.append({
@@ -759,25 +850,27 @@ def aktualizuj_pomysl(slug, pomysl_id, **pola):
     if "status" in pola and pola["status"] not in STATUSY:
         raise ValueError(f"Nieznany status '{pola['status']}'. Dozwolone: {', '.join(STATUSY)}")
     plik = _plik_pomyslow(slug)
-    pomysly = _wczytaj_json(plik, [])
-    for p in pomysly:
-        if p["id"] == pomysl_id:
-            p.update(pola)
-            p["zaktualizowano"] = _teraz()
-            if pola.get("status") in ("wygenerowany", "gotowe") and not p.get("wygenerowano"):
-                p["wygenerowano"] = _teraz()
-            _zapisz_json(plik, pomysly)
-            return p
+    with _rmw(plik):
+        pomysly = _wczytaj_json(plik, [])
+        for p in pomysly:
+            if p["id"] == pomysl_id:
+                p.update(pola)
+                p["zaktualizowano"] = _teraz()
+                if pola.get("status") in ("wygenerowany", "gotowe") and not p.get("wygenerowano"):
+                    p["wygenerowano"] = _teraz()
+                _zapisz_json(plik, pomysly)
+                return p
     raise ValueError(f"Nie ma pomyslu #{pomysl_id}.")
 
 
 def usun_pomysl(slug, pomysl_id):
     plik = _plik_pomyslow(slug)
-    pomysly = _wczytaj_json(plik, [])
-    nowe = [p for p in pomysly if p["id"] != pomysl_id]
-    if len(nowe) == len(pomysly):
-        raise ValueError(f"Nie ma pomyslu #{pomysl_id}.")
-    _zapisz_json(plik, nowe)
+    with _rmw(plik):
+        pomysly = _wczytaj_json(plik, [])
+        nowe = [p for p in pomysly if p["id"] != pomysl_id]
+        if len(nowe) == len(pomysly):
+            raise ValueError(f"Nie ma pomyslu #{pomysl_id}.")
+        _zapisz_json(plik, nowe)
 
 
 def statystyki_pomyslow(slug):
@@ -787,6 +880,157 @@ def statystyki_pomyslow(slug):
     for p in pomysly:
         wynik[p["status"]] = wynik.get(p["status"], 0) + 1
     return wynik
+
+
+# ---------------- generacja w toku (job wyslany, jeszcze nie pobrany) ----------------
+# Pomysl w trakcie generacji ma status "w_toku" i slownik `w_toku`:
+#   {dostawca, model, krok (0 = dostawca persony, 1.. = zapas_nsfw), klucz (Idempotency-Key), koszt (wycena), od (czas wyslania),
+#    etap: "wysylanie" (job_id jeszcze nieznany) | "czeka" (job_id znany - tylko odpytujemy), job_id, wideo_id (upload filmiku)}
+# Marker jest zapisywany PRZED wyslaniem, a job_id zaraz po - po restarcie/timeoucie fabryka odpytuje ten sam job, nie wysyla nowego.
+
+def zacznij_w_toku(slug, pomysl_id, **marker):
+    """Status w_toku + marker (etap 'wysylanie', od = teraz). Zwraca pomysl."""
+    marker.setdefault("etap", "wysylanie")
+    marker.setdefault("od", _teraz())
+    marker.setdefault("job_id", None)
+    return aktualizuj_pomysl(slug, pomysl_id, status="w_toku", w_toku=marker)
+
+
+def ustaw_w_toku(slug, pomysl_id, **pola):
+    """Dopisuje pola do markera w_toku (np. job_id po wyslaniu, wideo_id przed wyslaniem). Zwraca pomysl."""
+    with _rmw(_plik_pomyslow(slug)):
+        p = pomysl(slug, pomysl_id)
+        marker = dict(p.get("w_toku") or {})
+        marker.update(pola)
+        zmiany = {"w_toku": marker}
+        if pola.get("job_id"):
+            zmiany["job_id"] = pola["job_id"]
+        return aktualizuj_pomysl(slug, pomysl_id, **zmiany)
+
+
+def pomysly_w_toku(slug):
+    """Pomysly z wyslanym (albo wysylanym) jobem - do wznowienia po restarcie panelu/autopilota."""
+    return [p for p in lista_pomyslow(slug) if p.get("status") == "w_toku"]
+
+
+def zapisz_probe(slug, pomysl_id, wpis):
+    """Dopisuje probe do p['proby'] ({dostawca, model, job_id, status, powod, kr, czas}); proba z tym samym job_id
+    jest aktualizowana, nie dublowana (wznowienie po restarcie). Zwraca pomysl."""
+    with _rmw(_plik_pomyslow(slug)):
+        p = pomysl(slug, pomysl_id)
+        proby = list(p.get("proby") or [])
+        wpis = dict(wpis)
+        wpis.setdefault("czas", _teraz())
+        jid = wpis.get("job_id")
+        for i, w in enumerate(proby):
+            if jid and w.get("job_id") == jid:
+                proby[i] = {**w, **wpis}
+                break
+        else:
+            proby.append(wpis)
+        return aktualizuj_pomysl(slug, pomysl_id, proby=proby)
+
+
+def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
+    """Kredyty zarezerwowane przez rolki w toku (job wyslany, jeszcze nie rozliczony) - wszystkie persony, jeden dostawca.
+    Bezpieczniki dzienne licza je razem z wydatkami, zeby kilka wolnych jobow naraz nie przebilo limitu."""
+    suma = 0
+    for slug in lista_modelek():
+        for p in pomysly_w_toku(slug):
+            m = p.get("w_toku") or {}
+            if (m.get("dostawca") or DOSTAWCA_GLOWNY) == (dostawca or DOSTAWCA_GLOWNY) and not rozliczony(p.get("job_id"), dostawca):
+                try:
+                    suma += int(m.get("koszt") or 0)
+                except (TypeError, ValueError):
+                    pass
+    return suma
+
+
+def wydano_z_rezerwa(dostawca=DOSTAWCA_GLOWNY):
+    """Wydane dzis + zarezerwowane przez rolki w toku - to porownujemy z limitem dziennym."""
+    return wydano_dzis(dostawca) + koszt_w_toku(dostawca)
+
+
+# ---------------- blokada: jedna generacja naraz na persone (takze miedzy procesami) ----------------
+# Panel (autopilot), `python fabryka.py generuj` i agent moga dzialac naraz - bez blokady dwa procesy wziely by te sama
+# rolke 'nowy' i zaplacily dwa razy. Blokada pliku (msvcrt / fcntl) znika sama, gdy proces umrze.
+
+_blokady = {}
+_blokady_lock = threading.Lock()
+
+
+def _zablokuj_plik(f):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _odblokuj_plik(f):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+@contextmanager
+def blokada_generacji(slug):
+    """`with blokada_generacji(slug) as moge:` - moge=False, gdy inny proces/watek generuje juz dla tej persony.
+    W tym samym watku mozna wejsc ponownie (generuj -> wznow_w_toku)."""
+    klucz = os.path.normcase(os.path.abspath(os.path.join(KATALOG_MODELEK, slug)))
+    watek = threading.get_ident()
+    with _blokady_lock:
+        wpis = _blokady.get(klucz)
+        if wpis and wpis["watek"] == watek:
+            wpis["licznik"] += 1
+            nowy = None
+        elif wpis:
+            nowy = False
+        else:
+            nowy = True
+    if nowy is False:
+        yield False
+        return
+    if nowy is None:
+        try:
+            yield True
+        finally:
+            with _blokady_lock:
+                _blokady[klucz]["licznik"] -= 1
+        return
+    sciezka = os.path.join(folder_modelki(slug), "generacja.lock")
+    f = open(sciezka, "a+")
+    if not _zablokuj_plik(f):
+        f.close()
+        yield False
+        return
+    with _blokady_lock:
+        _blokady[klucz] = {"watek": watek, "licznik": 1, "plik": f}
+    try:
+        yield True
+    finally:
+        with _blokady_lock:
+            wpis = _blokady.get(klucz)
+            wpis["licznik"] -= 1
+            koniec = wpis["licznik"] <= 0
+            if koniec:
+                _blokady.pop(klucz, None)
+        if koniec:
+            _odblokuj_plik(f)
+            f.close()
 
 
 # ---------------- zdjecia persony ----------------
@@ -801,26 +1045,42 @@ def lista_zdjec(slug):
 
 def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki="", stroj=None):
     plik_json = _plik_zdjec(slug)
-    zdjecia = _wczytaj_json(plik_json, [])
-    nowy_id = (max((z["id"] for z in zdjecia), default=0)) + 1
-    zdjecia.append({"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
-                    "status": status, "notatki": notatki, "stroj": stroj, "utworzono": _teraz()})
-    _zapisz_json(plik_json, zdjecia)
+    with _rmw(plik_json):
+        zdjecia = _wczytaj_json(plik_json, [])
+        nowy_id = (max((z["id"] for z in zdjecia), default=0)) + 1
+        zdjecia.append({"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
+                        "status": status, "notatki": notatki, "stroj": stroj, "utworzono": _teraz()})
+        _zapisz_json(plik_json, zdjecia)
     return nowy_id
+
+
+def ustaw_zdjecie(slug, zid, **pola):
+    """Zmienia pola zdjecia (pod blokada pliku)."""
+    plik_json = _plik_zdjec(slug)
+    with _rmw(plik_json):
+        lista = _wczytaj_json(plik_json, [])
+        for z in lista:
+            if z["id"] == zid:
+                z.update(pola)
+        _zapisz_json(plik_json, lista)
 
 
 def usun_zdjecie(slug, zid):
     plik_json = _plik_zdjec(slug)
-    zdjecia = _wczytaj_json(plik_json, [])
-    nowe = [z for z in zdjecia if z["id"] != zid]
-    if len(nowe) == len(zdjecia):
-        raise ValueError(f"Nie ma zdjecia #{zid}.")
-    _zapisz_json(plik_json, nowe)
+    with _rmw(plik_json):
+        zdjecia = _wczytaj_json(plik_json, [])
+        nowe = [z for z in zdjecia if z["id"] != zid]
+        if len(nowe) == len(zdjecia):
+            raise ValueError(f"Nie ma zdjecia #{zid}.")
+        _zapisz_json(plik_json, nowe)
 
 
-def zdjecia_z_dnia(slug, dzien=None):
+def zdjecia_z_dnia(slug, dzien=None, z_niepewnymi=False):
+    """Gotowe zdjecia z dnia; z_niepewnymi=True dolicza 'niepewne' (job mogl powstac mimo bledu - autopilot nie robi wtedy
+    kolejnego, zeby nie zaplacic drugi raz)."""
     dzien = dzien or _dzis()
-    return [z for z in lista_zdjec(slug) if z["status"] == "gotowe" and z.get("utworzono", "").startswith(dzien)]
+    statusy = ("gotowe", "niepewne") if z_niepewnymi else ("gotowe",)
+    return [z for z in lista_zdjec(slug) if z["status"] in statusy and z.get("utworzono", "").startswith(dzien)]
 
 
 def prompty_zdjec(slug):
@@ -841,10 +1101,11 @@ def nastepny_prompt_zdjecia(slug):
     if not prompty:
         return None, 0
     plik = os.path.join(folder_modelki(slug), "zdjecia_stan.json")
-    stan = _wczytaj_json(plik, {"indeks": 0})
-    i = int(stan.get("indeks", 0)) % len(prompty)
-    stan["indeks"] = i + 1          # w tym samym pliku siedzi tez licznik strojow (zdjecia._nastepny_stroj) - nie nadpisuj
-    _zapisz_json(plik, stan)
+    with _rmw(plik):
+        stan = _wczytaj_json(plik, {"indeks": 0})
+        i = int(stan.get("indeks", 0)) % len(prompty)
+        stan["indeks"] = i + 1          # w tym samym pliku siedzi tez licznik strojow (zdjecia._nastepny_stroj) - nie nadpisuj
+        _zapisz_json(plik, stan)
     return prompty[i], i
 
 
@@ -861,9 +1122,10 @@ def autopilot_stan(slug):
 
 
 def zapisz_autopilot_stan(slug, **pola):
-    dane = autopilot_stan(slug)
-    dane.update(pola)
-    _zapisz_json(_plik_autopilota(slug), dane)
+    with _rmw(_plik_autopilota(slug)):
+        dane = autopilot_stan(slug)
+        dane.update(pola)
+        _zapisz_json(_plik_autopilota(slug), dane)
     return dane
 
 
@@ -887,34 +1149,37 @@ def lista_lipsync(slug):
 
 def dodaj_lipsync(slug, wideo, audio, dostawca, model, pomysl_id=None):
     plik = _plik_lipsync(slug)
-    lista = _wczytaj_json(plik, [])
-    nowy_id = (max((l["id"] for l in lista), default=0)) + 1
-    lista.append({"id": nowy_id, "wideo": wideo, "audio": audio, "dostawca": dostawca, "model": model,
-                  "pomysl_id": pomysl_id, "job_id": None, "status": "nowy", "plik_wynikowy": None,
-                  "koszt": None, "notatki": "", "utworzono": _teraz(), "zaktualizowano": _teraz()})
-    _zapisz_json(plik, lista)
+    with _rmw(plik):
+        lista = _wczytaj_json(plik, [])
+        nowy_id = (max((l["id"] for l in lista), default=0)) + 1
+        lista.append({"id": nowy_id, "wideo": wideo, "audio": audio, "dostawca": dostawca, "model": model,
+                      "pomysl_id": pomysl_id, "job_id": None, "status": "nowy", "plik_wynikowy": None,
+                      "koszt": None, "notatki": "", "utworzono": _teraz(), "zaktualizowano": _teraz()})
+        _zapisz_json(plik, lista)
     return nowy_id
 
 
 def aktualizuj_lipsync(slug, lid, **pola):
     plik = _plik_lipsync(slug)
-    lista = _wczytaj_json(plik, [])
-    for l in lista:
-        if l["id"] == lid:
-            l.update(pola)
-            l["zaktualizowano"] = _teraz()
-            _zapisz_json(plik, lista)
-            return l
+    with _rmw(plik):
+        lista = _wczytaj_json(plik, [])
+        for l in lista:
+            if l["id"] == lid:
+                l.update(pola)
+                l["zaktualizowano"] = _teraz()
+                _zapisz_json(plik, lista)
+                return l
     raise ValueError(f"Nie ma lipsyncu #{lid}.")
 
 
 def usun_lipsync(slug, lid):
     plik = _plik_lipsync(slug)
-    lista = _wczytaj_json(plik, [])
-    nowe = [l for l in lista if l["id"] != lid]
-    if len(nowe) == len(lista):
-        raise ValueError(f"Nie ma lipsyncu #{lid}.")
-    _zapisz_json(plik, nowe)
+    with _rmw(plik):
+        lista = _wczytaj_json(plik, [])
+        nowe = [l for l in lista if l["id"] != lid]
+        if len(nowe) == len(lista):
+            raise ValueError(f"Nie ma lipsyncu #{lid}.")
+        _zapisz_json(plik, nowe)
 
 
 # ---------------- bank tekstow ----------------
@@ -934,16 +1199,17 @@ def dodaj_teksty(slug, teksty, zrodlo=""):
     Zwraca liczbe faktycznie dodanych pozycji.
     """
     plik = _plik_tekstow(slug)
-    bank = _wczytaj_json(plik, [])
-    juz_w_banku = {w["tekst"] for w in bank}
-    dodane = 0
-    for t in teksty:
-        t = t.strip()
-        if t and t not in juz_w_banku:
-            bank.append({"tekst": t, "zrodlo": zrodlo, "dodano": _teraz()})
-            juz_w_banku.add(t)
-            dodane += 1
-    _zapisz_json(plik, bank)
+    with _rmw(plik):
+        bank = _wczytaj_json(plik, [])
+        juz_w_banku = {w["tekst"] for w in bank}
+        dodane = 0
+        for t in teksty:
+            t = t.strip()
+            if t and t not in juz_w_banku:
+                bank.append({"tekst": t, "zrodlo": zrodlo, "dodano": _teraz()})
+                juz_w_banku.add(t)
+                dodane += 1
+        _zapisz_json(plik, bank)
     return dodane
 
 
@@ -977,11 +1243,12 @@ def statystyki_tekstow(slug):
 
 def losuj_tekst(slug):
     """Zwraca pierwszy jeszcze nieuzyty tekst i oznacza go jako uzyty."""
-    bank = _wczytaj_json(_plik_tekstow(slug), [])
-    uzyte = set(_wczytaj_json(_plik_uzytych(slug), []))
-    for wpis in bank:
-        if wpis["tekst"] not in uzyte:
-            uzyte.add(wpis["tekst"])
-            _zapisz_json(_plik_uzytych(slug), sorted(uzyte))
-            return wpis["tekst"]
+    with _rmw(_plik_uzytych(slug)):
+        bank = _wczytaj_json(_plik_tekstow(slug), [])
+        uzyte = set(_wczytaj_json(_plik_uzytych(slug), []))
+        for wpis in bank:
+            if wpis["tekst"] not in uzyte:
+                uzyte.add(wpis["tekst"])
+                _zapisz_json(_plik_uzytych(slug), sorted(uzyte))
+                return wpis["tekst"]
     return None

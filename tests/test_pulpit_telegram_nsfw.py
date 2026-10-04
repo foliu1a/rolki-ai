@@ -173,23 +173,21 @@ def test_powod_odrzucenia():
     assert fabryka.powod_odrzucenia("", "") is None
 
 
-def test_nsfw_dwa_razy_z_rzedu_konczy_proby(modelka, cli, bez_ffmpeg):
+def test_nsfw_bez_powtorki_na_tym_samym_modelu(modelka, cli, bez_ffmpeg):
+    """Odrzucenie NSFW: ZADNEJ powtorki na Seedance (ten sam filtr, te same wejscia) - bez zapasu rolka konczy jako blad."""
     baza.zapisz_ustawienia(modelka, mediatool=False, powtorki=2)
     open(os.path.join(baza.folder_zrodel(modelka), "a.mp4"), "wb").write(b"v")
     fabryka.skanuj(modelka)
     nsfw = {"id": "j1", "status": "nsfw", "result_url": None, "fail_reason": "nsfw"}
     cli.wyniki = [dict(nsfw), dict(nsfw), None]
     w = fabryka.generuj(modelka)
-    assert w["bledy"] == [1] and len(cli.generacje) == 2       # trzecia proba sie nie odbyla
+    assert w["bledy"] == [1] and w["odrzucone"] == [1] and len(cli.generacje) == 1
     p = baza.pomysl(modelka, 1)
-    assert p["status"] == "blad" and p["powod"] == "nsfw"
+    assert p["status"] == "blad" and p["powod"] == "nsfw" and p["koszt"] == 0
+    assert p["proby"] == [dict(p["proby"][0], dostawca="higgsfield", model="seedance_2_5", job_id="j1", status="nsfw", powod="nsfw", kr=0)]
     wpisy = [x for x in baza.dziennik_ostatnie(50) if x.get("dane", {}).get("powod") == "nsfw"]
-    assert wpisy and "filtr tresci" in wpisy[-1]["tekst"]
-    # jedno odrzucenie, potem sukces -> powtorka ma sens
-    open(os.path.join(baza.folder_zrodel(modelka), "b.mp4"), "wb").write(b"v")
-    fabryka.skanuj(modelka)
-    cli.wyniki = [dict(nsfw), None]
-    assert fabryka.generuj(modelka)["wygenerowane"] == 1 and baza.pomysl(modelka, 2)["status"] == "gotowe"
+    assert wpisy and "filtr tresci" in wpisy[-1]["tekst"] and "zapas po NSFW wylaczony" in wpisy[-1]["tekst"]
+    assert baza.wydano_dzis() == 0
 
 
 def test_wskazowki_nsfw(modelka, cli, bez_ffmpeg):

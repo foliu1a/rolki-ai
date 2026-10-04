@@ -413,7 +413,7 @@
             <div class="sekcja-tresc">
               <div class="jakosc-karty" id="jakosc-karty" role="radiogroup" aria-label="Zestaw jakości i kosztu"><div class="muted">Sprawdzam ustawienia…</div></div>
               <div class="callout uwaga" id="jakosc-ostrzezenie" hidden><span class="ikona" data-ikona="uwaga"></span><span id="jakosc-ostrzezenie-tekst"></span></div>
-              <p class="jakosc-info">Koszt rolki rośnie z jej długością: <b>720p</b> to ok. <b>7,5 kr za sekundę</b>, <b>1080p</b> ok. <b>12 kr</b>. Dłuższy filmik jest cięty na kawałki tej długości – każdy to osobna rolka. Dokładną cenę policzy „Ile to będzie kosztować?” na Starcie.</p>
+              <p class="jakosc-info">Rozdzielczość wybiera długość klipu: <b>≤8 s → 1080p</b>, <b>dłuższe → 720p</b>. Koszt rośnie z długością: <b>720p</b> to ok. <b>7,5 kr za sekundę</b>, <b>1080p</b> ok. <b>12 kr</b>. Dłuższy filmik jest cięty na kawałki tej długości – każdy to osobna rolka. Dokładną cenę policzy „Ile to będzie kosztować?” na Starcie.</p>
               <p class="jakosc-info" data-zaawansowane>Własną rozdzielczość i długość rolki ustawisz niżej, w „Jak robić rolki”.</p>
             </div>
           </details>
@@ -432,7 +432,7 @@
               <div class="pola-siatka">
                 <div class="pole"><label for="u-resolution">Rozdzielczość</label>
                   <select id="u-resolution" name="resolution"><option value="480p">480p – najtaniej (ok. 3,5 kr/s)</option><option value="720p">720p – normalnie (ok. 7,5 kr/s)</option><option value="1080p">1080p – najlepiej (ok. 12 kr/s)</option></select>
-                  <small class="pole-info">Ta sama jakość u obu dostawców (Higgsfield i yapper).</small></div>
+                  <small class="pole-info">Rolki z filmiku: rozdzielczość wybiera długość klipu – <b>≤8 s → 1080p, dłuższe → 720p</b> (Higgsfield i yapper). To pole działa tylko dla pomysłów bez filmiku.</small></div>
                 <div class="pole"><label for="u-max-sekund">Długość jednej rolki (s)</label><input type="number" id="u-max-sekund" name="max_sekund_rolki" min="4" max="30" data-domyslne="15"><small class="pole-info">4–30 s. Dłuższy filmik jest cięty na kawałki tej długości (każdy = osobna rolka). Krótsza rolka = mniej kredytów.</small></div>
               </div>
               <label class="check"><input type="checkbox" name="mediatool"><span>Wypierz rolkę w Media Tool (iPhone)<small>po zrobieniu plik dostaje metadane jak z iPhone’a i trafia do folderu gotowych</small></span></label>
@@ -457,7 +457,14 @@
                 <div class="pole"><label for="u-duration">Długość (s)</label><input type="number" id="u-duration" name="duration" min="4" max="30" placeholder="jak źródło"><small class="pole-info">Puste = tyle, ile ma filmik źródłowy.</small></div>
                 <div class="pole"><label for="u-audio">Dźwięk z modelu</label>
                   <select id="u-audio" name="generate_audio" data-typ="tri"><option value="">domyślne modelu</option><option value="true">tak</option><option value="false">nie</option></select></div>
-                <div class="pole"><label for="u-powtorki">Powtórki po odrzuceniu</label><input type="number" id="u-powtorki" name="powtorki" min="0" max="10" data-domyslne="2"><small class="pole-info">Seedance przy odrzuceniu oddaje kredyty.</small></div>
+                <div class="pole"><label for="u-powtorki">Ponowne wysłanie po błędzie sieci</label><input type="number" id="u-powtorki" name="powtorki" min="0" max="10" data-domyslne="2"><small class="pole-info">Tylko gdy rolka w ogóle nie dotarła do Higgsfield. Wysłanej rolki fabryka nigdy nie wysyła drugi raz, a odrzuconej przez filtr (NSFW) nie powtarza – od tego jest zapas niżej.</small></div>
+                <div class="pole szerokie"><label for="u-zapas">Gdy filtr odrzuci rolkę (NSFW / znana postać)</label>
+                  <select id="u-zapas" name="zapas_nsfw" data-typ="lista-json">
+                    <option value="[]">nic więcej – rolka zostaje „nie wyszło”</option>
+                    <option value='[{"dostawca":"yapper","model":"wan-3.0-prime"}]'>spróbuj na yapper.so: Wan 3.0 Prime</option>
+                    <option value='[{"dostawca":"yapper","model":"wan-3.0-prime"},{"dostawca":"yapper","model":"wan-3.0"}]'>spróbuj na yapper.so: Wan 3.0 Prime, potem Wan 3.0</option>
+                  </select>
+                  <small class="pole-info">Zapas płaci kredytami yapper.so i rusza tylko z dziennym limitem yappera (Limity kredytów). Prompt dla Wan: plik <span class="mono">prompty/wan.txt</span> persony (max 5000 znaków, bez @[Image N]). Wan traktuje filmik jako wzór ruchu (max 15 s).</small></div>
                 <div class="pole szerokie"><label for="u-dodatkowe">Dodatkowe parametry CLI (JSON)</label><textarea id="u-dodatkowe" name="dodatkowe_parametry" class="mono" data-typ="json" placeholder='{"seed": 42}'></textarea></div>
               </div>
 
@@ -529,11 +536,10 @@
               <div class="pola-siatka">
                 <div class="pole"><label for="limit-higgsfield">Nie wydawaj więcej niż … kredytów dziennie</label><input type="number" id="limit-higgsfield" name="budzet.higgsfield" min="0"><small class="pole-info">Limit wspólny dla wszystkich person. 0 = bez limitu.</small></div>
                 <div class="pole"><label for="u-min">Zostaw na koncie co najmniej … kredytów</label><input type="number" id="u-min" name="min_kredyty" min="0" data-domyslne="200"></div>
-                <div class="pole"><label for="u-max">Jedna rolka może kosztować najwyżej … kredytów</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"><small class="pole-info">Zestaw „Najlepiej” (1080p, 15 s) to ok. 180 kr – podnieś ten próg, jeśli go wybierasz.</small></div>
-                <div class="pole"><label for="limit-yapper">yapper.so: nie więcej niż … kredytów dziennie</label><input type="number" id="limit-yapper" name="budzet.yapper" min="0"></div>
+                <div class="pole"><label for="u-max">Jedna rolka może kosztować najwyżej … kredytów</label><input type="number" id="u-max" name="max_kredyty_na_rolke" min="0" data-domyslne="150"><small class="pole-info">Rolka do 8 s idzie w 1080p (ok. 100 kr), dłuższa w 720p (15 s ≈ 112 kr).</small></div>
+                <div class="pole"><label for="limit-yapper">yapper.so: nie więcej niż … kredytów dziennie</label><input type="number" id="limit-yapper" name="budzet.yapper" min="0"><small class="pole-info">0 = zapas po NSFW (yapper) wyłączony – bez limitu nic nie wyda.</small></div>
                 <div class="pole"><label for="u-yapper-min">yapper.so: zostaw na koncie co najmniej …</label><input type="number" id="u-yapper-min" name="yapper.min_kredyty" min="0" data-domyslne="0"></div>
-                <div class="pole"><label for="u-yapper-max">yapper.so: jedna rolka najwyżej …</label><input type="number" id="u-yapper-max" name="yapper.max_kredyty_na_rolke" min="0" data-domyslne="1000"><small class="pole-info">Kredyty yapper mają inną skalę niż Higgsfield.</small></div>
-                <div class="pole"><label for="u-warianty">Warianty VideoRemixer po generacji</label><input type="number" id="u-warianty" name="warianty" min="0" max="500" data-domyslne="0"><small class="pole-info">0 = pomiń.</small></div>
+                <div class="pole"><label for="u-yapper-max">yapper.so: jedna rolka najwyżej …</label><input type="number" id="u-yapper-max" name="yapper.max_kredyty_na_rolke" min="0" data-domyslne="400"><small class="pole-info">Kredyty yapper mają inną skalę niż Higgsfield (Wan 3.0 Prime 10 s ≈ 250).</small></div>
               </div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
@@ -759,6 +765,7 @@
               <p>Na pulpicie masz skrót <b>„Rolki AI”</b> – tworzy go <b>aktualizuj.bat</b>. Jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b> w folderze programu. Skrót uruchamia panel w tle (bez czarnego okna) i otwiera go w przeglądarce.</p>
               <p>Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</p>
               <p>Program działa w tle nawet po zamknięciu karty przeglądarki. Żeby go wyłączyć, kliknij <b>Zamknij program</b> w lewym dolnym rogu panelu. Włączysz go ponownie skrótem Rolki AI.</p>
+              <p>Zamknięcie w trakcie robienia rolki jest bezpieczne: panel poczeka, aż rolka zostanie wysłana do Higgsfield, a gdy już się generuje – dokończy ją sam po ponownym uruchomieniu (ten sam job, <b>nic nie płacisz drugi raz</b>). Taka rolka ma status „generuje się”.</p>
             </div>
           </details>
           <details class="karta zwijane pomoc" id="pomoc-persona">
@@ -775,7 +782,7 @@
           <details class="karta zwijane pomoc" id="pomoc-aktualizacja">
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak zaktualizować program?</summary>
             <div class="pomoc-tresc">
-              <p>Kliknij dwa razy w plik <b>aktualizuj.bat</b> w folderze programu. Panel sam się zamknie, pobierze nową wersję, odświeży skrót na pulpicie i włączy się ponownie. Twoje persony, filmiki, klucze i ustawienia zostają.</p>
+              <p>Kliknij dwa razy w plik <b>aktualizuj.bat</b> w folderze programu. Panel sam się zamknie (jeśli akurat wysyła rolkę – poczeka, aż skończy), pobierze nową wersję, odświeży skrót na pulpicie i włączy się ponownie. Twoje persony, filmiki, klucze, limity i ustawienia zostają, a rolki „generuje się” dokończą się po starcie.</p>
             </div>
           </details>
           <details class="karta zwijane pomoc" id="pomoc-tryb">

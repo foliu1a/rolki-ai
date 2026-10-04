@@ -16,5 +16,5 @@ echo.
 echo Gotowe. Teraz zaloguj CLI Higgsfield (otworzy sie przegladarka):
 echo     zaloguj-higgsfield.bat
 echo Klucze yapper.so / sync.so wpiszesz w panelu (zakladka Konta).
-echo Panel: skrot "Rolki AI" na pulpicie (albo panel.bat)   Autostart z Windows: autostart.bat   Widget: widget.bat
+echo Panel: skrot "Rolki AI" na pulpicie (albo panel.bat)   Autostart z Windows: autostart.bat   Male okno: http://localhost:5077/widget
 pause

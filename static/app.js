@@ -19,15 +19,15 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const STRONY = ['start', 'rolki', 'zdjecia', 'lipsync', 'ustawienia', 'historia', 'pomoc'];
 const STARE_STRONY = { pulpit: 'start', kolejka: 'rolki', persona: 'ustawienia/persona', konta: 'ustawienia/konta', teksty: 'ustawienia/teksty', dziennik: 'historia' };
-const STATUSY = ['nowy', 'wygenerowany', 'postprodukcja', 'gotowe', 'blad'];
+const STATUSY = ['nowy', 'w_toku', 'wygenerowany', 'postprodukcja', 'gotowe', 'blad'];
 const FILTRY_ROLEK = [
   { id: 'wszystkie', nazwa: 'wszystkie', statusy: null },
   { id: 'nowy', nazwa: 'czekają', statusy: ['nowy'] },
-  { id: 'w_trakcie', nazwa: 'w trakcie', statusy: ['wygenerowany', 'postprodukcja'] },
+  { id: 'w_trakcie', nazwa: 'w trakcie', statusy: ['w_toku', 'wygenerowany', 'postprodukcja'] },
   { id: 'gotowe', nazwa: 'gotowe', statusy: ['gotowe'] },
   { id: 'blad', nazwa: 'nie wyszły', statusy: ['blad'] },
 ];
-const STATUS_NA_FILTR = { nowy: 'nowy', wygenerowany: 'w_trakcie', postprodukcja: 'w_trakcie', gotowe: 'gotowe', blad: 'blad' };
+const STATUS_NA_FILTR = { nowy: 'nowy', w_toku: 'w_trakcie', wygenerowany: 'w_trakcie', postprodukcja: 'w_trakcie', gotowe: 'gotowe', blad: 'blad' };
 const AKCEPT = { zrodlo: 'video/*,.mp4,.mov,.m4v,.webm', referencja: 'image/*', stroj: 'image/*', audio: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg' };
 const STRONY_PO_ZADANIU = ['start', 'rolki', 'zdjecia', 'lipsync', 'historia', 'ustawienia'];
 const MODELE_SYNC_ZAPAS = ['lipsync-2', 'lipsync-2-pro', 'sync-3'];
@@ -164,7 +164,7 @@ function wstawIkony(root = document) {
 // ============================================================ 2. SŁOWNIK PROSTYCH SŁÓW
 // Statusy rolek / zdjęć / lipsyncu – jedno proste słowo zamiast nazwy technicznej.
 const SLOWA_STATUSU = {
-  rolka: { nowy: 'czeka', wygenerowany: 'zrobiona (jeszcze nie wyprana)', postprodukcja: 'w obróbce', gotowe: 'gotowa', blad: 'nie wyszło', pobieranie: 'pobieram' },
+  rolka: { nowy: 'czeka', w_toku: 'generuje się', wygenerowany: 'zrobiona (jeszcze nie wyprana)', postprodukcja: 'w obróbce', gotowe: 'gotowa', blad: 'nie wyszło', pobieranie: 'pobieram' },
   zdjecie: { nowy: 'czeka', wygenerowany: 'zrobione', postprodukcja: 'w obróbce', gotowe: 'gotowe', blad: 'nie wyszło' },
   lipsync: { nowy: 'w trakcie', wygenerowany: 'zrobiony', postprodukcja: 'w obróbce', gotowe: 'gotowy', blad: 'nie wyszło' },
 };
@@ -173,7 +173,7 @@ function slowoStatusu(status, rodzaj = 'rolka') {
   return m[status] || SLOWA_STATUSU.rolka[status] || status || '';
 }
 function kolorStatusu(status) {
-  return { nowy: 'akcent', wygenerowany: 'uwaga', postprodukcja: 'uwaga', gotowe: 'ok', blad: 'zle', pobieranie: 'uwaga' }[status] || '';
+  return { nowy: 'akcent', w_toku: 'uwaga', wygenerowany: 'uwaga', postprodukcja: 'uwaga', gotowe: 'ok', blad: 'zle', pobieranie: 'uwaga' }[status] || '';
 }
 
 // Błędy: fragment tekstu technicznego -> jedno zdanie po ludzku (kolejność ma znaczenie).
@@ -212,8 +212,8 @@ function prostyBlad(tekst) {
 }
 
 // Zadania w tle: nazwy i proste podsumowania wyników.
-const CO_ROBIE = { skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
-const NAZWY_AKCJI = { skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
+const CO_ROBIE = { wznow: 'kończę rolki przerwane zamknięciem', skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
+const NAZWY_AKCJI = { wznow: 'Dokończenie przerwanych rolek', skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
 const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia' };
 
 function prostyWynik(typ, w) {
@@ -343,7 +343,7 @@ async function api(url, metoda = 'GET', dane = null) {
   catch (e) { throw new BladApi('Brak połączenia z panelem – sprawdź, czy okno panel.bat jest otwarte.', 0); }
   let json = null;
   try { json = await odp.json(); } catch (e) { json = null; }
-  if (odp.status === 409) throw new BladApi('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 409);
+  if (odp.status === 409) throw new BladApi((json && json.blad) || 'Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 409);
   if (!json || typeof json !== 'object') throw new BladApi(`Błąd serwera (HTTP ${odp.status})`, odp.status);
   if (json.ok === false) throw new BladApi(json.blad || `Nieznany błąd (HTTP ${odp.status})`, odp.status);
   return json;
@@ -566,18 +566,21 @@ function polaczenie(ok) {
 async function zamknijPanel() {
   const w = await potwierdz({
     tytul: 'Zamknąć program?',
-    tresc: '<p>Panel i autopilot przestaną działać, dopóki nie uruchomisz programu ponownie – skrótem <b>Rolki AI</b> na pulpicie.</p>' + (state.zadanie && state.zadanie.trwa ? '<p class="dialog-uwaga">Coś się jeszcze robi – zamknięcie to przerwie.</p>' : ''),
+    tresc: '<p>Panel i autopilot przestaną działać, dopóki nie uruchomisz programu ponownie – skrótem <b>Rolki AI</b> na pulpicie.</p>' + (state.zadanie && state.zadanie.trwa ? '<p class="dialog-uwaga">Coś się jeszcze robi – zamknę panel po bieżącym kroku (wysyłanie rolki nie jest przerywane). Rolka, która już się generuje, dokończy się po ponownym uruchomieniu – bez drugiej opłaty.</p>' : ''),
     ok: 'Zamknij program', klasa: 'btn-zly',
   });
   if (!w) return;
-  try { await api('/api/zamknij', 'POST', {}); }
+  let d = {};
+  try { d = await api('/api/zamknij', 'POST', {}); }
   catch (e) { if (e.status !== 0) { bladToast(e); return; } }
   state.zamkniety = true;
   stopKonsoli();
   const off = $('#offline');
-  off.innerHTML = 'Panel zamknięty. Uruchom ponownie skrótem <b>Rolki AI</b> na pulpicie.';
+  off.innerHTML = d && d.czekam
+    ? 'Panel zamknie się za chwilę – kończy bieżący krok (rolka dokończy się po ponownym uruchomieniu). Potem uruchom go skrótem <b>Rolki AI</b> na pulpicie.'
+    : 'Panel zamknięty. Uruchom ponownie skrótem <b>Rolki AI</b> na pulpicie.';
   off.hidden = false;
-  toast('Panel zamknięty. Uruchom ponownie skrótem Rolki AI.', 'info');
+  toast(d && d.czekam ? 'Zamknę panel po bieżącym kroku – nic nie zostanie zapłacone dwa razy.' : 'Panel zamknięty. Uruchom ponownie skrótem Rolki AI.', 'info');
   window.scrollTo({ top: 0 });
 }
 function nazwaPersony(slug) { const m = state.modelki.find(x => x.slug === slug); return m ? (m.nazwa || m.slug) : slug; }
@@ -965,9 +968,9 @@ async function wyslijNaTelefon(id) {
 
 // Nazwy zestawów „Jakość i koszt” (fabryka.PRESETY_JAKOSCI) po ludzku.
 const PRESETY_JAKOSCI = {
-  oszczednie: { nazwa: 'Oszczędnie', opis: 'rolki do 10 s w 720p – najtaniej, w sam raz na telefon' },
-  normalnie: { nazwa: 'Normalnie', opis: 'rolki do 15 s w 720p – dobry kompromis' },
-  najlepiej: { nazwa: 'Najlepiej', opis: 'rolki do 15 s w 1080p – najostrzej, najdrożej' },
+  oszczednie: { nazwa: 'Oszczędnie', opis: 'rolki do 10 s – najtaniej, w sam raz na telefon' },
+  normalnie: { nazwa: 'Normalnie', opis: 'rolki do 15 s – dobry kompromis' },
+  najlepiej: { nazwa: 'Najlepiej', opis: 'rolki do 8 s – zawsze 1080p, najostrzej' },
 };
 function nazwaPresetu(p) { return (PRESETY_JAKOSCI[p] || {}).nazwa || (p === 'wlasne' ? 'Własne ustawienia' : p); }
 
@@ -1505,6 +1508,7 @@ const POLSKIE_WSKAZOWKI = [
   [/Jesli masz pewnosc/g, 'Jeśli masz pewność'], [/pomylka/g, 'pomyłka'], [/oddaja/g, 'oddają'], [/cofaja/g, 'cofają'], [/zglos/g, 'zgłoś'],
   [/dwoch odrzuceniach z rzedu/g, 'dwóch odrzuceniach z rzędu'], [/probowac/g, 'próbować'], [/jedna powtorka/g, 'jedna powtórka'],
   [/\bslowa\b/g, 'słowa'], [/tresci/g, 'treści'], [/\bWYNIKU\b/g, 'WYNIKU'],
+  [/dalby/g, 'dałby'], [/wlaczonym/g, 'włączonym'], [/probuje/g, 'próbuje'], [/Recznie/g, 'Ręcznie'],
 ];
 function poLudzkuWskazowka(t) {
   t = String(t || '');
@@ -1586,7 +1590,9 @@ function szacunekKosztu(sekundy) {
   const j = state.jakosc;
   if (!j) return null;
   const s = Number(sekundy);
-  if (s > 0 && j.koszt_sekundy) return Math.max(1, Math.round(s * Number(j.koszt_sekundy)));
+  // rozdzielczość wybiera długość klipu: ≤ prog_1080p_s → 1080p, dłuższy → 720p (backend: fabryka.PROG_1080P_S)
+  const stawka = (s > 0 && j.prog_1080p_s) ? (s <= Number(j.prog_1080p_s) ? j.koszt_sekundy_1080p : j.koszt_sekundy_720p) : j.koszt_sekundy;
+  if (s > 0 && stawka) return Math.max(1, Math.round(s * Number(stawka)));
   return j.koszt_rolki ? Number(j.koszt_rolki) : null;
 }
 
@@ -1641,10 +1647,14 @@ function kartaRolki(p) {
     // szacunek dla rolki, która czeka: długość filmiku × stawka za sekundę (jakosc.koszt_sekundy); bez długości – koszt typowej rolki.
     // Stawki są w kredytach Higgsfield – przy yapper (inna skala) szacunku nie pokazujemy.
     const sz = szacunekKosztu(info.czas);
-    const jak = info.czas ? `${esc(Number(info.czas).toFixed(1).replace('.', ','))} s × ${esc(String(state.jakosc.koszt_sekundy).replace('.', ','))} kr/s` : 'typowa rolka w Twoim zestawie jakości';
+    const j = state.jakosc || {};
+    const stawka = info.czas && j.prog_1080p_s ? (Number(info.czas) <= Number(j.prog_1080p_s) ? j.koszt_sekundy_1080p : j.koszt_sekundy_720p) : j.koszt_sekundy;
+    const jak = info.czas ? `${esc(Number(info.czas).toFixed(1).replace('.', ','))} s × ${esc(String(stawka).replace('.', ','))} kr/s (${esc(p.resolution || '')})` : 'typowa rolka w Twoim zestawie jakości';
     if (sz && nieaktualny) fakty.push(`<span class="uwaga" title="Od ostatniego liczenia (${esc(kredytow(p.koszt))}) zmienił się zestaw „Jakość i koszt”. Szacunek: ${jak}. „Zrób tę rolkę” policzy koszt na nowo, zanim zapyta.">ok. ${esc(liczba(sz))} kr · policz ponownie</span>`);
     else if (sz) fakty.push(`<span title="Szacunek: ${jak}. Dokładną cenę policzy „Ile kosztuje?”.">ok. ${esc(liczba(sz))} kr</span>`);
   }
+  if (p.resolution && p.zrodlo) fakty.push(`<span title="Rozdzielczość wybiera długość klipu: ≤8 s → 1080p, dłuższe → 720p">${esc(p.resolution)}</span>`);
+  if (p.zapas_opis) fakty.push(`<span class="ok rolka-zapas" title="Seedance odrzucił tę rolkę (filtr NSFW), więc zrobił ją zapasowy model (yapper.so). Koszt w kredytach yapper.">${esc(p.zapas_opis)}</span>`);
   if (p.audio_nazwa || p.audio) fakty.push(`${ikona('audio')}z głosem`);
   if (p.lipsync_plik) fakty.push('usta dopasowane');
   if (p.telegram_wyslano) fakty.push(`<span class="ok" title="Ta rolka poleciała już na telefon">${ikona('ok')}wysłane na telefon</span>`);
@@ -1702,8 +1712,15 @@ function kartaRolki(p) {
   }
   if (p.lipsync_url) menu.push(`<a class="btn btn-maly" href="${esc(p.lipsync_url)}" target="_blank" rel="noopener">Otwórz wersję z dopasowanymi ustami</a>`);
   if (telefon && p.telegram_wyslano) menu.push(przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon jeszcze raz`));
-  menu.push(przyciskRolki('usun-pomysl', id, 'Usuń', 'btn-zly'));
+  if (status === 'w_toku') menu.push(przyciskRolki('przerwij-pomysl', id, 'Przestań czekać (sprawdziłem w apce)', 'btn-zly'));
+  else menu.push(przyciskRolki('usun-pomysl', id, 'Usuń', 'btn-zly'));
   let powod = '';
+  if (status === 'w_toku') {
+    const maJob = !!(p.w_toku && p.w_toku.job_id);
+    powod = maJob
+      ? `<div class="rolka-meta"><b>Generuje się</b> u dostawcy${p.w_toku_opis ? ` (${esc(p.w_toku_opis)})` : ''}. Możesz zamknąć panel – fabryka dokończy tę rolkę sama po ponownym uruchomieniu (ten sam job, bez drugiej opłaty).</div>`
+      : `<div class="rolka-meta"><b>Wysyłanie</b> do dostawcy${p.w_toku_opis ? ` (${esc(p.w_toku_opis)})` : ''} – numer joba jeszcze niepotwierdzony. Fabryka sprawdza, czy rolka powstała, i <b>nie wyśle jej drugi raz</b> sama.</div>`;
+  }
   const filtr = status === 'blad' ? (p.powod === 'nsfw' || p.powod === 'ip' ? p.powod : (p.powod ? null : (/nsfw/i.test(p.notatki || '') ? 'nsfw' : (/ip_detected/i.test(p.notatki || '') ? 'ip' : null)))) : null;
   if (filtr === 'nsfw') {
     // odrzucone przez filtr treści: wyraźna plakietka + jedno zdanie + link do Pomocy (czemu i co z tym zrobić)
@@ -1711,7 +1728,14 @@ function kartaRolki(p) {
   } else if (filtr === 'ip') {
     powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}model wykrył znaną postać/markę</span><span>W filmiku, na zdjęciu albo w prompcie jest coś, co wygląda jak znana osoba, logo albo marka. Wrzuć inny fragment albo zasłoń logo. <a href="#pomoc/niewyszla">Co zrobić? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
   } else if (status === 'blad' && p.notatki) powod = `<div class="rolka-powod"><b>Dlaczego:</b> ${esc(prostyBlad(p.notatki))}${state.pelny ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
-  else if (p.notatki && state.pelny) powod = `<div class="rolka-meta">${esc(p.notatki)}</div>`;
+  else if (status !== 'w_toku' && p.notatki && state.pelny) powod = `<div class="rolka-meta">${esc(p.notatki)}</div>`;
+  if (filtr) {
+    // zapas po NSFW (yapper/Wan): czemu nie ruszył albo co dał – z notatek i listy prób
+    const zp = /zapas (?:po NSFW )?pominiety:?\s*(.*)$/i.exec(p.notatki || '');
+    const proby = (p.proby || []).filter(x => Number(x.krok) > 0);
+    if (zp) powod += `<div class="rolka-meta">Zapas (Wan) nie ruszył: ${esc(zp[1].slice(0, 300))}</div>`;
+    else if (proby.length) powod += `<div class="rolka-meta">Zapas też nie przeszedł: ${proby.map(x => `${esc(x.model || '?')} – ${esc(x.status || '?')}`).join(', ')}</div>`;
+  }
   return `<article class="rolka" data-id="${id}">
     ${miniatura}
     <div class="rolka-tresc">
@@ -1754,19 +1778,30 @@ function kosztZWyniku(z, id) {
   const w = poz.find(x => Array.isArray(x) && Number(x[0]) === id);
   return w && w[1] !== null && w[1] !== undefined ? Number(w[1]) : null;
 }
+// Kto wycenił rolkę (trzeci element pozycji): 'yapper' = zapas po NSFW – kredyty yapper.so, inna skala niż Higgsfield.
+function dostawcaZWyniku(z, id) {
+  const poz = (z && z.wynik && Array.isArray(z.wynik.pozycje)) ? z.wynik.pozycje : [];
+  const w = poz.find(x => Array.isArray(x) && Number(x[0]) === id);
+  return w && w[2] ? String(w[2]) : null;
+}
 
 async function generujPomysl(id) {
   const p = state.pomysly.find(x => Number(x.id) === id);
   if (p && !p.prompt_higgsfield) { toast('Ta rolka nie ma promptu – wpisz go (więcej → Wpisz prompt) i zapisz.', 'uwaga'); return; }
   if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
   let koszt = p && p.koszt !== null && p.koszt !== undefined ? Number(p.koszt) : null;
-  if (koszt === null || kosztNieaktualny(p)) {
+  let zapas = false;
+  if (koszt === null || kosztNieaktualny(p) || (p && p.krok_startowy)) {
     // brak kosztu albo koszt sprzed zmiany zestawu „Jakość i koszt” – liczymy na nowo (tanie, ~12 s), żeby pytać o prawdziwą kwotę
     const z = await akcjaCzekaj({ typ: 'koszt', ids: [id] }, 'liczę koszt', true);
     if (!z) return;
     koszt = z.blad ? null : kosztZWyniku(z, id);
+    zapas = dostawcaZWyniku(z, id) === 'yapper' && (state.stan && state.stan.dostawca) !== 'yapper';
   }
-  const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc: trescKosztu(koszt, 1, koszt === null ? 0 : 0), ok: 'Zrób' });
+  const tresc = zapas
+    ? `<p>Zapas po NSFW: rolka pójdzie na <b>yapper.so (Wan 3.0)</b>${koszt !== null ? ` za ok. <b>${esc(liczba(koszt))} kredytów yapper</b>` : ''} – to inne kredyty niż Higgsfield. Pilnuje tego dzienny limit yappera.</p><p class="dialog-uwaga">To wyda kredyty yapper.so.</p>`
+    : trescKosztu(koszt, 1, koszt === null ? 0 : 0);
+  const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc, ok: 'Zrób' });
   if (!w) return;
   await akcja({ typ: 'generuj', ids: [id] }, 'robię rolkę');
 }
@@ -1786,7 +1821,8 @@ async function taniPodglad(id) {
 }
 
 async function ponowPomysl(id) {
-  await api(`/api/pomysly/${id}/ponow`, 'POST', {});
+  const d = await api(`/api/pomysly/${id}/ponow`, 'POST', {});
+  if (d && d.od_zapasu) toast('Ta rolka odpadła na filtrze NSFW – tym razem spróbuję od razu na zapasowym modelu (yapper.so, Wan 3.0).', 'info');
   await ladujRolki(false);
   odswiez();
   await generujPomysl(id);
@@ -1811,6 +1847,20 @@ async function zapiszPrompt(id) {
   state.otwartePrompty.delete(id);
   toast('Prompt zapisany.', 'ok');
   renderRolki();
+  odswiez();
+}
+
+// Rolka w toku, która utknęła (np. bez numeru joba): user sprawdza w apce i świadomie przestaje czekać.
+async function przerwijPomysl(id) {
+  const w = await potwierdz({
+    tytul: 'Przestać czekać na tę rolkę?',
+    tresc: '<p>Fabryka przestanie sprawdzać tę rolkę i oznaczy ją jako „nie wyszło”.</p><p><b>Najpierw sprawdź w apce Higgsfield</b> (lista generacji), czy rolka nie powstała – kredyty mogły już zejść. Jeśli powstała, pobierz ją stamtąd.</p><p class="dialog-uwaga">„Spróbuj jeszcze raz” po tym zrobi NOWĄ, płatną generację.</p>',
+    ok: 'Przestań czekać', klasa: 'btn-zly',
+  });
+  if (!w) return;
+  await api(`/api/pomysly/${id}/przerwij`, 'POST', { potwierdzam: true });
+  toast('Przestałem czekać – rolka jest teraz „nie wyszło”.', 'info');
+  await ladujRolki(false);
   odswiez();
 }
 
@@ -2164,6 +2214,7 @@ function wypelnijFormularz(form, dane, tylkoPodane = false) {
     else if (el.type === 'radio') el.checked = String(el.value) === String(v === null || v === undefined ? '' : v);
     else if (el.dataset.typ === 'tri') el.value = v === null || v === undefined ? '' : String(v);
     else if (el.dataset.typ === 'json') el.value = v && typeof v === 'object' && Object.keys(v).length ? JSON.stringify(v) : '';
+    else if (el.dataset.typ === 'lista-json') ustawSelectWartosc(el, JSON.stringify(Array.isArray(v) ? v : []));   // zapas_nsfw
     else if (el.tagName === 'SELECT') ustawSelectWartosc(el, v);
     else if (v === null || v === undefined) el.value = '';
     else el.value = typeof v === 'object' ? JSON.stringify(v) : String(v);
@@ -2963,6 +3014,7 @@ document.addEventListener('click', async e => {
       case 'lipsync-pomysl': await otworzLipsyncDialog(id); break;
       case 'podpis': await akcja({ typ: 'podpis', id }, 'dobieram podpis'); break;
       case 'usun-pomysl': await usunPomysl(id); break;
+      case 'przerwij-pomysl': await przerwijPomysl(id); break;
       case 'zapisz-prompt': await zapiszPrompt(id); break;
       // zdjęcia, lipsync
       case 'fokus-zdjecia': { const inp = $('#zd-prompt'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } break; }

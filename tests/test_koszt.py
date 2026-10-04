@@ -14,14 +14,17 @@ def _wrzuc(slug, nazwa, czas):
 
 
 def test_szacunek_kosztu_i_presety():
+    # rozdzielczosc wybiera dlugosc: <= 8 s -> 1080p (12 kr/s), dluzej -> 720p (7,5 kr/s) - ustawienie resolution nie gra roli
     assert fabryka.szacunek_kosztu_rolki({"resolution": "720p", "max_sekund_rolki": 15}) == 112
-    assert fabryka.szacunek_kosztu_rolki({"resolution": "1080p", "max_sekund_rolki": 10}) == 120
-    assert fabryka.szacunek_kosztu_rolki({"resolution": "720p"}, 6) == 45           # zmierzone: 6 s 720p = 45 kr
-    assert fabryka.szacunek_kosztu_rolki({"resolution": "dziwne", "max_sekund_rolki": 4}) == 30   # nieznana -> stawka 720p
+    assert fabryka.szacunek_kosztu_rolki({"resolution": "1080p", "max_sekund_rolki": 10}) == 75
+    assert fabryka.szacunek_kosztu_rolki({"resolution": "720p"}, 6) == 72           # zmierzone: 6,04 s 1080p = 73 kr
+    assert fabryka.szacunek_kosztu_rolki({"resolution": "1080p", "max_sekund_rolki": 8}) == 96
+    assert fabryka.szacunek_kosztu_rolki({"resolution": "dziwne", "max_sekund_rolki": 4}) == 48
     assert fabryka.max_sekund_rolki({"max_sekund_rolki": 99}) == 30 and fabryka.max_sekund_rolki({"max_sekund_rolki": 1}) == 4
     assert fabryka.max_sekund_rolki({"max_sekund_rolki": "zle"}) == 30 and fabryka.max_sekund_rolki({}) == 30
     assert fabryka.preset_jakosci({"resolution": "720p", "max_sekund_rolki": 10}) == "oszczednie"
-    assert fabryka.preset_jakosci({"resolution": "1080p", "max_sekund_rolki": 15}) == "najlepiej"
+    assert fabryka.preset_jakosci({"resolution": "1080p", "max_sekund_rolki": 8}) == "najlepiej"
+    assert fabryka.preset_jakosci({"resolution": "1080p", "max_sekund_rolki": 15}) == "wlasne"
     assert fabryka.preset_jakosci({"resolution": "480p", "max_sekund_rolki": 15}) == "wlasne"
     assert baza.USTAWIENIA_DOMYSLNE["max_sekund_rolki"] == 15 and fabryka.preset_jakosci(baza.USTAWIENIA_DOMYSLNE) == "normalnie"
 
@@ -29,11 +32,17 @@ def test_szacunek_kosztu_i_presety():
 def test_jakosc_i_koszt_persony(modelka):
     j = fabryka.jakosc_i_koszt(modelka)
     assert j["preset"] == "normalnie" and j["koszt_rolki"] == 112 and j["za_drogo"] is False and j["max_kredyty_na_rolke"] == 150
-    assert j["presety"]["oszczednie"]["koszt_rolki"] == 75 and j["presety"]["najlepiej"]["koszt_rolki"] == 180
+    assert j["resolution"] == "720p (≤8 s → 1080p)" and j["zasada_rozdzielczosci"] == "≤8 s → 1080p, dłuższe → 720p"
+    assert j["koszt_sekundy_1080p"] == 12.0 and j["koszt_sekundy_720p"] == 7.5 and j["prog_1080p_s"] == 8.0
+    assert j["presety"]["oszczednie"]["koszt_rolki"] == 75 and j["presety"]["najlepiej"]["koszt_rolki"] == 96
+    assert j["presety"]["najlepiej"]["resolution"] == "1080p"
     fabryka.ustaw_preset_jakosci(modelka, "najlepiej")
     u = baza.ustawienia_modelki(modelka)
-    assert u["resolution"] == "1080p" and u["max_sekund_rolki"] == 15
-    assert fabryka.jakosc_i_koszt(modelka)["za_drogo"] is True        # 180 > max_kredyty_na_rolke 150 - panel ostrzega
+    assert u["resolution"] == "1080p" and u["max_sekund_rolki"] == 8
+    assert fabryka.jakosc_i_koszt(modelka)["za_drogo"] is False       # 1080p/8 s ~ 96 kr < max_kredyty_na_rolke 150
+    baza.zapisz_ustawienia(modelka, max_sekund_rolki=15, max_kredyty_na_rolke=100)
+    assert fabryka.jakosc_i_koszt(modelka)["za_drogo"] is True        # 15 s (720p) ~ 112 kr > 100 - panel ostrzega
+    baza.zapisz_ustawienia(modelka, max_kredyty_na_rolke=150)
     fabryka.ustaw_preset_jakosci(modelka, "oszczednie")
     assert fabryka.jakosc_i_koszt(modelka)["preset"] == "oszczednie"
     try:

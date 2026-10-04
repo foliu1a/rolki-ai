@@ -306,24 +306,51 @@ def test_brak_salda_nie_generuje(bez_mediatool, cli):
 
 # ---------------- powtorki ----------------
 
-def test_powtorka_po_odrzuceniu(bez_mediatool, cli):
-    cli.wyniki = [higgsfield_cli.HiggsfieldBlad("rejected: nsfw")]   # druga proba = sukces
+def test_powtorka_tylko_gdy_nic_nie_poszlo(bez_mediatool, cli, monkeypatch):
+    """Blad PRZED wyslaniem (wgranie filmiku padlo - `generate create` nie ruszyl) -> wysylamy jeszcze raz (powtorki)."""
+    prawdziwy_upload = cli.upload
+    proby = []
+
+    def upload(plik):
+        proby.append(plik)
+        if len(proby) == 1:
+            raise higgsfield_cli.HiggsfieldBlad("request failed (no response received)")
+        return prawdziwy_upload(plik)
+    monkeypatch.setattr(higgsfield_cli, "upload", upload)
     _wrzuc(bez_mediatool, "a.mp4")
     fabryka.main(["skanuj"])
     fabryka.main(["generuj", "--tak"])
-    assert len(cli.generacje) == 2
-    assert baza.pomysl(bez_mediatool, 1)["status"] == "gotowe"
-    assert baza.wydano_dzis() == 45   # odrzucenie nic nie kosztowalo
+    filmik = [x for x in proby if x.endswith("a.mp4")]
+    assert len(filmik) == 2 and len(cli.generacje) == 1          # filmik: pierwsze wgranie padlo, drugie OK; jeden create
+    p = baza.pomysl(bez_mediatool, 1)
+    assert p["status"] == "gotowe" and p.get("w_toku") is None
+    assert baza.wydano_dzis() == 45
+    assert [x["job_id"] for x in p["proby"]] == ["job1"]
 
 
-def test_wszystkie_proby_nieudane(bez_mediatool, cli):
+def test_blad_po_wyslaniu_nie_wysyla_drugi_raz(bez_mediatool, cli):
+    """`generate create` padl PO znaczniku 'wysylam' (job mogl powstac), na liscie go nie ma -> zadnego drugiego wysylania,
+    rolka czeka w toku (wznow_w_toku dokonczy albo poprosi o sprawdzenie w apce)."""
+    cli.wyniki = [higgsfield_cli.HiggsfieldBlad("request failed (no response received)")]
+    _wrzuc(bez_mediatool, "a.mp4")
+    fabryka.main(["skanuj"])
+    fabryka.main(["generuj", "--tak"])
+    assert len(cli.generacje) == 1
+    p = baza.pomysl(bez_mediatool, 1)
+    assert p["status"] == "w_toku" and p["w_toku"]["wysylam"] is True and p["w_toku"]["wysylam_od"] and not p["job_id"]
+    fabryka.main(["generuj", "--tak"])                      # kolejny przebieg: dalej czeka, dalej nic nie wysyla
+    assert len(cli.generacje) == 1 and baza.pomysl(bez_mediatool, 1)["status"] == "w_toku"
+
+
+def test_job_nieudany_nie_jest_wysylany_drugi_raz(bez_mediatool, cli):
+    """Job POWSTAL i padl (failed) - zadnej powtorki (to bylby nowy, platny job); rolka 'blad', 0 kr."""
     cli.wyniki = [{"id": "j", "status": "failed"}] * 3
     _wrzuc(bez_mediatool, "a.mp4")
     fabryka.main(["skanuj"])
     fabryka.main(["generuj", "--tak"])
-    assert len(cli.generacje) == 3      # 1 + powtorki=2
+    assert len(cli.generacje) == 1
     p = baza.pomysl(bez_mediatool, 1)
-    assert p["status"] == "blad" and p["koszt"] == 0
+    assert p["status"] == "blad" and p["koszt"] == 0 and p["powod"] == "inny"
     assert baza.wydano_dzis() == 0
 
 

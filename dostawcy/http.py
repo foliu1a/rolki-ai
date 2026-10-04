@@ -85,8 +85,12 @@ def multipart(url, pola=None, pliki=None, naglowki=None, timeout=900):
 
 
 def wyslij_plik(url, sciezka, naglowki=None, metoda="PUT", timeout=900):
-    """Surowy upload (np. na presigned URL S3)."""
-    typ = mimetypes.guess_type(sciezka)[0] or "application/octet-stream"
+    """Surowy upload (np. na podpisany URL S3/GCS). Naglowki z biletu ida 1:1 - Content-Type z biletu NIE jest nadpisywany
+    zgadywanym typem pliku (jest czescia podpisu; inny = 403). Zgadujemy go tylko, gdy bilet go nie podal."""
+    naglowki = dict(naglowki or {})
+    typ = None
+    if not any(k.lower() == "content-type" for k in naglowki):
+        typ = mimetypes.guess_type(sciezka)[0] or "application/octet-stream"
     with open(sciezka, "rb") as f:
         zawartosc = f.read()
     return zapytanie(metoda, url, naglowki=naglowki, timeout=timeout, surowe_cialo=zawartosc, typ_ciala=typ)

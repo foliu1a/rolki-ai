@@ -19,7 +19,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from datetime import datetime, timezone
 
 import baza
 import dostawcy
@@ -157,6 +159,27 @@ def sprawdz_prompt(slug, ust=None):
     stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
     if (stroje or baza.stroj_domyslny(slug)) and not b:
         uwagi.append("sa zdjecia strojow, ale prompt B (stroj ze zdjecia) jest pusty")
+    uwagi += sprawdz_prompt_wan(slug, ust)
+    return uwagi
+
+
+LIMIT_PROMPTU_WAN = 5000
+
+
+def sprawdz_prompt_wan(slug, ust=None):
+    """Prompt Wan (yapper.prompt albo prompty/wan.txt) - sprawdzany tylko, gdy persona go uzywa (dostawca yapper albo zapas_nsfw):
+    max 5000 znakow, bez skladni @[Image N](image_N) z Higgsfielda."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    if (ust.get("dostawca") or "higgsfield") != "yapper" and not ust.get("zapas_nsfw"):
+        return []
+    wan = baza.prompt_wan(slug)
+    if not wan:
+        return ["brak promptu Wan (prompty/wan.txt albo yapper.prompt) - yapper/zapas po NSFW nie ruszy"]
+    uwagi = []
+    if len(wan) > LIMIT_PROMPTU_WAN:
+        uwagi.append(f"prompt Wan ma {len(wan)} znakow, a Wan przyjmuje max {LIMIT_PROMPTU_WAN}")
+    if _WZORZEC_IMAGE.search(wan):
+        uwagi.append("prompt Wan ma skladnie @[Image N] z Higgsfielda - Wan jej nie zna (pisz 'the reference photos')")
     return uwagi
 
 
@@ -188,6 +211,7 @@ def diagnoza():
             wynik.append({"co": "telegram", "ok": None, "info": "nie podlaczony (opcjonalnie)"})
     except Exception as e:
         wynik.append({"co": "telegram", "ok": False, "info": str(e)})
+    wynik += _diagnoza_yappera()
     for slug in baza.lista_modelek():
         braki = []
         if not baza.sciezki_referencji(slug):
@@ -215,6 +239,32 @@ def diagnoza():
                 wynik.append({"co": f"telefon {slug}", "ok": bool(cid), "info": f"rolki {slug} -> {konto}" if cid else opis})
             except Exception as e:
                 wynik.append({"co": f"telefon {slug}", "ok": False, "info": str(e)})
+    return wynik
+
+
+def _diagnoza_yappera():
+    """yapper: czy klucz dziala (GET /credits) i czy jest dzienny limit - bez niego zapas po NSFW nic nie wyda.
+    Tylko gdy jest klucz albo ktoras persona robi rolki na yapperze / ma zapas_nsfw."""
+    import sekrety
+    uzywa = []
+    for s in baza.lista_modelek():
+        u = baza.ustawienia_modelki(s)
+        if (u.get("dostawca") or "higgsfield") == "yapper" or u.get("zapas_nsfw"):
+            uzywa.append(s)
+    if not sekrety.klucz("yapper") and not uzywa:
+        return []
+    try:
+        from dostawcy import yapper
+        ok, info = yapper.gotowy()
+    except Exception as e:
+        ok, info = False, str(e)
+    wynik = [{"co": "yapper", "ok": ok, "info": info}]
+    limit = baza.limit_dzienny("yapper")
+    if limit:
+        wynik.append({"co": "limit yappera", "ok": True, "info": f"dzis {baza.wydano_dzis('yapper')}/{limit} kr"})
+    else:
+        wynik.append({"co": "limit yappera", "ok": False if uzywa else None,
+                      "info": "nie ustawiony - zapas po NSFW (yapper) nic nie wyda, dopoki go nie ustawisz (Ustawienia -> Limity)"})
     return wynik
 
 
@@ -253,6 +303,8 @@ def stan_modelki(slug):
         "statystyki": st,
         "bez_promptu": [p["id"] for p in nowe if not p.get("prompt_higgsfield")],
         "do_generacji": [p["id"] for p in nowe if p.get("prompt_higgsfield")],
+        "w_toku": [p["id"] for p in baza.pomysly_w_toku(slug)],
+        "zapas_nsfw": [f"{k.get('dostawca')} {k.get('model')}" for k in (ust.get("zapas_nsfw") or []) if isinstance(k, dict)],
         "niezeskanowane": [os.path.basename(z) for z in nowe_zrodla(slug)],
         "wrzutnia": baza.folder_zrodel(slug),
         "gotowe_dir": baza.folder_gotowych(slug),
@@ -278,7 +330,10 @@ def cmd_status(args):
     slug = _slug(args.modelka)
     s = stan_modelki(slug)
     ust = s["ustawienia"]
-    print(f"modelka: {slug}   dostawca: {s['dostawca']}   model: {ust['model']} / {ust['mode']} / {ust['aspect_ratio']} / {ust['resolution']}")
+    print(f"modelka: {slug}   dostawca: {s['dostawca']}   model: {ust['model']} / {ust['mode']} / {ust['aspect_ratio']} / "
+          f"rozdzielczosc: {OPIS_ROZDZIELCZOSCI}")
+    if s.get("w_toku"):
+        print("w toku (job wyslany, dokoncze bez wysylania drugi raz): " + ", ".join(f"#{i}" for i in s["w_toku"]))
     print(f"wrzutnia: {s['wrzutnia']}")
     print(f"gotowe:   {s['gotowe_dir']}   (Media Tool: {'tak' if ust.get('mediatool') else 'nie'})")
     print("pomysly: " + ", ".join(f"{k}={s['statystyki'].get(k, 0)}" for k in baza.STATUSY))
@@ -308,16 +363,48 @@ def cmd_status(args):
 
 MAX_SEKUND_ZRODLA = 30   # Seedance 2.5 edit: twardy limit 30 s; user tnie krocej (max_sekund_rolki), bo koszt rosnie z dlugoscia
 
-# Ile kredytow Higgsfield kosztuje sekunda rolki (video_edit = wejscie + wyjscie). 720p i 1080p zmierzone (6 s: 45 / 72 kr),
-# 480p szacunek z cennika apki. Tylko do podpowiedzi w panelu - prawdziwa cene mowi `generate cost` przed generacja.
+# Ile kredytow Higgsfield kosztuje sekunda rolki (video_edit = wejscie + wyjscie). 720p i 1080p zmierzone (6,04 s: 46 / 73 kr,
+# 10,03 s: 76 / 121 kr - `generate cost` 2026-10-04), 480p szacunek z cennika apki. Tylko do podpowiedzi w panelu - prawdziwa
+# cene mowi `generate cost` przed generacja.
 KR_NA_SEKUNDE = {"480p": 3.5, "720p": 7.5, "1080p": 12.0}
 
-# Gotowe zestawy "Jakosc i koszt" (panel -> Ustawienia): co ustawiaja i ile mniej wiecej kosztuje rolka.
+# Rozdzielczosc wybiera dlugosc klipu (zasada usera 2026-10-04, Higgsfield Seedance i yapper Wan): klip <= 8 s -> 1080p,
+# dluzszy -> 720p. Liczy sie dlugosc (pocietego) klipu w chwili generacji; ustawienie persony `resolution` dziala tylko dla
+# pomyslow bez filmiku. 1080p/8 s to ok. 100 kr - miesci sie w max_kredyty_na_rolke 150.
+PROG_1080P_S = 8.0
+OPIS_ROZDZIELCZOSCI = "≤8 s → 1080p, dłuższe → 720p"
+
+# Gotowe zestawy "Jakosc i koszt" (panel -> Ustawienia): dlugosc rolki (ciecie) i rozdzielczosc dla pomyslow bez filmiku.
+# Rozdzielczosc rolki z filmiku wybiera zasada PROG_1080P_S, dlatego "najlepiej" = rolki do 8 s (zawsze 1080p).
 PRESETY_JAKOSCI = {
     "oszczednie": {"resolution": "720p", "max_sekund_rolki": 10},
     "normalnie": {"resolution": "720p", "max_sekund_rolki": 15},
-    "najlepiej": {"resolution": "1080p", "max_sekund_rolki": 15},
+    "najlepiej": {"resolution": "1080p", "max_sekund_rolki": 8},
 }
+
+
+def rozdzielczosc_dla_czasu(sekundy):
+    """Zasada usera: klip <= 8 s -> '1080p', dluzszy -> '720p'."""
+    return "1080p" if float(sekundy) <= PROG_1080P_S + 1e-9 else "720p"
+
+
+def czas_klipu(p):
+    """Dlugosc (pocietego) filmiku zrodlowego pomyslu w sekundach albo None (pomysl bez filmiku / nieznana)."""
+    if not p.get("zrodlo"):
+        return None
+    try:
+        czas = float((p.get("info_zrodla") or {}).get("czas") or 0)
+    except (TypeError, ValueError):
+        return None
+    return czas if czas > 0 else None
+
+
+def rozdzielczosc_rolki(p, ust):
+    """Rozdzielczosc tej rolki: z dlugosci klipu (<= 8 s -> 1080p, dluzszy -> 720p); bez filmiku - ustawienie persony."""
+    czas = czas_klipu(p)
+    if czas:
+        return rozdzielczosc_dla_czasu(czas)
+    return ust.get("resolution") or "720p"
 
 
 def max_sekund_rolki(ust):
@@ -330,10 +417,10 @@ def max_sekund_rolki(ust):
 
 
 def szacunek_kosztu_rolki(ust, sekundy=None):
-    """Orientacyjny koszt jednej rolki w kredytach Higgsfield (dlugosc x stawka za sekunde dla rozdzielczosci)."""
+    """Orientacyjny koszt jednej rolki w kredytach Higgsfield: dlugosc x stawka za sekunde rozdzielczosci, ktora wybierze
+    zasada <= 8 s -> 1080p (bez dlugosci - typowa rolka max_sekund_rolki)."""
     sek = float(sekundy) if sekundy else max_sekund_rolki(ust)
-    stawka = KR_NA_SEKUNDE.get(str(ust.get("resolution") or "720p"), KR_NA_SEKUNDE["720p"])
-    return int(round(sek * stawka))
+    return int(round(sek * KR_NA_SEKUNDE[rozdzielczosc_dla_czasu(sek)]))
 
 
 def preset_jakosci(ust):
@@ -344,16 +431,25 @@ def preset_jakosci(ust):
     return "wlasne"
 
 
+def _opis_rozdzielczosci(max_s):
+    """Co wyjdzie z rolek do max_s sekund: '1080p' (wszystkie <= 8 s) albo '720p (≤8 s → 1080p)'."""
+    return "1080p" if max_s <= PROG_1080P_S else "720p (≤8 s → 1080p)"
+
+
 def jakosc_i_koszt(slug, ust=None):
-    """Dla panelu: aktualny zestaw, szacunek kosztu rolki i tabela zestawow z kosztami."""
+    """Dla panelu: aktualny zestaw, szacunek kosztu rolki i tabela zestawow z kosztami. Rozdzielczosc = zasada dlugosci klipu."""
     ust = ust or baza.ustawienia_modelki(slug)
+    max_s = max_sekund_rolki(ust)
     koszt = szacunek_kosztu_rolki(ust)
     _, max_na_rolke = bezpiecznik(ust, "higgsfield")
     return {
-        "preset": preset_jakosci(ust), "resolution": ust.get("resolution"), "max_sekund_rolki": max_sekund_rolki(ust),
-        "koszt_rolki": koszt, "koszt_sekundy": KR_NA_SEKUNDE.get(str(ust.get("resolution") or "720p"), KR_NA_SEKUNDE["720p"]),
+        "preset": preset_jakosci(ust), "resolution": _opis_rozdzielczosci(max_s), "max_sekund_rolki": max_s,
+        "koszt_rolki": koszt, "koszt_sekundy": KR_NA_SEKUNDE[rozdzielczosc_dla_czasu(max_s)],
+        "koszt_sekundy_1080p": KR_NA_SEKUNDE["1080p"], "koszt_sekundy_720p": KR_NA_SEKUNDE["720p"],
+        "prog_1080p_s": PROG_1080P_S, "zasada_rozdzielczosci": OPIS_ROZDZIELCZOSCI,
         "za_drogo": koszt > max_na_rolke, "max_kredyty_na_rolke": max_na_rolke,
-        "presety": {n: dict(p, koszt_rolki=szacunek_kosztu_rolki(p, p["max_sekund_rolki"])) for n, p in PRESETY_JAKOSCI.items()},
+        "presety": {n: dict(p, resolution=_opis_rozdzielczosci(p["max_sekund_rolki"]),
+                            koszt_rolki=szacunek_kosztu_rolki(p, p["max_sekund_rolki"])) for n, p in PRESETY_JAKOSCI.items()},
     }
 
 
@@ -551,10 +647,11 @@ def zlecenie(slug, p, ust=None):
         "pomysl": p.get("id"),
         "prompt": p.get("prompt_higgsfield") or "",
         "video": p["zrodlo"] if ma_zrodlo else None,
+        "video_czas": czas_klipu(p),
         "images": obrazy,
         "duration": int(dur) if dur else None,
         "aspect_ratio": ust.get("aspect_ratio"),
-        "resolution": ust.get("resolution"),
+        "resolution": rozdzielczosc_rolki(p, ust),      # <= 8 s -> 1080p, dluzszy -> 720p (oba dostawcy)
         "model": ust.get("model"),
         "mode": ust.get("mode") if ma_zrodlo else (ust.get("mode_bez_zrodla") or ust.get("mode")),
         "generate_audio": ust.get("generate_audio"),
@@ -563,6 +660,8 @@ def zlecenie(slug, p, ust=None):
         "dostawca": ust.get("dostawca") or "higgsfield",
         "yapper": dict(ust.get("yapper") or {}),
     }
+    # yapper (Wan): wlasny krotki prompt persony (yapper.prompt albo prompty/wan.txt) - bez @[Image N], max 5000 znakow
+    z["yapper"]["prompt"] = baza.prompt_wan(slug)
     return z
 
 
@@ -638,7 +737,8 @@ def _kandydaci(slug, args):
 # ---------------- koszt ----------------
 
 def koszt(slug, ids=None, limit=None, log=None):
-    """Szacunek kredytow (zapisuje p['koszt']). Zwraca {"razem": n, "pozycje": [(id, koszt|None)]}."""
+    """Szacunek kredytow (zapisuje p['koszt']). Zwraca {"razem": n, "pozycje": [(id, koszt|None, dostawca)]}.
+    Rolka, ktora po NSFW zaczyna od zapasu (krok_startowy > 0, "Ponow"), jest wyceniana u dostawcy zapasu (darmowy dryRun yappera)."""
     log = log or _log
     ust = baza.ustawienia_modelki(slug)
     d = dostawcy.dostawca(ust.get("dostawca"))
@@ -648,16 +748,33 @@ def koszt(slug, ids=None, limit=None, log=None):
         log("Nic do policzenia (brak pomyslow 'nowy' z promptem).")
         return wynik
     for p in lista:
+        krok = _krok_startowy(p, ust)
+        if krok:
+            try:
+                zapas = _przygotuj_zapas(slug, p, ust, krok, log, tylko_wycena=True)
+            except _BezZapasu as e:
+                log(f"#{p['id']}: zapas po NSFW - {e}")
+                zapas = None
+            if not zapas:
+                wynik["pozycje"].append((p["id"], None, "yapper"))
+                continue
+            dk, z, k = zapas
+            log(f"#{p['id']}: {k} kr ({dk.NAZWA} {_model(dk, z)}, zapas po NSFW)   {p['opis']}")
+            wynik["pozycje"].append((p["id"], k, dk.NAZWA))
+            wynik["dostawca"] = dk.NAZWA
+            wynik["razem"] += k or 0
+            continue
         try:
-            k = d.koszt(zlecenie(slug, p, ust))
+            z = zlecenie(slug, p, ust)
+            k = d.koszt(z)
         except dostawcy.BladDostawcy as e:
             log(f"#{p['id']}: [BLAD] {e}")
-            wynik["pozycje"].append((p["id"], None))
+            wynik["pozycje"].append((p["id"], None, d.NAZWA))
             continue
         wynik["razem"] += k or 0
-        wynik["pozycje"].append((p["id"], k))
-        baza.aktualizuj_pomysl(slug, p["id"], koszt=k)
-        log(f"#{p['id']}: {k if k is not None else '?'} kr   {p['opis']}")
+        wynik["pozycje"].append((p["id"], k, d.NAZWA))
+        baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
+        log(f"#{p['id']}: {k if k is not None else '?'} kr ({z['resolution']})   {p['opis']}")
     log(f"razem: {wynik['razem']} kr")
     return wynik
 
@@ -669,12 +786,43 @@ def cmd_koszt(args):
 
 
 # ---------------- generacja ----------------
+# Jedna rolka = proba (albo kilka - zapas po NSFW). Proba: znacznik w_toku w pomysle -> wyslanie BEZ czekania (generate create /
+# POST /processes) -> job_id zapisany od razu -> odpytywanie TEGO joba (0 kr). Blad sieci, timeout, STOP, zamkniety panel = job
+# dalej sie robi i jest dokanczany pozniej (wznow_w_toku) - nigdy nie wysylamy drugiego. Ponowne WYSLANIE (powtorki) tylko gdy
+# job na pewno nie powstal. Koszt = z joba (wycena / creditsUsed), nie z roznicy salda.
+
+ODSTEP_ODPYTYWANIA_S = 10    # co ile sprawdzamy job (generate get / GET /processes/{id}) - 0 kr
+MAX_GODZIN_W_TOKU = 24       # job, ktory po tylu godzinach dalej "trwa", konczymy jako blad (bez wysylania nowego)
+CZAS_NA_WYSLANIE_S = 180     # yapper (Idempotency-Key): po tylu s bez procesu wraca do kolejki - ten sam klucz = ten sam proces
+OKNO_NIEPEWNEGO_WYSLANIA_S = 60 * 60   # Higgsfield (bez klucza): create zwrocil blad PO wyslaniu / wysylanie przerwane -
+                                       # tyle czekamy, az job pojawi sie na `generate list` (dluzej niz najwolniejszy Seedance);
+                                       # potem NIE wysylamy drugi raz, tylko rolka 'nie wyszla' z prosba o sprawdzenie w apce
+POWODY_ZAPASU = ("nsfw", "ip")
+SPRAWDZ_W_APCE = ("Sprawdz w apce Higgsfield (lista generacji), czy ta rolka nie powstala - jesli tak, pobierz ja stamtad; "
+                  "jesli nie - kliknij 'Sprobuj jeszcze raz'.")
+_WYSYLANIE = set()           # (slug, pid) w trakcie wysylania - wtedy panelu nie wolno zamknac (osierocony job = podwojna oplata)
+_WYSYLANIE_LOCK = threading.Lock()
+
+
+class JobTrwa(Exception):
+    """Czekanie przerwane (limit czasu albo nie wiadomo, czy job powstal) - pomysl zostaje w_toku, dokonczymy go pozniej."""
+
+
+class _BezZapasu(Exception):
+    """Zapas u tego dostawcy jest teraz niemozliwy (brak/wyczerpany limit dzienny, saldo, odmowa) - pomijamy jego kroki."""
+
+
+def trwa_wysylanie():
+    """Czy fabryka wlasnie wysyla rolke do dostawcy (upload + create). Panel nie zamyka sie w tym oknie."""
+    with _WYSYLANIE_LOCK:
+        return bool(_WYSYLANIE)
+
 
 def bezpiecznik(ust, dostawca="higgsfield"):
     """(min_kredyty, max_kredyty_na_rolke) dla dostawcy. yapper ma wlasne (kredyty yapper to inna skala)."""
     if dostawca == "yapper":
         y = ust.get("yapper") or {}
-        return int(y.get("min_kredyty") or 0), int(y.get("max_kredyty_na_rolke") or 1000)
+        return int(y.get("min_kredyty") or 0), int(y.get("max_kredyty_na_rolke") or 400)
     return int(ust["min_kredyty"]), int(ust["max_kredyty_na_rolke"])
 
 
@@ -682,9 +830,10 @@ def powod_odrzucenia(status, blad=""):
     """Klasa niepowodzenia generacji: 'nsfw' (filtr tresci Higgsfield/Seedance), 'ip' (znana postac/marka),
     'inny' albo None (nic nie wiadomo)."""
     s, b = (status or "").lower(), (blad or "").lower()
-    if s in ("nsfw", "moderated") or "nsfw" in b or "moderat" in b or "content policy" in b or "safety" in b or "visual restriction" in b:
+    if s in ("nsfw", "moderated") or any(x in b for x in ("nsfw", "moderat", "content policy", "content_policy", "policy_violation",
+                                                          "safety", "visual restriction", "flagged")):
         return "nsfw"
-    if s == "ip_detected" or "ip_detected" in b or "copyright" in b or "not eligible" in b:
+    if s == "ip_detected" or any(x in b for x in ("ip_detected", "copyright", "celebrity", "public figure")):
         return "ip"
     return "inny" if (s or b) else None
 
@@ -744,30 +893,581 @@ def wskazowki_nsfw(slug, dni=14):
                      "- te same zdjecia ida do kazdej rolki, wiec jedno ryzykowne psuje wszystkie.")
     wskazowki.append("Filmik zrodlowy: taniec z bliskim kontaktem, skapy stroj, prysznic/lozko, bron lub krew w kadrze - filtr nie patrzy "
                      "na kontekst. Sprobuj innego fragmentu albo krotszego ujecia (potnij w panelu: dziel_dlugie).")
-    wskazowki.append("Gdy odrzuca tylko czasem: to filtr WYNIKU (losowy) - jedna powtorka ma sens, wiecej nie. Fabryka po dwoch "
-                     "odrzuceniach z rzedu przestaje probowac.")
+    wskazowki.append("Fabryka nie powtarza odrzuconej rolki na tym samym modelu (filtr dalby to samo). Z wlaczonym zapasem po NSFW "
+                     "(yapper, Wan 3.0) probuje tam - inny model, inny filtr. Recznie: 'Sprobuj jeszcze raz'.")
     wskazowki.append("Jesli masz pewnosc, ze to pomylka filtra: Higgsfield -> Help Center -> zglos false positive (oddaja kredyty, "
                      "ale decyzji filtra nie cofaja).")
     return {"odrzucone": len(odrzucone), "odrzucone_ostatnio": len(ostatnio), "dni": dni, "slowa": slowa, "wskazowki": wskazowki}
 
 
+def _model(d, z):
+    """Nazwa modelu proby: Higgsfield - job_type (seedance_2_5), yapper - yapper.model (wan-3.0-prime)."""
+    return (z.get("yapper") or {}).get("model") if d.NAZWA == "yapper" else (z.get("model") or "seedance_2_5")
+
+
+def _teraz_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _wiek_s(iso):
+    """Ile sekund temu (czas ISO z markera); None, gdy nie da sie odczytac."""
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds()
+
+
+def _spij(sekundy, stop):
+    """Pauza miedzy odpytaniami; STOP przerywa ja od razu."""
+    for _ in range(max(1, int(sekundy))):
+        if stop is not None and stop.is_set():
+            return
+        time.sleep(1)
+
+
+_KODY_TRWALE = ("insufficient_credits", "invalid_request", "validation_error", "missing_scope", "idempotency_conflict",
+                "unsupported_filter_combination", "not_found")
+_TEKSTY_TRWALE = ("nie jest zalogowane", "workspace", "nie wybrano modelu", "insufficient", "not enough credits", "za malo kredytow",
+                  "invalid_request", "invalid request", "validation", "invalid param", "invalid value", "unknown flag",
+                  "required flag", "brak klucza", "odmawia startu", "skladnie @[image", "znakow, a model przyjmuje")
+
+
+def _blad_trwaly(e):
+    """Blad, ktory znaczy, ze job NIE powstal i powtorka nic nie da (klucz, logowanie, brak kredytow, zle zapytanie,
+    walidacja) - bez powtorek i bez czekania na job."""
+    if e is None:
+        return False
+    if isinstance(e, dostawcy.BrakKlucza):
+        return True
+    if getattr(e, "status", None) in (400, 401, 402, 403, 404, 409, 422):
+        return True
+    if getattr(e, "kod", "") in _KODY_TRWALE:
+        return True
+    t = str(e).lower()
+    return any(x in t for x in _TEKSTY_TRWALE)
+
+
+def _krok_startowy(p, ust):
+    """Od ktorego kroku zaczac rolke: 0 = dostawca persony; 1.. = kroki zapas_nsfw (np. 'Ponow' po NSFW)."""
+    try:
+        k = int(p.get("krok_startowy") or 0)
+    except (TypeError, ValueError):
+        k = 0
+    return k if 0 < k <= len(ust.get("zapas_nsfw") or []) else 0
+
+
+def _numer_proby(p, dostawca, model):
+    """Kolejny numer proby tego modelu dla pomyslu (do Idempotency-Key) - licza sie tylko proby, ktore dostaly job."""
+    return 1 + sum(1 for w in (p.get("proby") or []) if w.get("dostawca") == dostawca and w.get("model") == model and w.get("job_id"))
+
+
+def _wyslij(slug, p, d, z, k, krok, ust, log):
+    """Wysyla jedna probe i zapisuje job_id w pomysle (status w_toku). Ponowne wyslanie TYLKO gdy job na pewno nie powstal:
+    yapper - ten sam Idempotency-Key oddaje ten sam proces; Higgsfield - najpierw szukamy joba na `generate list` po wgranym
+    filmiku. Zwraca wynik zlec() z job_id (albo pseudo-wynik odrzucenia NSFW/IP przy wysylaniu). Rzuca BladDostawcy
+    (nie wyslano mimo powtorek) albo JobTrwa (nie wiadomo, czy job powstal - sprawdzimy przy nastepnym przebiegu)."""
+    pid = p["id"]
+    model = _model(d, z)
+    klucz = f"rolki-{slug}-{pid}-{model}-{_numer_proby(p, d.NAZWA, model)}"
+    ile = 1 + max(0, int(ust.get("powtorki") or 0))
+    for proba in range(1, ile + 1):
+        baza.zacznij_w_toku(slug, pid, dostawca=d.NAZWA, model=model, krok=krok, klucz=klucz, koszt=k,
+                            resolution=z.get("resolution"))
+
+        def znacznik(**pola):
+            # dostawca wola to tuz PRZED nieodwracalnym wyslaniem (wszystkie pliki juz wgrane): od tej chwili job MOZE powstac
+            if pola.get("wysylam"):
+                pola.setdefault("wysylam_od", _teraz_iso())
+            baza.ustaw_w_toku(slug, pid, **pola)
+        with _WYSYLANIE_LOCK:
+            _WYSYLANIE.add((slug, pid))
+        try:                                    # okno "wysylania" (panel sie nie zamyka) trwa az do zapisu job_id
+            try:
+                job = d.zlec(z, klucz=klucz, znacznik=znacznik, log=log)
+                blad = None
+            except dostawcy.BladDostawcy as e:
+                job, blad = None, e
+            if job is None:
+                powod = powod_odrzucenia("", str(blad))
+                if powod in POWODY_ZAPASU:
+                    # odrzucone juz przy wysylaniu (np. prompt) - powtorka da to samo
+                    return {"job_id": None, "status": "nsfw" if powod == "nsfw" else "ip_detected", "urls": [], "blad": str(blad),
+                            "surowe": {}}
+                marker = baza.pomysl(slug, pid).get("w_toku") or {}
+                if marker.get("wysylam") and not getattr(d, "IDEMPOTENTNY", False) and not _blad_trwaly(blad):
+                    # Higgsfield: create MOGL dotrzec mimo bledu - szukamy joba; nie ma -> JobTrwa (NIGDY drugie wysylanie)
+                    job = _szukaj_wyslanego(slug, p, d, z, model, klucz, marker, blad, log)
+            if job is not None:
+                baza.ustaw_w_toku(slug, pid, job_id=job["job_id"], etap="czeka", wyslano=_teraz_iso())
+                return job
+        finally:
+            with _WYSYLANIE_LOCK:
+                _WYSYLANIE.discard((slug, pid))
+        # job nie powstal (wyslanie nie ruszylo albo blad trwaly): znacznik won, pomysl wraca do stanu sprzed proby
+        baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None)
+        log(f"#{pid}: wyslanie nie wyszlo ({str(blad)[:200]})")
+        if _blad_trwaly(blad) or proba >= ile:
+            raise blad
+        log(f"#{pid}: job nie powstal - wysylam jeszcze raz za 10 s (proba {proba + 1}/{ile})")
+        time.sleep(10)
+    raise dostawcy.BladDostawcy("wyslanie nie wyszlo")
+
+
+def _szukaj_wyslanego(slug, p, d, z, model, klucz, marker, blad, log):
+    """Higgsfield: `generate create` zwrocil blad, ale znacznik 'wysylam' juz byl - job MOGL powstac. Sprawdzamy liste
+    (po 5 s i po kolejnych 15 s); znaleziony = TEN job. Nie ma go -> JobTrwa: NIE wysylamy drugi raz (lista bywa opozniona),
+    rolka zostaje w toku i wznow_w_toku szuka dalej przez OKNO_NIEPEWNEGO_WYSLANIA_S, potem prosi o sprawdzenie w apce."""
+    pid = p["id"]
+    for pauza in (5, 15):
+        time.sleep(pauza)
+        try:
+            znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=z.get("prompt"),
+                                  od=marker.get("wysylam_od") or marker.get("od"), klucz=klucz,
+                                  pomin=[w.get("job_id") for w in (p.get("proby") or [])])
+        except dostawcy.BladDostawcy as e:
+            log(f"#{pid}: nie moge sprawdzic listy jobow ({e})")
+            break
+        if znaleziony:
+            _zdarzenie(log, slug, "info", f"#{pid}: job {znaleziony['job_id']} jednak powstal - czekam na niego (bez drugiego wysylania)",
+                       pomysl=pid)
+            return znaleziony
+    _zdarzenie(log, slug, "uwaga", f"#{pid}: wysylanie zwrocilo blad ({str(blad)[:200]}), a joba (jeszcze) nie widac na liscie "
+               f"Higgsfield - NIE wysylam drugi raz. Rolka czeka w toku; sprawdzam przy kolejnych przebiegach przez "
+               f"{OKNO_NIEPEWNEGO_WYSLANIA_S // 60} min.", pomysl=pid)
+    raise JobTrwa("nie wiadomo, czy job powstal")
+
+
+def _niepewne_wyslanie(slug, p, d, marker, przyczyna, log, wynik):
+    """Nie wiadomo, czy przerwane wysylanie utworzylo job, i nie ma juz sensu czekac: rolka 'nie wyszla' z prosba o sprawdzenie
+    w apce - BEZ automatycznego drugiego wysylania. Koszt (wycena) wliczamy do limitu dnia na wszelki wypadek."""
+    pid = p["id"]
+    k = int(marker.get("koszt") or 0)
+    if k:
+        baza.dopisz_wydatek(k, d.NAZWA, job_id=f"niepewne:{marker.get('klucz') or pid}")
+    notatki = (f"Wysylanie przerwane ({przyczyna}) - nie wiadomo, czy rolka powstala. {SPRAWDZ_W_APCE}"
+               + (f" {k} kr wliczone do dzisiejszego limitu na wszelki wypadek." if k else ""))
+    baza.aktualizuj_pomysl(slug, pid, status="blad", w_toku=None, krok_startowy=None, dostawca=d.NAZWA, powod="inny",
+                           notatki=notatki[:2000])
+    baza.zapisz_probe(slug, pid, {"dostawca": d.NAZWA, "model": marker.get("model"), "krok": marker.get("krok") or 0,
+                                  "job_id": None, "status": "niepewne", "powod": None, "kr": k, "info": przyczyna[:300]})
+    wynik["bledy"].append(pid)
+    _zdarzenie(log, slug, "blad", f"#{pid}: {notatki}", pomysl=pid)
+
+
+def _czekaj(slug, pid, d, job_id, timeout, log, stop, gotowy=None):
+    """Odpytuje job az do konca (0 kr). Zwraca wynik koncowy albo rzuca JobTrwa (limit czasu) / Przerwano (STOP) - w obu
+    przypadkach job zostaje w_toku i dokonczymy go pozniej. NIGDY nie wysyla nowego joba."""
+    if gotowy and d.koncowy(gotowy.get("status") or ""):
+        return gotowy
+    odpytan = max(1, dostawcy.sekundy(timeout) // ODSTEP_ODPYTYWANIA_S)
+    bledy = 0
+    for i in range(odpytan + 1):
+        _sprawdz_stop(stop)
+        try:
+            w = d.sprawdz(job_id)
+            bledy = 0
+        except dostawcy.BladDostawcy as e:
+            w = None
+            bledy += 1
+            if bledy in (1, 5) or bledy % 30 == 0:
+                log(f"#{pid}: nie moge sprawdzic joba {job_id} ({str(e)[:150]}) - probuje dalej, nic nie wysylam")
+        if w is not None and d.koncowy(w.get("status") or ""):
+            return w
+        if i and i % 6 == 0:
+            log(f"#{pid}: job {job_id} jeszcze sie robi ({(w or {}).get('status') or '?'})...")
+        if i < odpytan:
+            _spij(ODSTEP_ODPYTYWANIA_S, stop)
+    raise JobTrwa(f"job {job_id} jeszcze sie robi")
+
+
+def _rozlicz(slug, pid, d, w, k, krok, model, log):
+    """Koszt zakonczonego joba (z joba / wyceny - nie z roznicy salda), raz na job (budzet pamieta rozliczone job_id),
+    + wpis w p['proby']. Zwraca (kr, powod)."""
+    kr = int(d.koszt_joba(w, k) or 0)
+    powod = None if d.udany(w.get("status") or "") else powod_odrzucenia(w.get("status"), w.get("blad"))
+    jid = w.get("job_id")
+    if kr:
+        juz = baza.rozliczony(jid, d.NAZWA)
+        wydano = baza.dopisz_wydatek(kr, d.NAZWA, job_id=jid)
+        if not juz:
+            baza.dziennik_zapisz("kredyty", f"#{pid}: {kr} kr ({d.NAZWA} {model}), dzis {wydano}/{baza.limit_dzienny(d.NAZWA)}",
+                                 modelka=slug, pomysl=pid, kredyty=kr, dostawca=d.NAZWA)
+    baza.zapisz_probe(slug, pid, {"dostawca": d.NAZWA, "model": model, "krok": krok, "job_id": jid, "status": w.get("status"),
+                                  "powod": powod, "kr": kr})
+    return kr, powod
+
+
+def _przytnij_do(slug, p, z, max_s, log):
+    """Wan: filmik referencyjny max `max_s` s - przycinamy KOPIE (zrodla_ciete/<nazwa>_max15s.mp4), oryginal bez zmian."""
+    czas = z.get("video_czas")
+    if not (z.get("video") and max_s and czas and float(czas) > float(max_s) + 0.05):
+        return z
+    stem = os.path.splitext(os.path.basename(z["video"]))[0]
+    cel = os.path.join(baza.folder_modelki(slug), "zrodla_ciete", f"{_bezpieczna_nazwa(stem)}_max{int(max_s)}s.mp4")
+    if not os.path.isfile(cel):
+        klatki.przytnij(z["video"], cel, float(max_s) - 0.1)
+        log(f"#{p['id']}: filmik ma {float(czas):.1f} s - do Wan ide pierwsze {float(max_s) - 0.1:.1f} s (kopia)")
+    return dict(z, video=cel, video_czas=round(float(max_s) - 0.1, 2))
+
+
+def _przygotuj_zapas(slug, p, ust, krok, log, potwierdz=None, tylko_wycena=False):
+    """Krok zapasu nr `krok` (1 = pierwszy z zapas_nsfw): bezpiecznik dostawcy zapasu + wycena. Zwraca (d, z, kr) albo None
+    (krok pominiety - wpis w p['proby']). Rzuca _BezZapasu, gdy zapas u tego dostawcy jest teraz niemozliwy: dzienny limit
+    yappera nieustawiony/wyczerpany (wtedy ZERO zapytan do yappera), saldo, odmowa startu."""
+    kroki = ust.get("zapas_nsfw") or []
+    opis = kroki[krok - 1] if 0 < krok <= len(kroki) and isinstance(kroki[krok - 1], dict) else {}
+    nazwa = (opis.get("dostawca") or "").strip().lower()
+    model = (opis.get("model") or "").strip()
+
+    def pomin(powod, tekst):
+        _zdarzenie(log, slug, "uwaga", f"#{p['id']}: zapas {nazwa or '?'} {model or '?'} pominiety - {tekst}", pomysl=p["id"])
+        if not tylko_wycena:
+            baza.zapisz_probe(slug, p["id"], {"dostawca": nazwa, "model": model, "krok": krok, "job_id": None,
+                                              "status": "pominiete", "powod": powod, "kr": 0, "info": tekst[:300]})
+        return None
+
+    if p.get("stroj"):
+        # wariant B: stroj ma byc ze zdjecia, a prompt Wan (wan.txt) bierze stroj z filmu i traktuje wszystkie zdjecia jak twarz
+        # persony - zapas dalby inna rolke niz chciales, wiec go nie robimy (zero zapytan do yappera)
+        raise _BezZapasu("rolka ze strojem ze zdjecia (wariant B) - prompt Wan bierze stroj z filmu, wiec zapas zgubilby stroj; "
+                         "zrob ja na Higgsfield (inne zdjecie stroju / inny fragment) albo bez zdjecia stroju")
+    if nazwa != "yapper" or not model:
+        return pomin("nieobslugiwany", "zapas obsluguje na razie tylko kroki {\"dostawca\": \"yapper\", \"model\": ...}")
+    limit = baza.limit_dzienny(nazwa)
+    if not limit:
+        raise _BezZapasu("dzienny limit yappera nie jest ustawiony - bez niego zapas nic nie wyda. Ustaw go: panel -> Ustawienia -> "
+                         "Limity kredytow (tryb pelny) -> 'yapper.so: nie wiecej niz ... kredytow dziennie' albo "
+                         "`python fabryka.py budzet max_kredyty_dziennie=500 --dostawca yapper`")
+    wydano = baza.wydano_z_rezerwa(nazwa)      # z rezerwa procesow w toku
+    if wydano >= limit:
+        raise _BezZapasu(f"dzienny limit yappera wyczerpany ({wydano}/{limit} kr) - zapas jutro albo podnies limit")
+    d = dostawcy.dostawca(nazwa)
+    z = zlecenie(slug, p, ust)
+    z["dostawca"] = nazwa
+    z["yapper"] = dict(z.get("yapper") or {}, model=model)
+    try:
+        zasady = d.zasady_modelu(model)
+        z = _przytnij_do(slug, p, z, zasady.get("max_wideo_s"), log)
+        saldo = d.saldo()
+    except dostawcy.BladDostawcy as e:
+        raise _BezZapasu(f"yapper nie odpowiada ({e})")
+    except Exception as e:      # ffmpeg (przycinanie)
+        return pomin("blad", f"nie moge przygotowac filmiku ({e})")
+    try:
+        k = d.koszt(z)            # darmowy dryRun: creditsEstimated; odmowa przy canStart=false / blockedBy
+    except dostawcy.BladDostawcy as e:
+        return pomin("wycena", f"wycena nie wyszla: {e}")
+    if tylko_wycena:
+        return d, z, k
+    min_k, max_k = bezpiecznik(ust, nazwa)
+    if k > max_k:
+        return pomin("za_drogo", f"{k} kr > yapper max/rolka {max_k}")
+    if saldo - k < min_k:
+        raise _BezZapasu(f"{k} kr zostawiloby na yapper {saldo - k} < min {min_k}")
+    if wydano + k > limit:
+        return pomin("limit", f"{k} kr przekroczyloby dzienny limit yappera ({wydano}+{k} > {limit})")
+    if potwierdz is not None and not potwierdz(p, k, saldo - k, wydano + k, limit):
+        return pomin("odmowa", "pominiety na zyczenie")
+    return d, z, k
+
+
+def _sukces(slug, p, d, w, kr, krok, ust, log, lipsync, wynik):
+    """Job sie udal: pobranie -> wygenerowany -> Media Tool -> gotowe (+ lipsync recznego 'Zrob rolke')."""
+    pid = p["id"]
+    urls = w.get("urls") or []
+    model = (p.get("w_toku") or {}).get("model") or ""
+    nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{pid}"))[0])
+    rozsz = os.path.splitext(urls[0].split("?")[0])[1] or ".mp4"
+    if rozsz.lower() not in ROZSZERZENIA_WIDEO:
+        rozsz = ".mp4"
+    surowy = os.path.join(baza.folder_wynikow(slug), f"{pid:03d}_{nazwa}.raw{rozsz}")
+    try:
+        d.pobierz(urls[0], surowy)
+    except Exception as e:
+        wiek = _wiek_s((p.get("w_toku") or {}).get("od"))
+        if wiek is not None and wiek > MAX_GODZIN_W_TOKU * 3600:
+            baza.aktualizuj_pomysl(slug, pid, status="blad", w_toku=None, job_id=w.get("job_id"), koszt=kr, dostawca=d.NAZWA,
+                                   wynik_url=urls[0], notatki=f"pobranie: {e}", powod="inny")
+            _zdarzenie(log, slug, "blad", f"#{pid}: pobranie nie wychodzi od {MAX_GODZIN_W_TOKU} h ({e}) - pobierz recznie: {urls[0]}",
+                       pomysl=pid)
+            wynik["bledy"].append(pid)
+            return False
+        # job zaplacony i gotowy - zostaje w_toku: nastepny przebieg pobierze go jeszcze raz (bez nowego joba)
+        _zdarzenie(log, slug, "blad", f"#{pid}: pobranie nie wyszlo ({e}) - sprobuje jeszcze raz przy nastepnym przebiegu, URL: {urls[0]}",
+                   pomysl=pid)
+        wynik["w_toku"].append(pid)
+        return False
+    zapas = krok > 0
+    baza.aktualizuj_pomysl(slug, pid, status="wygenerowany", w_toku=None, krok_startowy=None, job_id=w.get("job_id"), koszt=kr,
+                           dostawca=d.NAZWA, model=model, zapas=zapas, wynik_url=urls[0], plik_wynikowy=surowy)
+    wynik["wygenerowane"] += 1
+    limit_dnia = baza.limit_dzienny(d.NAZWA)
+    if zapas:
+        _zdarzenie(log, slug, "ok", f"#{pid}: NSFW -> zapas {model}: WYGENEROWANE ({kr} kr {d.NAZWA}, dzis "
+                   f"{baza.wydano_dzis(d.NAZWA)}/{limit_dnia}) -> {surowy}", pomysl=pid, zapas=model)
+    else:
+        _zdarzenie(log, slug, "ok", f"#{pid}: WYGENEROWANE ({kr} kr, dzis {baza.wydano_dzis(d.NAZWA)}/{limit_dnia}) -> {surowy}", pomysl=pid)
+    gotowy = _postprodukcja(slug, pid, surowy, nazwa, ust, log=log)
+    if gotowy:
+        _zdarzenie(log, slug, "ok", f"#{pid}: GOTOWE -> {gotowy}", pomysl=pid, plik=gotowy)
+    if lipsync is not False:
+        _lipsync_po_generacji(slug, baza.pomysl(slug, pid), gotowy or surowy, ust, log)
+    return True
+
+
+def _niepowodzenie(slug, p, d, w, kr, powod, ust, log, wynik, zapas_info=""):
+    """Rolka nie wyszla (po wszystkich krokach): status blad z powodem; NSFW/IP osobno w wynik['odrzucone'] (hamulec ich nie liczy)."""
+    pid = p["id"]
+    blad = (w or {}).get("blad") or ""
+    if w:
+        notatki = f"job {w.get('job_id')} status={w.get('status')}" + (f", powod: {blad}" if blad else "")
+        if w.get("surowe"):
+            notatki += f": {json.dumps(w['surowe'], ensure_ascii=False)[:600]}"
+    else:
+        notatki = "zapas po NSFW: zaden krok nie ruszyl (szczegoly w 'proby')"
+    baza.aktualizuj_pomysl(slug, pid, status="blad", w_toku=None, krok_startowy=None, job_id=(w or {}).get("job_id"), koszt=kr,
+                           dostawca=d.NAZWA if d else None, notatki=(notatki + zapas_info)[:2000], powod=powod)
+    wynik["bledy"].append(pid)
+    if powod == "nsfw":
+        wynik["odrzucone"].append(pid)
+        _zdarzenie(log, slug, "blad", f"#{pid}: ODRZUCONE przez filtr tresci (NSFW){zapas_info}. {PODPOWIEDZ_NSFW}", pomysl=pid, powod="nsfw")
+    elif powod == "ip":
+        wynik["odrzucone"].append(pid)
+        _zdarzenie(log, slug, "blad", f"#{pid}: ODRZUCONE - model wykryl znana postac/marke (ip_detected){zapas_info}. "
+                   f"Sprawdz, czy w filmiku/zdjeciach nie ma logo, celebryty albo postaci z filmu.", pomysl=pid, powod="ip")
+    elif w is not None and d is not None and d.udany(w.get("status") or ""):
+        _zdarzenie(log, slug, "blad", f"#{pid}: job {w.get('job_id')} zakonczony, ale nie znajduje URL - NIE powtarzam; sprawdz "
+                   f"`higgsfield generate get {w.get('job_id')} --json`", pomysl=pid)
+    else:
+        _zdarzenie(log, slug, "blad", f"#{pid}: BLAD ({(blad or (w or {}).get('status') or '?')[:200]}) - status blad, "
+                   f"kliknij 'Sprobuj jeszcze raz', gdy poprawisz przyczyne", pomysl=pid)
+
+
+def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, krok_start=0, potwierdz=None):
+    """Cala rolka: krok 0 = dostawca persony (d0, wycena k0), po odrzuceniu NSFW/IP kolejne kroki zapas_nsfw (po jednej probie).
+    Pomysl w_toku (marker) jest WZNAWIANY: odpytujemy jego job zamiast wysylac nowy. Aktualizuje `wynik` generuj()."""
+    pid = p["id"]
+    kroki = list(ust.get("zapas_nsfw") or [])
+    marker = p.get("w_toku") if p.get("status") == "w_toku" else None
+    if p.get("status") == "w_toku" and not marker:
+        baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None)
+        log(f"#{pid}: rolka w toku bez znacznika generacji - wraca do kolejki")
+        return
+    krok = int((marker or {}).get("krok") or 0) if marker else krok_start
+    powod, w, kr_razem, d, zapas_info = None, None, 0, d0, ""
+    while krok <= len(kroki):
+        _sprawdz_stop(stop)
+        if marker:
+            # --- wznowienie proby sprzed restartu/timeoutu/STOP: ten sam job ---
+            d = dostawcy.dostawca(marker.get("dostawca"))
+            model = marker.get("model") or ""
+            k = marker.get("koszt")
+            jid = marker.get("job_id")
+            wiek = _wiek_s(marker.get("od"))
+            if not jid:
+                if not marker.get("wysylam"):
+                    baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None, krok_startowy=krok or None)
+                    log(f"#{pid}: wysylanie nie zaczelo sie przed przerwaniem - rolka wraca do kolejki")
+                    return
+                # okno liczymy od chwili wyslania (wysylam_od), nie od startu proby - upload potrafi trwac minuty
+                od_wyslania = marker.get("wysylam_od") or marker.get("od")
+                wiek = _wiek_s(od_wyslania)
+                idem = getattr(d, "IDEMPOTENTNY", False)
+                try:
+                    znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=p.get("prompt_higgsfield"),
+                                          od=od_wyslania, klucz=marker.get("klucz"),
+                                          pomin=[x.get("job_id") for x in (p.get("proby") or [])])
+                except dostawcy.BladDostawcy as e:
+                    if wiek is not None and wiek > MAX_GODZIN_W_TOKU * 3600:
+                        _niepewne_wyslanie(slug, p, d, marker, f"od {MAX_GODZIN_W_TOKU} h nie da sie sprawdzic listy jobow: {e}", log, wynik)
+                        return
+                    log(f"#{pid}: nie moge sprawdzic, czy przerwane wysylanie utworzylo job ({e}) - sprobuje pozniej, nic nie wysylam")
+                    wynik["w_toku"].append(pid)
+                    return
+                if not znaleziony:
+                    okno = CZAS_NA_WYSLANIE_S if idem else OKNO_NIEPEWNEGO_WYSLANIA_S
+                    if wiek is None or wiek < okno:
+                        log(f"#{pid}: wysylanie przerwane {int(wiek or 0)} s temu, joba nie widac na liscie - czekam (do "
+                            f"{okno // 60} min), nic nie wysylam drugi raz")
+                        wynik["w_toku"].append(pid)
+                        return
+                    if idem:
+                        # yapper: kolejne wyslanie pojdzie z TYM SAMYM Idempotency-Key - jesli proces jednak jest, dostaniemy go
+                        baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None, krok_startowy=krok or None)
+                        _zdarzenie(log, slug, "info", f"#{pid}: przerwane wysylanie nie utworzylo procesu - rolka wraca do kolejki "
+                                   f"(ten sam klucz idempotencji)", pomysl=pid)
+                        return
+                    _niepewne_wyslanie(slug, p, d, marker, f"po {okno // 60} min joba dalej nie widac na liscie", log, wynik)
+                    return
+                jid = znaleziony["job_id"]
+                baza.ustaw_w_toku(slug, pid, job_id=jid, etap="czeka")
+                _zdarzenie(log, slug, "info", f"#{pid}: odnaleziony job {jid} z przerwanego wysylania - czekam na niego", pomysl=pid)
+                job = znaleziony
+            else:
+                job = None
+                _zdarzenie(log, slug, "info", f"#{pid}: wznawiam - job {jid} ({d.NAZWA} {model}) byl juz wyslany, sprawdzam go "
+                           f"(bez wysylania nowego)", pomysl=pid)
+            if wiek is not None and wiek > MAX_GODZIN_W_TOKU * 3600 and not (job and d.koncowy(job.get("status") or "")):
+                try:
+                    teraz = d.sprawdz(jid)
+                except dostawcy.BladDostawcy:
+                    teraz = {"job_id": jid, "status": "", "blad": "nie odpowiada"}
+                if not d.koncowy(teraz.get("status") or ""):
+                    kr_rez = int(k or 0)
+                    if kr_rez:      # job byl wyslany - na wszelki wypadek wliczamy wycene (raz na job)
+                        baza.dopisz_wydatek(kr_rez, d.NAZWA, job_id=jid)
+                    _niepowodzenie(slug, baza.pomysl(slug, pid), d, dict(teraz, blad=f"job nie skonczyl sie w {MAX_GODZIN_W_TOKU} h - "
+                                   f"{SPRAWDZ_W_APCE}"), kr_rez, "inny", ust, log, wynik)
+                    return
+                job = teraz
+            marker = None
+        else:
+            # --- nowa proba ---
+            if krok == 0:
+                d, z, k = d0, zlecenie(slug, p, ust), k0
+            else:
+                try:
+                    przyg = _przygotuj_zapas(slug, baza.pomysl(slug, pid), ust, krok, log, potwierdz=potwierdz)
+                except _BezZapasu as e:
+                    zapas_info = f" | zapas pominiety: {e}"
+                    _zdarzenie(log, slug, "uwaga", f"#{pid}: zapas po NSFW pominiety - {e}", pomysl=pid)
+                    break
+                if not przyg:
+                    krok += 1
+                    continue
+                d, z, k = przyg
+            model = _model(d, z)
+            if krok > 0:
+                _zdarzenie(log, slug, "info", f"#{pid}: NSFW -> zapas {model} ({d.NAZWA}, ~{k} kr, {z.get('resolution')})", pomysl=pid)
+            else:
+                _zdarzenie(log, slug, "info", f"#{pid}: start ({d.NAZWA} {model}, {z.get('resolution')}, ~{k} kr) - {p['opis']}",
+                           pomysl=pid)
+            try:
+                job = _wyslij(slug, baza.pomysl(slug, pid), d, z, k, krok, ust, log)
+            except JobTrwa:
+                wynik["w_toku"].append(pid)
+                return
+            except dostawcy.BladDostawcy as e:
+                _niepowodzenie(slug, baza.pomysl(slug, pid), d, {"job_id": None, "status": "", "blad": str(e)}, kr_razem,
+                               powod_odrzucenia("", str(e)) or "inny", ust, log, wynik, zapas_info)
+                return
+            jid = job.get("job_id")
+            if jid is None:          # odrzucone juz przy wysylaniu
+                w = job
+                powod = powod_odrzucenia(job.get("status"), job.get("blad"))
+                baza.zapisz_probe(slug, pid, {"dostawca": d.NAZWA, "model": model, "krok": krok, "job_id": None,
+                                              "status": job.get("status"), "powod": powod, "kr": 0, "info": (job.get("blad") or "")[:300]})
+                if powod in POWODY_ZAPASU and krok < len(kroki):
+                    # miedzy krokami: 'nowy' + krok_startowy - po awarii w tym miejscu rolka ruszy od zapasu, nie od Seedance
+                    baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None, krok_startowy=krok + 1)
+                    krok += 1
+                    continue
+                _niepowodzenie(slug, baza.pomysl(slug, pid), d, w, kr_razem, powod, ust, log, wynik, zapas_info)
+                return
+            job = job.get("gotowy") or None
+        # --- czekanie na TEN job ---
+        try:
+            w = _czekaj(slug, pid, d, jid, timeout, log, stop, gotowy=job)
+        except JobTrwa as e:
+            _zdarzenie(log, slug, "info", f"#{pid}: {e} - zostaje w toku, dokoncze przy nastepnym przebiegu (nic nie wysylam drugi raz)",
+                       pomysl=pid)
+            wynik["w_toku"].append(pid)
+            return
+        kr, powod = _rozlicz(slug, pid, d, w, k, krok, model, log)
+        kr_razem += kr
+        if d.udany(w.get("status") or "") and w.get("urls"):
+            _sukces(slug, baza.pomysl(slug, pid), d, w, kr, krok, ust, log, lipsync, wynik)
+            return
+        if powod in POWODY_ZAPASU and krok < len(kroki):
+            _zdarzenie(log, slug, "uwaga", f"#{pid}: {model} odrzucil ({powod}) - nie powtarzam tego modelu, probuje zapas", pomysl=pid,
+                       powod=powod)
+            # miedzy krokami: 'nowy' + krok_startowy - po awarii w tym miejscu rolka ruszy od zapasu, nie od Seedance
+            baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None, krok_startowy=krok + 1)
+            krok += 1
+            continue
+        if powod in POWODY_ZAPASU and krok == 0 and not kroki:
+            zapas_info = " | zapas po NSFW wylaczony (zapas_nsfw = [])"
+        _niepowodzenie(slug, baza.pomysl(slug, pid), d, w, kr_razem, powod or "inny", ust, log, wynik, zapas_info)
+        return
+    # wszystkie kroki zapasu pominiete albo wyczerpane
+    _niepowodzenie(slug, baza.pomysl(slug, pid), d, w, kr_razem, powod or "nsfw", ust, log, wynik, zapas_info)
+
+
+def _nowy_wynik():
+    return {"wygenerowane": 0, "bledy": [], "odrzucone": [], "pominiete": [], "w_toku": [], "stop": None}
+
+
+def wznow_w_toku(slug, log=None, stop=None, timeout="30m", lipsync=None, wynik=None):
+    """Dokancza rolki persony, ktore maja juz wyslany job (status w_toku: restart panelu, timeout, STOP, przerwane wysylanie):
+    odpytuje TEN SAM job i pobiera wynik. Nigdy nie wysyla nowego joba dla tej samej proby. Zwraca wynik jak generuj()."""
+    log = log or _log
+    wynik = wynik if wynik is not None else _nowy_wynik()
+    lista = baza.pomysly_w_toku(slug)
+    if not lista:
+        return wynik
+    with baza.blokada_generacji(slug) as moge:
+        if not moge:
+            log(f"{slug}: inny proces juz dokancza rolki tej persony - pomijam")
+            wynik["stop"] = "zajete"
+            return wynik
+        ust = baza.ustawienia_modelki(slug)
+        for p in baza.pomysly_w_toku(slug):
+            _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik)
+    return wynik
+
+
+def wznow_wszystkie(log=None, stop=None, timeout="30m"):
+    """Start panelu: dokoncz rolki w toku wszystkich person. Zwraca {slug: wynik} (tylko persony, ktore cos mialy)."""
+    wyniki = {}
+    for slug in baza.lista_modelek():
+        if baza.pomysly_w_toku(slug):
+            wyniki[slug] = wznow_w_toku(slug, log=log, stop=stop, timeout=timeout, lipsync=False)
+    return wyniki
+
+
 def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_referencji=False,
-            timeout="30m", log=None, stop=None, max_rolek=None, lipsync=None):
-    """Generacja pozycji 'nowy' z promptem (albo wskazanych id).
+            timeout="30m", log=None, stop=None, max_rolek=None, lipsync=None, wznow=True):
+    """Generacja pozycji 'nowy' z promptem (albo wskazanych id). Najpierw dokancza rolki w toku (job wyslany wczesniej;
+    wznow=False - autopilot zrobil to juz sam).
 
     potwierdz(p, koszt, saldo_po, dzis_po, limit) -> bool; None = bez pytania.
-    stop = threading.Event (panel: STOP). max_rolek = ile rolek max w tym przebiegu (autopilot).
-    lipsync: None = wg ustawienia lipsync_auto (reczne "Zrob rolke"); False = nigdy (autopilot - lipsync tylko recznie).
-    Zwraca {"wygenerowane": n, "bledy": [id], "pominiete": [id], "stop": powod|None}.
+    stop = threading.Event (panel: STOP - job w toku zostaje i jest dokanczany pozniej). max_rolek = ile rolek max w tym
+    przebiegu (autopilot). lipsync: None = wg ustawienia lipsync_auto (reczne "Zrob rolke"); False = nigdy (autopilot).
+    Zwraca {"wygenerowane": n, "bledy": [id], "odrzucone": [id] (NSFW/IP - podzbior bledow), "pominiete": [id],
+            "w_toku": [id], "stop": powod|None}.
     """
     log = log or _log
-    wynik = {"wygenerowane": 0, "bledy": [], "pominiete": [], "stop": None}
+    wynik = _nowy_wynik()
+    if dry_run:
+        ust = baza.ustawienia_modelki(slug)
+        d = dostawcy.dostawca(ust.get("dostawca") or "higgsfield")
+        for uwaga in sprawdz_prompt(slug, ust):
+            log(f"[UWAGA] {uwaga}")
+        for p in kandydaci(slug, ids, limit, log):
+            log(f"#{p['id']}: " + d.podglad(zlecenie(slug, p, ust)))
+        return wynik
+    with baza.blokada_generacji(slug) as moge:
+        if not moge:
+            log("Inny proces (panel/autopilot albo konsola) robi wlasnie rolki tej persony - nie wysylam rownolegle, sprobuj za chwile.")
+            wynik["stop"] = "zajete"
+            return wynik
+        return _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, max_rolek, lipsync, wynik, wznow)
+
+
+def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, max_rolek, lipsync, wynik, wznow=True):
     ust = baza.ustawienia_modelki(slug)
     nazwa_dostawcy = ust.get("dostawca") or "higgsfield"
     d = dostawcy.dostawca(nazwa_dostawcy)
+    # 1) rolki w toku (job wyslany przed restartem/timeoutem) - dokonczyc, zanim cokolwiek nowego pojdzie
+    if wznow and baza.pomysly_w_toku(slug):
+        wznow_w_toku(slug, log=log, stop=stop, timeout=timeout, lipsync=lipsync, wynik=wynik)
     lista = kandydaci(slug, ids, limit, log)
     if not lista:
-        log("Nic do generacji (brak pomyslow 'nowy' z promptem).")
+        if not wynik["wygenerowane"] and not wynik["w_toku"]:
+            log("Nic do generacji (brak pomyslow 'nowy' z promptem).")
         return wynik
     if not baza.sciezki_referencji(slug) and not bez_referencji:
         log("Brak zdjec persony w referencje/ - bez tego model nie wie, kogo wstawic. "
@@ -778,11 +1478,6 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
     for uwaga in sprawdz_prompt(slug, ust):
         log(f"[UWAGA] {uwaga}")
 
-    if dry_run:
-        for p in lista:
-            log(f"#{p['id']}: " + d.podglad(zlecenie(slug, p, ust)))
-        return wynik
-
     try:
         saldo = d.saldo()
     except dostawcy.BladDostawcy as e:
@@ -792,16 +1487,24 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
     if saldo is None:
         saldo = 10 ** 9   # dostawca nie podaje salda - pilnuje tylko limit dzienny
     limit_dnia = baza.limit_dzienny(nazwa_dostawcy)
-    wydano = baza.wydano_dzis(nazwa_dostawcy)
     min_kredyty, max_na_rolke = bezpiecznik(ust, nazwa_dostawcy)
-    log(f"saldo {nazwa_dostawcy}: {saldo} kr | dzis wydano {wydano}/{limit_dnia} | min_kredyty={min_kredyty} "
-        f"max/rolka={max_na_rolke} powtorki={ust.get('powtorki', 0)}")
+    log(f"saldo {nazwa_dostawcy}: {saldo} kr | dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} "
+        f"(+{baza.koszt_w_toku(nazwa_dostawcy)} w toku) | min_kredyty={min_kredyty} "
+        f"max/rolka={max_na_rolke} | rozdzielczosc: {OPIS_ROZDZIELCZOSCI}")
 
     for p in lista:
         _sprawdz_stop(stop)
-        if max_rolek is not None and wynik["wygenerowane"] >= max_rolek:
+        if max_rolek is not None and wynik["wygenerowane"] + len(wynik["w_toku"]) >= max_rolek:
             wynik["stop"] = f"limit rolek w tym przebiegu ({max_rolek})"
             break
+        p = baza.pomysl(slug, p["id"])
+        if p.get("status") not in ("nowy", "blad"):
+            continue        # w miedzyczasie wznowiona / zrobiona
+        krok = _krok_startowy(p, ust)
+        if krok:
+            # "Ponow" po NSFW: od razu zapas (Seedance i tak odrzuci te same wejscia)
+            _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, krok_start=krok, potwierdz=potwierdz)
+            continue
         z = zlecenie(slug, p, ust)
         try:
             k = d.koszt(z)
@@ -813,8 +1516,15 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
         if k is None:
             k = max_na_rolke
             log(f"#{p['id']}: dostawca nie podal kosztu, zakladam {k} kr")
+        baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
+        wydano = baza.wydano_z_rezerwa(nazwa_dostawcy)     # wydane + zarezerwowane przez rolki w toku (wolne joby)
+        try:
+            saldo = d.saldo() or saldo
+        except dostawcy.BladDostawcy:
+            pass
         if k > max_na_rolke:
-            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr > max/rolka {max_na_rolke} - POMIJAM (zmien ustawienia albo skroc zrodlo)", pomysl=p["id"])
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr ({z['resolution']}) > max/rolka {max_na_rolke} - POMIJAM (zmien ustawienia "
+                       f"albo skroc zrodlo)", pomysl=p["id"])
             wynik["pominiete"].append(p["id"])
             continue
         if saldo - k < min_kredyty:
@@ -822,104 +1532,18 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
             wynik["stop"] = "min_kredyty"
             break
         if limit_dnia and wydano + k > limit_dnia:
-            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr przekroczyloby limit dzienny ({wydano}+{k} > {limit_dnia}) - STOP na dzis", pomysl=p["id"])
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr przekroczyloby limit dzienny ({wydano}+{k} > {limit_dnia}) - STOP na dzis",
+                       pomysl=p["id"])
             wynik["stop"] = "limit dzienny"
             break
         if potwierdz is not None and not potwierdz(p, k, saldo - k, wydano + k, limit_dnia):
             log("pominieto")
             wynik["pominiete"].append(p["id"])
             continue
+        _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=d, k0=k, potwierdz=potwierdz)
 
-        urls, jid, blad, powod = [], None, None, None
-        proby = 1 + max(0, int(ust.get("powtorki") or 0))
-        saldo_przed = saldo
-        for proba in range(1, proby + 1):
-            _sprawdz_stop(stop)
-            _zdarzenie(log, slug, "info", f"#{p['id']}: start ({nazwa_dostawcy} {z['model'] if nazwa_dostawcy == 'higgsfield' else z['yapper'].get('model')}, ~{k} kr, proba {proba}/{proby}) - {p['opis']}", pomysl=p["id"])
-            stan = ""
-            try:
-                job = d.generuj(z, timeout=timeout, log=log)
-                jid = job.get("job_id")
-                urls = job.get("urls") or []
-                if urls:
-                    blad = None
-                    break
-                stan = job.get("status") or ""
-                blad = f"job {jid} status={stan}, brak URL wyniku" + (f", powod: {job['blad']}" if job.get("blad") else "") \
-                    + f": {json.dumps(job.get('surowe'), ensure_ascii=False)[:600]}"
-                if d.udany(stan):
-                    # job sie udal, tylko nie umiem odczytac linku - powtorka by palila kredyty. Stop, do naprawy w wyniki_url().
-                    _zdarzenie(log, slug, "blad", f"#{p['id']}: job {jid} zakonczony, ale nie znajduje URL - NIE powtarzam; sprawdz `higgsfield generate get {jid} --json`", pomysl=p["id"])
-                    break
-            except dostawcy.BladDostawcy as e:
-                blad = str(e)
-            log(f"#{p['id']}: nie wyszlo ({blad[:200]})")
-            # ile naprawde zeszlo? Seedance przy odrzuceniu oddaje kredyty
-            try:
-                saldo = d.saldo() or saldo
-            except dostawcy.BladDostawcy:
-                pass
-            nowy_powod = powod_odrzucenia(stan, blad)
-            if nowy_powod == "nsfw" and powod == "nsfw":
-                # filtr tresci dwa razy z rzedu na tych samych wejsciach = to nie przypadek; kolejna proba to tylko stracony czas
-                _zdarzenie(log, slug, "uwaga", f"#{p['id']}: filtr tresci (NSFW) drugi raz z rzedu - nie probuje dalej", pomysl=p["id"])
-                break
-            powod = nowy_powod
-            if proba < proby:
-                time.sleep(10)
-
-        zuzyte = None
-        try:
-            nowe_saldo = d.saldo()
-            if nowe_saldo is None:
-                raise dostawcy.BladDostawcy("dostawca nie podaje salda")
-            saldo = nowe_saldo
-            zuzyte = max(0, saldo_przed - saldo)
-        except dostawcy.BladDostawcy:
-            saldo = saldo_przed - (k if urls else 0)
-            zuzyte = k if urls else 0
-        wydano = baza.dopisz_wydatek(zuzyte, nazwa_dostawcy)
-        if zuzyte:
-            baza.dziennik_zapisz("kredyty", f"#{p['id']}: {zuzyte} kr ({nazwa_dostawcy}), dzis {wydano}/{limit_dnia}", modelka=slug, pomysl=p["id"], kredyty=zuzyte, dostawca=nazwa_dostawcy)
-
-        if not urls:
-            baza.aktualizuj_pomysl(slug, p["id"], status="blad", job_id=jid, koszt=zuzyte, dostawca=nazwa_dostawcy, notatki=(blad or "")[:2000],
-                                   powod=powod)
-            if powod == "nsfw":
-                _zdarzenie(log, slug, "blad", f"#{p['id']}: ODRZUCONE przez filtr tresci (NSFW), zuzyte {zuzyte} kr. {PODPOWIEDZ_NSFW}", pomysl=p["id"], powod="nsfw")
-            elif powod == "ip":
-                _zdarzenie(log, slug, "blad", f"#{p['id']}: ODRZUCONE - model wykryl znana postac/marke (ip_detected), zuzyte {zuzyte} kr. "
-                           f"Sprawdz, czy w filmiku/zdjeciach nie ma logo, celebryty albo postaci z filmu.", pomysl=p["id"], powod="ip")
-            else:
-                _zdarzenie(log, slug, "blad", f"#{p['id']}: BLAD po {proby} probach (zuzyte {zuzyte} kr) - status blad, zostaje w kolejce", pomysl=p["id"])
-            wynik["bledy"].append(p["id"])
-            continue
-
-        nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{p['id']}"))[0])
-        rozsz = os.path.splitext(urls[0].split("?")[0])[1] or ".mp4"
-        if rozsz.lower() not in ROZSZERZENIA_WIDEO:
-            rozsz = ".mp4"
-        surowy = os.path.join(baza.folder_wynikow(slug), f"{p['id']:03d}_{nazwa}.raw{rozsz}")
-        try:
-            d.pobierz(urls[0], surowy)
-        except Exception as e:
-            _zdarzenie(log, slug, "blad", f"#{p['id']}: pobranie nie wyszlo ({e}), URL: {urls[0]}", pomysl=p["id"])
-            baza.aktualizuj_pomysl(slug, p["id"], status="blad", job_id=jid, koszt=zuzyte, wynik_url=urls[0], dostawca=nazwa_dostawcy,
-                                   notatki=f"pobranie: {e}")
-            wynik["bledy"].append(p["id"])
-            continue
-        wynik["wygenerowane"] += 1
-        baza.aktualizuj_pomysl(slug, p["id"], status="wygenerowany", job_id=jid, koszt=zuzyte, dostawca=nazwa_dostawcy,
-                               wynik_url=urls[0], plik_wynikowy=surowy)
-        _zdarzenie(log, slug, "ok", f"#{p['id']}: WYGENEROWANE ({zuzyte} kr, dzis {wydano}/{limit_dnia}) -> {surowy}", pomysl=p["id"])
-
-        gotowy = _postprodukcja(slug, p["id"], surowy, nazwa, ust, log=log)
-        if gotowy:
-            _zdarzenie(log, slug, "ok", f"#{p['id']}: GOTOWE -> {gotowy}", pomysl=p["id"], plik=gotowy)
-        if lipsync is not False:
-            _lipsync_po_generacji(slug, p, gotowy or surowy, ust, log)
-
-    log(f"koniec: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} kr")
+    log(f"koniec: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} kr"
+        + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
     return wynik
 
 
@@ -943,19 +1567,17 @@ def podglad(slug, pid, log=None):
     if k is None:
         k = 25
     min_kredyty, _ = bezpiecznik(ust, nazwa_dostawcy)
-    limit_dnia, wydano = baza.limit_dzienny(nazwa_dostawcy), baza.wydano_dzis(nazwa_dostawcy)
+    limit_dnia, wydano = baza.limit_dzienny(nazwa_dostawcy), baza.wydano_z_rezerwa(nazwa_dostawcy)
     if saldo - k < min_kredyty:
         raise ValueError(f"Podglad ({k} kr) zostawilby {saldo - k} < min_kredyty {min_kredyty}.")
     if limit_dnia and wydano + k > limit_dnia:
         raise ValueError(f"Podglad ({k} kr) przekroczylby limit dzienny ({wydano}+{k} > {limit_dnia}).")
     _zdarzenie(log, slug, "info", f"#{pid}: tani podglad (draft, ~{k} kr)", pomysl=pid)
     job = d.generuj(z, timeout="20m", log=log)
-    try:
-        zuzyte = max(0, saldo - d.saldo())
-    except dostawcy.BladDostawcy:
-        zuzyte = k
-    baza.dopisz_wydatek(zuzyte, nazwa_dostawcy)
     urls = job.get("urls") or []
+    # koszt z wyceny joba (udany = k, odrzucony = 0), nie z roznicy salda - reczne generacje w apce nie zjadaja limitu fabryki
+    zuzyte = d.koszt_joba(job, k) if hasattr(d, "koszt_joba") else (k if urls else 0)
+    baza.dopisz_wydatek(zuzyte, nazwa_dostawcy, job_id=job.get("job_id"))
     if not urls:
         raise RuntimeError(job.get("blad") or f"brak URL podgladu (status {job.get('status')})")
     nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{pid}"))[0])
@@ -968,7 +1590,7 @@ def podglad(slug, pid, log=None):
         baza.aktualizuj_pomysl(slug, pid, klatki_podgladu=_klatki_podgladu)
     except Exception:
         pass
-    _zdarzenie(log, slug, "ok", f"#{pid}: podglad gotowy ({zuzyte} kr) -> {cel}", pomysl=pid, plik=cel)
+    _zdarzenie(log, slug, "ok", f"#{pid}: podglad gotowy ({zuzyte} kr, {z.get('resolution')}) -> {cel}", pomysl=pid, plik=cel)
     return cel
 
 
@@ -993,11 +1615,11 @@ def cmd_generuj(args):
     potwierdz = None if args.tak else pytaj
     w = generuj(slug, ids=[args.id] if args.id else None, limit=args.limit, potwierdz=potwierdz,
                 dry_run=args.dry_run, bez_referencji=args.bez_referencji, timeout=args.timeout)
-    return 1 if w.get("stop") in ("brak referencji",) or (w.get("stop") or "").startswith("saldo") else 0
+    return 1 if w.get("stop") in ("brak referencji", "zajete") or (w.get("stop") or "").startswith("saldo") else 0
 
 
 def _postprodukcja(slug, pid, surowy, nazwa, ust, log=None):
-    """Media Tool (pranie) -> folder gotowych; opcjonalnie warianty VideoRemixer. Zwraca sciezke gotowego pliku."""
+    """Media Tool (pranie) -> folder gotowych. Zwraca sciezke gotowego pliku."""
     log = log or _log
     gotowe_dir = baza.folder_gotowych(slug)
     cel = os.path.join(gotowe_dir, f"{pid:03d}_{nazwa}.mp4")
@@ -1014,11 +1636,6 @@ def _postprodukcja(slug, pid, surowy, nazwa, ust, log=None):
         shutil.copy2(surowy, cel)
         baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=cel)
     _klatki_wyniku(slug, pid, cel, log)
-    if ust.get("warianty"):
-        try:
-            _warianty(slug, pid, cel, int(ust["warianty"]))
-        except Exception as e:
-            log(f"#{pid}: warianty nie wyszly: {e}")
     return cel
 
 
@@ -1054,29 +1671,17 @@ def cmd_ocen(args):
     return 0
 
 
-# ---------------- postprodukcja ----------------
-
-def _warianty(slug, pid, plik, ile):
-    import postprocess
-    folder = os.path.join(baza.folder_wynikow(slug), f"{pid:03d}_warianty")
-    os.makedirs(folder, exist_ok=True)
-    pliki = [f for f in postprocess.wygeneruj_warianty(plik, folder, ile)
-             if f.lower().endswith(ROZSZERZENIA_WIDEO)]
-    baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=folder)
-    _log(f"#{pid}: {len(pliki)} wariantow -> {folder}")
-    return pliki
-
-
-def cmd_warianty(args):
-    slug = _slug(args.modelka)
-    p = baza.pomysl(slug, args.id)
-    plik = args.plik or p.get("plik_wynikowy")
-    if not plik or not os.path.isfile(plik):
-        print(f"#{p['id']}: podaj --plik (po faceswapie/edycji) albo najpierw wygeneruj.")
-        return 1
-    _warianty(slug, p["id"], plik, args.ile)
+def cmd_wznow(args):
+    """Dokoncz rolki w toku (wszystkie persony albo --modelka)."""
+    slugi = [_slug(args.modelka)] if args.modelka else baza.lista_modelek()
+    for slug in slugi:
+        w = wznow_w_toku(slug, timeout=args.timeout)
+        if w["wygenerowane"] or w["bledy"] or w["w_toku"]:
+            print(f"{slug}: gotowe {w['wygenerowane']}, nie wyszlo {len(w['bledy'])}, dalej w toku {len(w['w_toku'])}")
     return 0
 
+
+# ---------------- postprodukcja ----------------
 
 def cmd_gotowe(args):
     slug = _slug(args.modelka)
@@ -1262,8 +1867,9 @@ def main(argv=None):
     s.add_argument("--bez-referencji", action="store_true")
     s.add_argument("--timeout", default="30m")
     s.set_defaults(f=cmd_generuj)
+    s = sub.add_parser("wznow", help="dokoncz rolki w toku (job wyslany przed restartem/timeoutem) - odpytuje ten sam job, nic nie wysyla")
+    s.add_argument("--timeout", default="30m"); s.set_defaults(f=cmd_wznow)
     s = sub.add_parser("ocen", help="Virality Predictor na wyniku (kosztuje kredyty)"); s.add_argument("id", type=int); s.set_defaults(f=cmd_ocen)
-    s = sub.add_parser("warianty", help="VideoRemixer: N unikalnych wersji"); s.add_argument("id", type=int); s.add_argument("--ile", type=int, default=10); s.add_argument("--plik"); s.set_defaults(f=cmd_warianty)
     s = sub.add_parser("gotowe", help="oznacz pomysl jako gotowy"); s.add_argument("id", type=int); s.set_defaults(f=cmd_gotowe)
     s = sub.add_parser("podpis", help="podpis z banku tekstow -> wyniki/<id>_podpis.txt"); s.add_argument("id", type=int); s.set_defaults(f=cmd_podpis)
     s = sub.add_parser("wgraj", help="wgraj referencje/stroje raz (UUID w cache, szybsze koszt/generuj)"); s.add_argument("--od-nowa", action="store_true"); s.set_defaults(f=cmd_wgraj)
