@@ -201,8 +201,9 @@ def test_http_wyslij_plik_nie_nadpisuje_content_type(monkeypatch, tmp_path):
 
 
 def test_yapper_wycena_dryrun_i_cialo_wan(modelka, udawany_http):
-    """dryRun w prawdziwym ksztalcie (creditsEstimated); cialo Wan wg schematu: bez generateAudio, durationMode auto zamiast
-    videoLength, rozdzielczosc rolki (6 s -> 1080p), prompt z wan.txt (bez @[Image]), filmik i referencje jako assetId."""
+    """dryRun w prawdziwym ksztalcie (creditsEstimated); cialo Wan wg schematu: bez generateAudio, durationMode auto RAZEM
+    z videoLength = dlugosc klipu (bez niej yapper wycenia jak 5 s), rozdzielczosc rolki (6 s -> 1080p), prompt z wan.txt
+    (bez @[Image]), filmik i referencje jako assetId."""
     z, _ = _zlecenie_wan(modelka, czas=6.0)
     z["generate_audio"] = True
     _modele(udawany_http)
@@ -212,7 +213,7 @@ def test_yapper_wycena_dryrun_i_cialo_wan(modelka, udawany_http):
     dry = udawany_http.posty(Y + "/processes")[0][2]
     assert dry["dryRun"] is True and dry["model"] == "wan-3.0" and dry["type"] == "video-generation"
     wej = dry["input"]
-    assert "generateAudio" not in wej and "videoLength" not in wej and wej["durationMode"] == "auto"
+    assert "generateAudio" not in wej and wej["durationMode"] == "auto" and wej["videoLength"] == 6
     assert wej["resolution"] == 1080 and wej["aspectRatio"] == "9:16"
     assert wej["prompt"] == "Replace the woman with the woman from the reference photos."
     assert wej["referenceImages"] == [{"assetId": "i1"}, {"assetId": "i2"}] and wej["referenceVideos"] == [{"assetId": "v_asset"}]

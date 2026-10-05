@@ -445,7 +445,7 @@ def _dzis(aktywna):
     dzien = baza._dzis()
     rolki = sum(len(baza.pomysly_z_dnia(s)) for s in baza.lista_modelek())
     zdjecia = sum(len(baza.zdjecia_z_dnia(s)) for s in baza.lista_modelek())
-    bledy = len([w for w in baza.dziennik_ostatnie(500, typ="blad") if str(w.get("czas", "")).startswith(dzien)])
+    bledy = len([w for w in baza.dziennik_ostatnie(500, typ="blad") if baza.dzien_lokalny(w.get("czas")) == dzien])
     return {"rolki": rolki, "zdjecia": zdjecia, "bledy": bledy,
             "kredyty": {d: baza.wydano_dzis(d) for d in ("higgsfield", "yapper", "sync")},
             "rolki_persony": len(baza.pomysly_z_dnia(aktywna)) if aktywna else 0}
@@ -954,11 +954,11 @@ def api_statystyki():
     zdjecia = {d: 0 for d in dni}
     for slug in baza.lista_modelek():
         for p in baza.lista_pomyslow(slug):
-            d = (p.get("wygenerowano") or "")[:10]
+            d = baza.dzien_lokalny(p.get("wygenerowano"))
             if d in rolki:
                 rolki[d] += 1
         for z in baza.lista_zdjec(slug):
-            d = (z.get("utworzono") or "")[:10]
+            d = baza.dzien_lokalny(z.get("utworzono"))
             if d in zdjecia and z.get("status") == "gotowe":
                 zdjecia[d] += 1
     bud = baza.budzet()
@@ -966,12 +966,12 @@ def api_statystyki():
                "sync": (bud.get("dostawcy", {}).get("sync") or {}).get("wydatki", {})}
     bledy = {d: 0 for d in dni}
     for w in baza.dziennik_ostatnie(2000, typ="blad"):
-        d = str(w.get("czas", ""))[:10]
+        d = baza.dzien_lokalny(w.get("czas"))
         if d in bledy:
             bledy[d] += 1
     nsfw = 0
     for slug in baza.lista_modelek():
-        nsfw += sum(1 for p in baza.lista_pomyslow(slug) if p.get("powod") == "nsfw" and (p.get("zaktualizowano") or "")[:10] in bledy)
+        nsfw += sum(1 for p in baza.lista_pomyslow(slug) if p.get("powod") == "nsfw" and baza.dzien_lokalny(p.get("zaktualizowano")) in bledy)
     return _ok(dni=[{"dzien": d, "rolki": rolki[d], "zdjecia": zdjecia[d], "bledy": bledy[d],
                      "kredyty": {k: int(v.get(d, 0)) for k, v in kredyty.items()}} for d in dni],
                razem={"rolki": sum(rolki.values()), "zdjecia": sum(zdjecia.values()), "bledy": sum(bledy.values()), "nsfw": nsfw,

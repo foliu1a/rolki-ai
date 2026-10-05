@@ -154,7 +154,7 @@ def raport_dnia(wymus=False):
         rolki = baza.pomysly_z_dnia(slug)
         d = baza.ustawienia_modelki(slug).get("dostawca") or "higgsfield"
         linie.append(f"- {slug}: {len(rolki)} rolek, {len(baza.zdjecia_z_dnia(slug))} zdjec, {baza.wydano_dzis(d)} kr ({d})")
-    bledy = [w for w in baza.dziennik_ostatnie(500, typ="blad") if str(w.get("czas", "")).startswith(dzis)]
+    bledy = [w for w in baza.dziennik_ostatnie(500, typ="blad") if baza.dzien_lokalny(w.get("czas")) == dzis]
     if bledy:
         linie.append(f"Problemy dzis: {len(bledy)} (szczegoly w panelu -> Historia)")
     tekst = "\n".join(linie)

@@ -869,7 +869,7 @@ def wskazowki_nsfw(slug, dni=14):
     granica = (datetime.now() - timedelta(days=dni)).strftime("%Y-%m-%d")
     odrzucone = [p for p in baza.lista_pomyslow(slug)
                  if p.get("powod") == "nsfw" or (p.get("status") == "blad" and "nsfw" in (p.get("notatki") or "").lower())]
-    ostatnio = [p for p in odrzucone if (p.get("zaktualizowano") or p.get("utworzono") or "")[:10] >= granica]
+    ostatnio = [p for p in odrzucone if baza.dzien_lokalny(p.get("zaktualizowano") or p.get("utworzono")) >= granica]
     ust = baza.ustawienia_modelki(slug)
     teksty = {"A": baza.prompt_bazowy(slug), "B": baza.prompt_stroj(slug), "zdjecia": "\n".join(baza.prompty_zdjec(slug))}
     slowa = {}

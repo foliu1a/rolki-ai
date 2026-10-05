@@ -403,6 +403,13 @@ def _cialo(z, uploady=True):
     tryby = zas.get("duration_mode") or ()
     if wideo and "auto" in tryby and wolno("durationMode"):
         wejscie["durationMode"] = "auto"           # dlugosc rolki = dlugosc klipu referencyjnego
+        czas = z.get("video_czas")
+        if czas and wolno("videoLength"):
+            # bez videoLength yapper wycenia "auto" jak 5 s, a placi sie za cala dlugosc (sprawdzone 2026-10-06)
+            dlugosc = max(1, int(round(float(czas))))
+            if zas.get("dlugosci"):
+                dlugosc = max(min(zas["dlugosci"]), min(max(zas["dlugosci"]), dlugosc))
+            wejscie["videoLength"] = dlugosc
     elif wolno("videoLength") and not model.endswith("-edit"):
         dlugosc = z.get("duration") or y.get("duration")
         if dlugosc:

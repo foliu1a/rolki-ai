@@ -514,6 +514,21 @@ def _dzis():
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def dzien_lokalny(znacznik):
+    """Znacznik czasu (zapisywany w UTC, np. '2026-10-05T23:30:00+00:00') -> dzien w lokalnej strefie ('2026-10-06'),
+    zeby porownania z _dzis() nie gubily rolek/zdjec miedzy polnoca a 2:00. Bez strefy albo nieczytelny -> 10 pierwszych znakow."""
+    s = str(znacznik or "")
+    if not s:
+        return ""
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return s[:10]
+    if dt.tzinfo is None:
+        return s[:10]
+    return dt.astimezone().strftime("%Y-%m-%d")
+
+
 def _konto_budzetu(dane, dostawca):
     """Slownik {max_kredyty_dziennie, wydatki} dla dostawcy (Higgsfield = korzen pliku)."""
     if dostawca in (None, "", DOSTAWCA_GLOWNY):
@@ -843,7 +858,7 @@ def pomysly_z_dnia(slug, dzien=None):
     """Pomysly wygenerowane danego dnia (domyslnie dzis) - do limitu autopilot_max_rolek_dziennie."""
     dzien = dzien or _dzis()
     return [p for p in _wczytaj_json(_plik_pomyslow(slug), [])
-            if p.get("wygenerowano", "").startswith(dzien)]
+            if dzien_lokalny(p.get("wygenerowano")) == dzien]
 
 
 def aktualizuj_pomysl(slug, pomysl_id, **pola):
@@ -1080,7 +1095,7 @@ def zdjecia_z_dnia(slug, dzien=None, z_niepewnymi=False):
     kolejnego, zeby nie zaplacic drugi raz)."""
     dzien = dzien or _dzis()
     statusy = ("gotowe", "niepewne") if z_niepewnymi else ("gotowe",)
-    return [z for z in lista_zdjec(slug) if z["status"] in statusy and z.get("utworzono", "").startswith(dzien)]
+    return [z for z in lista_zdjec(slug) if z["status"] in statusy and dzien_lokalny(z.get("utworzono")) == dzien]
 
 
 def prompty_zdjec(slug):
