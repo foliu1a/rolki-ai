@@ -197,7 +197,7 @@ Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/tes
   Token w `~/.config/higgsfield/credentials.json`. Konto: plan Ultra.
 - Zmiana konta (zrobiona 2026-10-03, nowe konto ma ~5700 kr): `hf.exe auth logout` -> `python zaloguj_firefox.py --prywatne`
   (okno prywatne Firefoksa, bo zwykle okno pamieta STARE konto i zatwierdza je od razu) -> `workspace list` + `workspace set <id>`
-  -> `python fabryka.py --modelka <slug> wgraj --od-nowa` dla kazdej persony (UUID-y referencji sa per konto; wgranie ~1,5 kr/plik).
+  -> `python fabryka.py --modelka <slug> wgraj --od-nowa` dla kazdej persony (UUID-y referencji sa per konto; wgranie jest darmowe - sprawdzone 2026-10-06 na 4 plikach Lilianny, saldo bez zmian).
   Logowanie i generowanie sa TYLKO lokalne na laptopie - sesje w chmurze nie maja i nie potrzebuja konta Higgsfield.
 - `generate create --wait --json` drukuje LISTE jobow `{id, job_type, display_name, status, created_at, params, result_url,
   min_result_url, thumbnail_url?}`; bez `--wait` liste UUID-ow (stringi). CLI widzi TYLKO result_url/min_result_url.
