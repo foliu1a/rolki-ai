@@ -143,7 +143,49 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   po polsku jest; slabsze: napisy cen wyszly jak "Z6£" (zamiast zl), model dorobil torebke w stylu znanej marki (beat ma juz
   "small plain black bag"), raz zerka w strone kamery. Generacja ~6 min + Media Tool ~2 min.
 - Testy: tests/test_scenariusz.py (prompt, wlosy, wzrost, katalog bez slow ryzykownych/marek, limity), tests/test_z_promptu.py
-  (wycena nic nie tworzy, bezpieczniki, pelna sciezka, wznowienie po promptcie, cena wyzsza = nic, NSFW bez zapasu, endpointy).
+  (wycena nic nie tworzy, bezpieczniki, pelna sciezka, wznowienie po promptcie, cena wyzsza = nic, NSFW bez zapasu, endpointy),
+  tests/test_asystent_glos.py (3.0: stroje, kamera, nazwy, reakcje, fonetyka, glos tts, asystent + udawany OpenRouter, nauka,
+  ElevenLabs, prawdziwy miks ffmpeg, dogranie, endpointy).
+
+## Rolka z promptu 3.0 (feedback usera po tescie #3, 2026-10-07)
+
+- **Stroj**: domyslnie `odwazny` (`scenariusz.STROJE_ODWAZNE`, 19 zestawow z porami roku: bardzo krotkie spodniczki, glebokie
+  dekolty, ekscentryczne zestawienia - LEGALNA moda uliczna; opisy bez `fabryka.SLOWA_RYZYKOWNE`, np. "very short pleated skirt",
+  "low square neckline" zamiast "mini skirt"/"cleavage"). `stroj: "odwazny:<id>"` = konkretny.
+- **Kamera z ukrycia** domyslnie (`KAMERY_UKRYTE`, `kamera_ukryta(miejsce)`): ukradkiem z daleka (telefon nisko, udaje SMS-a,
+  zoom 1.5x), zza filaru/regalu (krawedz zaslania kadr), z biodra (przechyl, ucieta glowa), z kolejki, siedzi naprzeciw;
+  blok "[Camera]" mowi "never walk up to her; she never notices the phone". Stare kamery (idzie_za...) tylko recznie.
+- **Prawdziwe nazwy** (`nazwy: "prawdziwe"`, `OBIEKTY_MIEJSC`): galerie (Posnania, Stary Browar, Wroclavia, Zlote Tarasy,
+  Arkadia, Galeria Krakowska, Manufaktura, Galeria Baltycka, Silesia City Center), dworce (Warszawa Centralna, Krakow Glowny...),
+  stacje metra, dzielnice (Jezyce, Praga, Nowa Huta, Nadodrze, Baluty, Zaspa, Tysiaclecie) i miasta; miasto z pomyslu ("we
+  Wroclawiu") wybiera obiekt (`miasto_z_tekstu`; sama nazwa miasta NIE wybiera miejsca, gdy jest inne slowo - "w galerii we
+  Wroclawiu" = galeria). `SZYLDY` = prawdziwe polskie napisy ('ZAMÓW TUTAJ', 'ODJAZDY'...) + "prices like '19,99 zł'".
+  Marki SKLEPOW dalej tylko opisem. `nazwy: "opisowe"` = bezpieczny zapas (bez nazw, "no brand logos").
+- **Reakcje zdziwienia** (prosba usera): `REAKCJE_ZDZIWIENIE` (dwa_razy, para_kreci_glowa, szturcha_kolege, kasjerka_zamiera,
+  mama_odciaga, szepcze_patrzac) + `SUBTELNE_REAKCJE` + `LINIE_REAKCJI` ("Jak ona może tak chodzić?", "Widziałaś to?", "No ja nie
+  mogę…"); ton komentarza "half-whispering in disbelief".
+- **Glos komentarza** (`glos`): "model" (mowi model wideo; `wymowa: "fonetyczna"` = `fonetycznie()` w klamrach: wygląda ->
+  wyglonda, mogę -> moge, się -> sie - model czyta polska pisownie fonetycznie), "tts" (wideo z SAMYM otoczeniem,
+  `DZWIEK_BEZ_MOWY`; komentarz dogrywa `komentarz_glos.py` po pobraniu, PRZED Media Tool: ElevenLabs eleven_v3 z [whispers] ->
+  pasmo telefonu + odbicia -> glosnosc = otoczenie (ebur128) + 3 LU w granicach -27..-15 LUFS -> adelay do `komentarz_t`
+  (sekunda reakcji) -> sidechaincompress przycisza otoczenie -> `wyniki/NNN_x.glos.mp4`). "auto" (panel) = tts, gdy klucz
+  ElevenLabs dziala (`elevenlabs.stan_klucza`: GET subscription, 401 missing_permissions = klucz dobry, cache 10 min), inaczej
+  model; rozstrzygniety glos jedzie w `ustalone.glos` (ta sama cena/prompt przy "Zrob"). Blad TTS NIGDY nie psuje rolki
+  (gotowa bez komentarza, `glos_blad`); "Dograj glos" w karcie / akcja `dograj_glos` / `python fabryka.py --modelka x
+  dograj-glos <id>` (tylko rolki z glosem tts - przy "model" odmawia, zdublowalby glos). Voice ID: ustawienie `z_promptu_glos`
+  ("" = `elevenlabs.wybierz_glos`: polski, kobiecy, NIE o imieniu persony). Klucz ElevenLabs zaczyna sie od `sk_` - panel
+  odrzuca inne wklejki (`sekrety.PREFIKSY`). Klucz w panelu (2026-10-07) jest ZLY - user musi wkleic dobry.
+- **Asystent** (`asystent.py`, `POST /api/z-promptu/asystent`, CLI `z-promptu --asystent`): krotki pomysl -> opcje (miejsce,
+  obiekt, nazwy, stroj, kamera, reakcja, komentarz, glos auto, wymowa fonetyczna, wlosy, dlugosc, model) + jedno zdanie
+  "dlaczego". Darmowy OpenRouter (klucz `openrouter`, `sk-or-`, Konta; `MODELE_LLM` jak w tg-glosowki, filtr GET /models, max 3
+  proby, 25 s, JSON walidowany z katalogiem - smieci = pole z regul), bez klucza/bledu = `dobierz_regulami` (wazone losowanie).
+  Nauka z pomysly.json + `modelki/<slug>/asystent_archiwum.json` (usuniete): ocena "dobra" +3 / gotowa +1 / "slaba" -3 (usuniecie
+  gotowej = slaba), NSFW -> ten stroj odpada, IP z prawdziwymi nazwami -> ten obiekt odpada, miejsce idzie na "opisowe", 2x IP =
+  wszedzie "opisowe" (IP liczone ze WSZYSTKICH person). `POST /api/pomysly/<id>/ocena`.
+- **Panel 3.0**: widok prosty = persona, "Napisz krotko, co ma sie dziac" + Losuj, linijka "Asystent dobral: ..." + "Dlaczego",
+  cena (auto po dobraniu, darmowa), jeden duzy "Zrob rolke" (bez swiezej ceny najpierw ja sprawdza, potem pyta "Zrobic za N
+  kr?"); wszystko inne w "Zmien szczegoly" (reczne zmiany = `state.zp.reczne`, asystent ich nie nadpisuje; "Oddaj wszystko
+  asystentowi"). Karta rolki z promptu: "Asystent: dlaczego", "Jak wyszla? Dobra / Slaba", "Dograj glos".
 
 ## Postprodukcja
 
@@ -169,6 +211,8 @@ fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, gener
                     generuj(): wznow_w_toku -> kandydaci -> _rolka (krok 0 + zapas_nsfw) -> _wyslij / _czekaj / _rozlicz / _sukces.
 scenariusz.py       rolka z promptu: katalog polskich miejsc, gotowe pomysly, wlosy/stroje/reakcje/komentarze/kamery, zbuduj() ->
                     prompt + zdjecia, sprawdz(), katalog() dla panelu (zero wysylania). Fabryka: wycena_z_promptu/dodaj_z_promptu.
+asystent.py         "agent w tle" zakladki Z promptu: dobierz() (OpenRouter free albo reguly) + nauka z ocen/NSFW/IP (bez kredytow)
+komentarz_glos.py   komentarz zza kamery z ElevenLabs dograny po generacji (ffmpeg miks z otoczeniem w sekundzie reakcji)
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
                     -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
                     glowny; `czat_persony`) -> raport dnia po 20:00. BEZ lipsyncu.
@@ -185,8 +229,9 @@ dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobier
                     IDEMPOTENTNY, JEDNOSTKA kr|c, WYMAGA_LIMITU; `dostawcy.kwota(k, nazwa)` = "46 kr" / "$2.60"):
                     higgsfield.py (CLI), yapper.py (REST; cialo per model z GET /models + schema.json, wycena dryRun),
                     wavespeed.py (REST WaveSpeedAI; MODELE = Seedance 2.5 Edit Turbo/Edit, Wan 3.0/Prime R2V z cennikiem; centy USD),
-                    elevenlabs.py (TYLKO gotowy/saldo_szczegoly: zostalo znakow TTS z GET /v1/user/subscription - do paska sald;
-                    NAZWY_SALDA = NAZWY + elevenlabs; glos z tekstu nadal przez sync.so),
+                    elevenlabs.py (gotowy/saldo_szczegoly: zostalo znakow TTS z GET /v1/user/subscription - do paska sald;
+                    NAZWY_SALDA = NAZWY + elevenlabs; stan_klucza, glosy/wybierz_glos, tts() eleven_v3 -> mp3 dla komentarza
+                    rolek z promptu; glos z tekstu do lipsyncu nadal przez sync.so),
                     sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
                     telegram.json obok stan.json: chat_id = czat glowny (pierwszy, ktory napisal), `czaty` = sparowane konta person
                     (tylko te z ustawien telegram_czat; obce ignorowane); `czat_dla(konto)`; limity 20 MB pobieranie / 50 MB
@@ -195,7 +240,7 @@ higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma
                     env (YAPPER_API_KEY, WAVESPEED_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
 mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
 klatki.py           ffprobe/ffmpeg: info, klatki PNG, arkusz.jpg (siatka do ogladania), potnij (dlugie zrodla na kawalki po 30 s)
-sekrety.py          klucze API (yapper, wavespeed, sync, elevenlabs, telegram = token bota)
+sekrety.py          klucze API (yapper, wavespeed, sync, elevenlabs, telegram = token bota, openrouter); PREFIKSY (sk_, sk-or-)
 baza.py             warstwa danych (modelki/<slug>/*.json, budzet, dziennik.jsonl) - zawsze przez nia, nie edytuj JSON-ow recznie
 postprocess.py      (nieuzywany - do skasowania, decyzja usera 2026-10-04)
 app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle naraz (Konsola), autopilot jako watek,

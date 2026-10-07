@@ -9,8 +9,13 @@ Zasady (sprawdzone na przewodniku Seedance 2.5 i na rolkach usera z 6.10, PROJEK
   tokeny <<<image_N>>> (tak zapisuje je apka Higgsfield), Wan / Gemini - bez numerow ("the reference photos");
 - prawdziwe, rozpoznawalne polskie miejsca (MIEJSCA) i wyglad nagrania z telefonu, nie z lustrzanki (opisy pozytywne);
 - komentarz zza kamery po polsku RAZ, w klamrach, po "Dialogue language: Polish." (inaczej model dorabia napisy / chinski);
-- bez nazw marek i postaci (filtr IP Higgsfielda), bez slow z fabryka.SLOWA_RYZYKOWNE (filtr NSFW);
-- wlosy do wyboru per rolka (domyslnie wlasne ze zdjec), zmiana wlosow nie zmienia twarzy; wzrost persony z profilu (wzrost_cm).
+- bez nazw marek sklepow i postaci (filtr IP Higgsfielda), bez slow z fabryka.SLOWA_RYZYKOWNE (filtr NSFW); prawdziwe NAZWY
+  galerii/dworcow/dzielnic (OBIEKTY, `nazwy: "prawdziwe"`) albo bez nazw (`"opisowe"` - bezpieczny zapas, gdy filtr IP odrzuci);
+- wlosy do wyboru per rolka (domyslnie wlasne ze zdjec), zmiana wlosow nie zmienia twarzy; wzrost persony z profilu (wzrost_cm);
+- (zp-2, feedback usera 2026-10-07) odwazne, przyciagajace wzrok stroje (STROJE_ODWAZNE, legalna moda uliczna), kamera z ukrycia
+  (KAMERY_UKRYTE: z daleka, z biodra, zza filaru - nigdy nie podchodzi), subtelne reakcje zdziwienia (REAKCJE_ZDZIWIENIE + polskie
+  linie), glos komentarza: `glos` "model" (mowi model wideo; `wymowa: "fonetyczna"` = ą/ę zapisane tak, jak sie je czyta) albo
+  "tts" (wideo tylko z dzwiekiem otoczenia, komentarz ElevenLabs dogrywa komentarz_glos.py po generacji).
 """
 import os
 import random
@@ -20,7 +25,7 @@ from datetime import date
 
 import baza
 
-WERSJA_SZABLONU = "zp-1"
+WERSJA_SZABLONU = "zp-2"
 
 # ---------------- modele (wszystkie przez CLI Higgsfield, wyceny `generate cost` z 2026-10-07) ----------------
 
@@ -124,11 +129,80 @@ WLOSY_GRZYWKI = {
 # ---------------- stroje ----------------
 
 STROJE_TRYBY = {
+    "odwazny": "Odważny, przyciąga wzrok (losowy)",
     "zdjecia": "Jak na jej zdjęciach",
     "codzienny": "Codzienny, w jej stylu (losowy)",
     "cosplay": "Cosplay (losowy) – tylko gdy chcesz",
     "wlasny": "Własny opis",
 }
+# Odwazne, ekscentryczne stroje do rolek "ludzie reaguja" (feedback usera 2026-10-07): bardzo krotkie spodniczki, glebokie dekolty,
+# dziwne zestawienia - ale LEGALNA moda uliczna (zero nagosci, zero bielizny na wierzchu). Opisy bez slow z fabryka.SLOWA_RYZYKOWNE
+# ("mini skirt", "tight dress", "cleavage", "sheer", "mesh", "lace"...) - filtr NSFW. id -> (etykieta PL, opis EN, pory roku)
+STROJE_ODWAZNE = {
+    "krata_futerko": ("Krótka spódniczka w czerwoną kratę + różowa kurtka z futerkiem",
+                      "a very short red tartan pleated skirt, a fitted black long-sleeve top with a low square neckline, a cropped "
+                      "fluffy hot-pink faux-fur jacket, black opaque tights and knee-high black patent platform boots",
+                      ("jesien", "zima", "wiosna")),
+    "panterka": ("Płaszcz w panterkę + krótka skórzana spódniczka",
+                 "a long leopard-print faux-fur coat worn open over a black top with a deep V-neck, a very short black leather "
+                 "skirt and black over-the-knee boots", ("jesien", "zima")),
+    "srebrna_kurtka": ("Krótka srebrna kurtka + plisowana spódniczko-spodenki",
+                       "a cropped shiny metallic-silver puffer jacket, a white ribbed top with a low scoop neckline, a very short "
+                       "black pleated skort, black opaque tights and chunky silver platform sneakers", ("jesien", "zima")),
+    "rozowy_sweterek": ("Różowy puszysty sweterek w serek + biała jeansowa spódniczka",
+                        "a fluffy baby-pink cardigan buttoned low with a deep V-neck, a very short white denim skirt and white "
+                        "knee-high boots", ("wiosna", "jesien")),
+    "krowie_laty": ("Kurtka w krowie łaty + różowa spódniczka i podkolanówki w paski",
+                    "a cropped cow-print faux-fur jacket, a fitted pink top with a low neckline, a very short pink pleated skirt, "
+                    "black-and-white striped knee-high socks and white platform boots", ("jesien", "wiosna", "zima")),
+    "czerwony_trencz": ("Czerwony lakierowany trencz jako sukienka + czerwone kozaki",
+                        "a short belted cherry-red patent-leather trench coat worn as a dress with a low neckline, glossy red "
+                        "over-the-knee boots and small black sunglasses", ("wiosna", "jesien")),
+    "blezer_sukienka": ("Limonkowa marynarka jako krótka sukienka",
+                        "an oversized lime-green blazer worn as a very short dress, cinched with a wide black belt and buttoned "
+                        "low, black opaque tights and pointed black heeled boots", ("wiosna", "jesien")),
+    "cekiny_w_dzien": ("Złoty cekinowy top w biały dzień + krótka spódniczka",
+                       "a sparkly gold sequinned party top with a low neckline worn in broad daylight, a very short black pleated "
+                       "skirt, a long camel coat worn open, black opaque tights and chunky boots", ("jesien", "zima")),
+    "pomaranczowa_dzianina": ("Pomarańczowa krótka sukienka z dzianiny + czapka do kompletu",
+                              "a bright orange fitted knit dress ending high above the knee with a low square neckline, a "
+                              "matching orange beanie, orange knee-high socks and black platform sneakers", ("jesien", "zima")),
+    "pastelowy_komplet": ("Pastelowy różowy komplet: krótki sweterek i spódniczka",
+                          "a pastel-pink knitted two-piece: a cropped fitted cardigan with a deep V-neck and a matching very "
+                          "short knit skirt, white over-the-knee socks and fluffy white boots", ("jesien", "zima", "wiosna")),
+    "bialy_komplet": ("Cała na biało: futerko, krótkie spodenki, kozaki",
+                      "an all-white outfit: a cropped white faux-fur jacket, a white ribbed top with a low neckline, very short "
+                      "white shorts over white opaque tights and white knee-high boots", ("jesien", "zima")),
+    "moro": ("Moro: krótka spódniczka + glany",
+             "a cropped camouflage jacket, a black tank top with a low neckline, a very short camouflage skirt, black opaque "
+             "tights and chunky black combat boots", ("wiosna", "jesien")),
+    "varsity": ("Kurtka baseballowa + spódniczka w kratę z łańcuchem",
+                "a purple-and-yellow cropped varsity jacket, a white fitted top with a low neckline, a very short grey plaid "
+                "skirt with a chunky silver chain belt, white knee-high socks and black platform loafers", ("wiosna", "jesien")),
+    "baletowa_spodniczka": ("Bufiasta różowa spódniczka + skórzana ramoneska",
+                            "a puffy layered pink ruffle skirt ending high above the knee, a black leather biker jacket, a "
+                            "black top with a low neckline, black opaque tights and chunky black boots", ("wiosna", "jesien")),
+    "neon": ("Neonowo-zielony komplet: krótka bluza i bojówki",
+             "a neon-green cropped zip-up jacket worn open over a black top with a low neckline, neon-green low-rise cargo "
+             "trousers, a chunky chain necklace and huge white platform sneakers", ("wiosna", "lato", "jesien")),
+    "futro_kozaki": ("Długie białe futerko + krótka czarna sukienka + kozaki",
+                     "a long white faux-fur coat worn open over a very short black knit dress with a low neckline, a huge black "
+                     "faux-fur hat and black thigh-high boots", ("zima",)),
+    "zolty_top": ("Żółty top z odkrytymi plecami + krótkie jeansowe szorty",
+                  "a bright yellow halter top with an open back, very short frayed denim shorts, white platform sandals and a "
+                  "tiny green handbag", ("lato",)),
+    "groszki": ("Czerwona sukienka w groszki na ramiączkach",
+                "a red polka-dot sundress with thin straps and a low neckline, ending high above the knee, white platform "
+                "sneakers and a straw bucket hat", ("lato", "wiosna")),
+    "kwiatowy_kombinezon": ("Kwiecisty krótki kombinezon z dekoltem w serek",
+                            "a floral very short playsuit with a deep V-neck, white platform sandals and big gold hoop earrings",
+                            ("lato",)),
+}
+
+
+def stroje_odwazne_na(sezon):
+    """Id odwaznych strojow pasujacych do pory roku (gdy zaden - wszystkie)."""
+    return [k for k, v in STROJE_ODWAZNE.items() if sezon in v[2]] or list(STROJE_ODWAZNE)
 # codzienne ubrania w stylu person (alternatywny / e-girl na co dzien - czarne, platformy), z porami roku
 STROJE_CODZIENNE = [
     ("a black oversized hoodie, loose black cargo trousers and chunky black platform sneakers", ("wiosna", "jesien")),
@@ -176,10 +250,80 @@ REAKCJE = {
     "nagrywa": ("Ktoś też ją nagrywa", "a teenager nearby secretly films her on his own phone too, grinning"),
     "szept": ("Szepczą i chichoczą", "two friends whisper to each other, glance at her and giggle"),
     "brak": ("Nikt nie reaguje", "nobody pays her any special attention; people simply walk past"),
+    # zdziwienie / szok "jak mozna tak chodzic" (prosba usera 2026-10-07) - subtelnie i wiarygodnie, bez pokazywania palcem
+    "dwa_razy": ("Ktoś się odwraca drugi raz i staje",
+                 "a man walking past glances at her, takes two more steps, then does a double take, stops for a second and "
+                 "stares at her outfit with raised eyebrows before slowly moving on"),
+    "para_kreci_glowa": ("Starsza para wymienia spojrzenia i kręci głową",
+                         "an older couple walking arm in arm exchange a long look; the woman purses her lips and slowly shakes "
+                         "her head, the man keeps glancing back over his shoulder"),
+    "szturcha_kolege": ("Chłopak szturcha kolegę łokciem",
+                        "a young man nudges his friend with his elbow and tilts his head towards her; the friend turns, stares "
+                        "for a second with his mouth slightly open, then looks away grinning"),
+    "kasjerka_zamiera": ("Kasjerka zamiera w pół ruchu",
+                         "the cashier freezes mid-scan with a product still in her hand, stares at her outfit for a second, "
+                         "then blinks and carries on scanning"),
+    "mama_odciaga": ("Mama odciąga dziecko na bok",
+                     "a mother walking with a small child stares at her, then gently pulls the child closer to her side and "
+                     "walks on, glancing back once"),
+    "szepcze_patrzac": ("Ktoś szepcze do koleżanki, patrząc na nią",
+                        "a woman leans to her friend and whispers something without taking her eyes off her; the friend looks "
+                        "over and her eyebrows go up"),
+}
+REAKCJE_ZDZIWIENIE = ("dwa_razy", "para_kreci_glowa", "szturcha_kolege", "kasjerka_zamiera", "mama_odciaga", "szepcze_patrzac")
+SUBTELNE_REAKCJE = (" The reactions are subtle and believable: short stares, raised eyebrows, a small head shake; nobody points, "
+                    "laughs out loud or speaks to her.")
+# krotkie polskie komentarze zza kamery pasujace do reakcji zdziwienia (bez ą/ę na koncu wyrazow - model wideo czyta je lepiej)
+LINIE_REAKCJI = {
+    "dwa_razy": ["Widziałaś to?", "Jak ona może tak chodzić?", "No ja nie mogę…"],
+    "para_kreci_glowa": ["Jak ona może tak chodzić?", "No ja nie mogę…", "Widziałaś to?"],
+    "szturcha_kolege": ["Widziałeś to?", "Ej, patrz na nią.", "No ja nie mogę…"],
+    "kasjerka_zamiera": ["No ja nie mogę…", "Widziałaś to?", "Jak ona może tak chodzić?"],
+    "mama_odciaga": ["Jak ona może tak chodzić?", "Widziałaś to?"],
+    "szepcze_patrzac": ["Widziałaś to?", "No ja nie mogę…", "Jak ona może tak chodzić?"],
 }
 KOMENTARZE = ["Jak ona wygląda.", "Patrz, patrz…", "Co ona ma na sobie?", "O matko…", "Zobacz, zobacz…", "Teraz tak się chodzi?",
-              "Ej, patrz na nią.", "No to mamy cyrk.", "Ale odwaga.", "Serio tak wyszła z domu?", "Ja bym tak nie wyszła."]
+              "Ej, patrz na nią.", "No to mamy cyrk.", "Ale odwaga.", "Serio tak wyszła z domu?", "Ja bym tak nie wyszła.",
+              "Jak ona może tak chodzić?", "Widziałaś to?", "Widziałeś to?", "No ja nie mogę…",
+              "Widziałaś to? Jak ona wygląda…"]
 KOMENTARZE_COSPLAY = ["Halloween już był.", "Gdzie jest ten konwent?"]
+
+# Glos komentarza zza kamery: kto go "mowi" (feedback usera: model wideo przekreca polskie ą - "wyględa" zamiast "wygląda")
+GLOSY = {
+    "auto": "Automatycznie (ElevenLabs, gdy jest dobry klucz; inaczej model)",
+    "tts": "Dograny po generacji (ElevenLabs v3, poprawna polszczyzna)",
+    "model": "Mówi model wideo (bywa zła wymowa ą/ę)",
+}
+WYMOWY = {"fonetyczna": "ą/ę zapisane tak, jak się je czyta (model mówi lepiej)", "zwykla": "zwykła pisownia"}
+NAZWY_TRYBY = {"prawdziwe": "Prawdziwe nazwy (np. Posnania, Złote Tarasy)", "opisowe": "Bez nazw (bezpieczniej dla filtra IP)"}
+
+
+def fonetycznie(tekst):
+    """Polski tekst -> zapis "tak, jak sie czyta" dla modelu wideo (ą/ę): wygląda -> wyglonda, idą -> idom, mogę -> moge, się -> sie,
+    zęby -> zemby. Uzywane tylko w {komentarzu} dla modelu wideo (ElevenLabs dostaje poprawna pisownie)."""
+    def zamien(m):
+        slowo = m.group(0)
+        wynik = []
+        for i, c in enumerate(slowo):
+            nast = slowo[i + 1].lower() if i + 1 < len(slowo) else ""
+            if c.lower() not in "ąę":
+                wynik.append(c)
+                continue
+            samog = "o" if c.lower() == "ą" else "e"
+            if not nast:
+                wynik.append("om" if samog == "o" else "e")          # idą -> idom, mogę -> moge
+            elif nast in "bp":
+                wynik.append(samog + "m")                            # zęby -> zemby, kąpie -> kompie
+            elif nast in "lł":
+                wynik.append(samog)                                  # wzięli -> wzieli
+            else:
+                wynik.append(samog + "n")                            # wygląda -> wyglonda, ręka -> renka
+            if c.isupper():
+                wynik[-1] = wynik[-1].capitalize()
+        return "".join(wynik)
+    tekst = re.sub(r"\b[Ss]ię\b", lambda m: m.group(0)[0] + "ie", tekst or "")
+    return re.sub(r"\w*[ąęĄĘ]\w*", zamien, tekst)
+
 
 KAMERY = {
     "idzie_za": ("Ktoś idzie za nią", "walking a few metres behind her",
@@ -197,10 +341,38 @@ KAMERY = {
     "siedzi_naprzeciw": ("Siedzi naprzeciwko (tramwaj, pociąg)", "sitting a few seats away from her",
                          "The phone rests low near their lap, tilted up at her; the view shakes with the vehicle and is partly "
                          "blocked by other passengers' shoulders."),
-    "kolejka": ("Stoi za nią w kolejce", "standing two people behind her in the queue",
+    "kolejka": ("Stoi za nią w kolejce (ukradkiem)", "standing two people behind her in the queue",
                 "The phone is held at chest height between other people's shoulders; at about {t1} s the person filming leans "
                 "sideways once to get a clearer view."),
+    # z ukrycia (feedback usera 2026-10-07): tak wygladaja prawdziwe nagrania "ludzie reaguja" - nagrywajacy udaje, ze nie nagrywa,
+    # telefon nisko, czesc kadru zaslonieta, z daleka, lekki zoom, nigdy nie podchodzi
+    "ukradkiem": ("Ukradkiem z daleka (udaje, że pisze SMS-a)", "standing still 6-10 m away, pretending to read their own phone",
+                  "The phone is held low at chest-to-waist height and tilted up a little, as if they were only texting; the frame "
+                  "is slightly crooked and she drifts off-centre; at about {t1} s a slow, slightly jerky 1.5x digital zoom "
+                  "towards her; she stays a small-to-medium figure in the frame and never becomes a close-up."),
+    "zza_filaru": ("Zza filaru / regału, z daleka", "half hidden behind a pillar (or the end of a shelf) 6-8 m away",
+                   "The blurred edge of the pillar or shelf, very close to the lens, covers one side of the frame; the phone "
+                   "peeks out at chest height; at about {t1} s a short 2x digital zoom; the person filming stays hidden and does "
+                   "not move."),
+    "z_biodra": ("Z biodra, w przejściu", "walking slowly past her 4-6 m away with the phone held low at hip height",
+                 "The lens points at her as if by accident: the horizon is tilted, the top of her head is sometimes cut off, and "
+                 "a passer-by's shoulder briefly covers half of the frame; the person filming never stops next to her."),
 }
+KAMERY_UKRYTE = ("ukradkiem", "zza_filaru", "z_biodra", "kolejka", "siedzi_naprzeciw")
+
+
+def kamera_ukryta(miejsce_id):
+    """Domyslna kamera z ukrycia dla miejsca (nigdy nie podchodzi): kolejka/siedzi naprzeciw zostaja, wnetrza - zza filaru,
+    ulice i przejscia - z biodra, reszta - ukradkiem z daleka."""
+    m = MIEJSCA.get(miejsce_id) or {}
+    k = m.get("kamera")
+    if k in ("kolejka", "siedzi_naprzeciw"):
+        return k
+    if m.get("wnetrze"):
+        return "zza_filaru"
+    if k in ("mija", "idzie_za"):
+        return "z_biodra"
+    return "ukradkiem"
 
 # ---------------- katalog prawdziwych polskich miejsc ----------------
 # Pola: nazwa (PL, panel), kat, krotko (EN, "in ..."), opis, detale, swiatlo, dzwieki, akcje (3 beaty domyslnego pomyslu),
@@ -330,7 +502,7 @@ MIEJSCA = {
         "streszczenie": "{IMIE} waits in a checkout queue with a basket while the cashier and an old lady stare.",
         "reakcje": "the cashier looks at her a second too long; an elderly lady behind her raises her eyebrows; a man at the next "
                    "checkout smirks",
-        "kamera": "kolejka", "slowa": ("biedron", "lidl", "dyskont", "market", "kasie", "kasjer", "zakupy", "koszyk"),
+        "kamera": "kolejka", "slowa": ("biedron", "lidl", "dyskont", "dyskonc", "market", "kasie", "kasjer", "zakupy", "koszyk"),
     },
     "drogeria": {
         "nazwa": "Drogeria (jak Rossmann)", "kat": "Sklepy i jedzenie", "wnetrze": True,
@@ -543,7 +715,7 @@ MIEJSCA = {
                   "she presses the door button and climbs aboard"],
         "streszczenie": "{IMIE} waits on a railway platform as a regional train pulls in.",
         "reakcje": "a conductor in a uniform cap gives her a long look; a group of students on the platform turn around",
-        "kamera": "stoi_obok", "slowa": ("peron", "pociag", "pkp", "intercity", "kolej"),
+        "kamera": "stoi_obok", "slowa": ("peron", "pociag", "pkp", "intercity", "kolejow"),   # nie "kolej" - "w kolejce"
     },
     "pociag": {
         "nazwa": "W pociągu (wagon)", "kat": "Komunikacja", "wnetrze": True,
@@ -874,6 +1046,109 @@ MIEJSCA = {
     },
 }
 
+# ---------------- prawdziwe nazwy: galerie, dworce, metro, dzielnice, miasta (feedback usera 2026-10-07) ----------------
+# User nie chce wymyslonych miejsc: rolka ma byc w PRAWDZIWEJ galerii (Posnania, Stary Browar, Wroclavia, Zlote Tarasy...).
+# Nazwy galerii/dworcow to nie marki produktow - filtr IP Higgsfielda raczej ich nie rusza; gdyby jednak odrzucil (powod "ip"),
+# asystent.py przelacza miejsce na `nazwy: "opisowe"` (opis bez nazwy). Marki SKLEPOW (Zabka, Biedronka, Rossmann...) nadal tylko
+# opisem wygladu. id -> (etykieta PL, fraza EN, miasto)
+GALERIE = {
+    "posnania": ("Posnania (Poznań)", "the Posnania shopping centre in Poznań", "poznan"),
+    "stary_browar": ("Stary Browar (Poznań)", "the Stary Browar shopping centre in Poznań, a converted red-brick brewery", "poznan"),
+    "wroclavia": ("Wroclavia (Wrocław)", "the Wroclavia shopping centre in Wrocław", "wroclaw"),
+    "zlote_tarasy": ("Złote Tarasy (Warszawa)", "the Złote Tarasy shopping centre in Warsaw, under its wavy glass roof", "warszawa"),
+    "arkadia": ("Arkadia (Warszawa)", "the Arkadia shopping centre in Warsaw", "warszawa"),
+    "galeria_krakowska": ("Galeria Krakowska (Kraków)", "the Galeria Krakowska shopping centre in Kraków", "krakow"),
+    "manufaktura": ("Manufaktura (Łódź)", "the Manufaktura shopping centre in Łódź, in red-brick former factory buildings", "lodz"),
+    "galeria_baltycka": ("Galeria Bałtycka (Gdańsk)", "the Galeria Bałtycka shopping centre in Gdańsk", "gdansk"),
+    "silesia": ("Silesia City Center (Katowice)", "the Silesia City Center shopping centre in Katowice", "katowice"),
+}
+DWORCE = {
+    "warszawa_centralna": ("Warszawa Centralna", "Warszawa Centralna station in Warsaw", "warszawa"),
+    "krakow_glowny": ("Kraków Główny", "Kraków Główny station in Kraków", "krakow"),
+    "wroclaw_glowny": ("Wrocław Główny", "Wrocław Główny station in Wrocław", "wroclaw"),
+    "poznan_glowny": ("Poznań Główny", "Poznań Główny station in Poznań", "poznan"),
+    "gdansk_glowny": ("Gdańsk Główny", "Gdańsk Główny station in Gdańsk", "gdansk"),
+    "katowice": ("Katowice (dworzec)", "the main railway station in Katowice", "katowice"),
+}
+STACJE_METRA = {
+    "centrum": ("Centrum (M1)", "Centrum station of the Warsaw metro", "warszawa"),
+    "swietokrzyska": ("Świętokrzyska", "Świętokrzyska station of the Warsaw metro", "warszawa"),
+    "politechnika": ("Politechnika", "Politechnika station of the Warsaw metro", "warszawa"),
+    "rondo_daszynskiego": ("Rondo Daszyńskiego", "Rondo Daszyńskiego station of the Warsaw metro", "warszawa"),
+}
+DZIELNICE = {
+    "jezyce": ("Jeżyce (Poznań)", "Poznań's Jeżyce district", "poznan"),
+    "praga": ("Praga (Warszawa)", "Warsaw's Praga district", "warszawa"),
+    "nowa_huta": ("Nowa Huta (Kraków)", "Kraków's Nowa Huta district", "krakow"),
+    "nadodrze": ("Nadodrze (Wrocław)", "Wrocław's Nadodrze district", "wroclaw"),
+    "baluty": ("Bałuty (Łódź)", "Łódź's Bałuty district", "lodz"),
+    "zaspa": ("Zaspa (Gdańsk)", "Gdańsk's Zaspa district", "gdansk"),
+    "tysiaclecie": ("Osiedle Tysiąclecia (Katowice)", "the Tysiąclecia estate in Katowice", "katowice"),
+}
+MIASTA = {
+    "warszawa": ("Warszawa", "Warsaw", "warszawa"), "krakow": ("Kraków", "Kraków", "krakow"),
+    "poznan": ("Poznań", "Poznań", "poznan"), "wroclaw": ("Wrocław", "Wrocław", "wroclaw"),
+    "lodz": ("Łódź", "Łódź", "lodz"), "gdansk": ("Gdańsk", "Gdańsk", "gdansk"), "katowice": ("Katowice", "Katowice", "katowice"),
+}
+_RDZENIE_MIAST = {"poznan": ("poznan",), "krakow": ("krakow",), "wroclaw": ("wroclaw",), "warszawa": ("warszaw", "stolic"),
+                  "lodz": (" lodz", "lodzi "), "gdansk": ("gdansk", "trojmiast"), "katowice": ("katowic", "slask")}
+# miejsce -> (lista obiektow, wzor frazy EN: {o} = fraza obiektu, {k} = 'krotko' miejsca)
+OBIEKTY_MIEJSC = {
+    "galeria_foodcourt": (GALERIE, "the food court of {o}"), "galeria_pasaz": (GALERIE, "the main passage of {o}"),
+    "dworzec": (DWORCE, "the main hall of {o}"), "peron": (DWORCE, "a platform of {o}"), "metro": (STACJE_METRA, "{o}"),
+    "przystanek": (MIASTA, "{k} in {o}"), "tramwaj": (MIASTA, "{k} in {o}"), "przejscie_podziemne": (MIASTA, "{k} in {o}"),
+    "przejscie_dla_pieszych": (MIASTA, "{k} in {o}"),
+    **{mid: (DZIELNICE, "{k} in {o}") for mid in ("osiedle", "klatka", "sklep_osiedlowy", "silownia_plenerowa", "orlik", "dyskont",
+                                                 "drogeria", "bazar", "piekarnia", "stacja_paliw", "kebab", "poczta", "park")},
+}
+# prawdziwe polskie napisy w miejscu (model psuje litery - krotkie, DUZE slowa); ceny zawsze "19,99 zł"
+SZYLDY = {
+    "galeria_foodcourt": "'ZAMÓW TUTAJ', 'ODBIÓR ZAMÓWIEŃ', 'WYJŚCIE'", "galeria_pasaz": "'WYJŚCIE', 'TOALETY', 'PROMOCJA -30%'",
+    "dyskont": "'KASA', 'PROMOCJA', 'PIECZYWO'", "drogeria": "'PROMOCJA', 'NOWOŚĆ', 'KASA'",
+    "sklep_osiedlowy": "'OTWARTE', 'HOT DOG', 'KAWA'", "stacja_paliw": "'KAWA', 'KASA', 'MYJNIA'",
+    "piekarnia": "'PĄCZKI', 'CHLEB', 'BUŁKI'", "kebab": "'KEBAB', 'ZAPIEKANKI', 'FRYTKI'", "poczta": "'POCZTA', 'NUMEREK'",
+    "bazar": "handwritten cardboard price cards like 'TRUSKAWKI 15 zł/kg'", "dworzec": "'ODJAZDY', 'PRZYJAZDY', 'KASY BILETOWE'",
+    "peron": "'PERON 2', 'TOR 3'", "metro": "'WYJŚCIE', 'KIERUNEK'", "przejscie_podziemne": "'WYJŚCIE', 'KLUCZE', 'KWIATY'",
+    "klatka": "'WYJŚCIE', 'OGŁOSZENIE'", "osiedle": "'PACZKOMAT', 'ZAKAZ PARKOWANIA'",
+}
+
+
+def obiekty_miejsca(miejsce_id):
+    """Prawdziwe obiekty dla miejsca: {id: (etykieta PL, fraza EN, miasto)} (puste = miejsce juz jest konkretne, np. Rynek)."""
+    lista = OBIEKTY_MIEJSC.get(miejsce_id)
+    return dict(lista[0]) if lista else {}
+
+
+def miasto_z_tekstu(tekst):
+    """'w Poznaniu', 'we Wrocławiu', 'w Warszawie' -> klucz MIASTA albo None."""
+    t = " " + _bez_ogonkow(tekst) + " "
+    return next((k for k, rdzenie in _RDZENIE_MIAST.items() if any(r in t for r in rdzenie)), None)
+
+
+def wybierz_obiekt(miejsce_id, tekst="", los=None, chce=None, unikaj=()):
+    """Konkretny prawdziwy obiekt (np. galeria Posnania) dla miejsca: `chce` (id, gdy pasuje), potem miasto z pomyslu, potem los
+    (bez obiektow z `unikaj` - np. odrzuconych przez filtr IP). None = miejsce bez listy obiektow."""
+    obiekty = obiekty_miejsca(miejsce_id)
+    if not obiekty:
+        return None
+    if chce in obiekty:
+        return chce
+    kandydaci = [k for k in obiekty if k not in set(unikaj or ())] or list(obiekty)
+    miasto = miasto_z_tekstu(tekst)
+    z_miasta = [k for k in kandydaci if obiekty[k][2] == miasto]
+    los = los or random.Random()
+    return _wybierz(los, sorted(z_miasta or kandydaci))
+
+
+def fraza_miejsca(miejsce_id, obiekt_id):
+    """'krotko' miejsca z prawdziwa nazwa obiektu (np. 'the food court of the Posnania shopping centre in Poznań')."""
+    m = MIEJSCA[miejsce_id]
+    obiekty = obiekty_miejsca(miejsce_id)
+    if not obiekt_id or obiekt_id not in obiekty:
+        return m["krotko"]
+    return OBIEKTY_MIEJSC[miejsce_id][1].format(o=obiekty[obiekt_id][1], k=m["krotko"])
+
+
 # ---------------- gotowe pomysly ("Losuj pomysl") ----------------
 # Pomysl = miejsce + (opcjonalnie) wlasne beaty/reakcje/kamera/komentarz; brakujace pola bierze z miejsca.
 
@@ -992,6 +1267,7 @@ REAKCJE_SLOWA = [   # (rdzenie, klucz REAKCJE) - pierwsza pasujaca
     (("szepcz", "szept"), "szept"),
     (("gapi", "patrzy", "patrza", "oglada", "ogladaja", "przyglada"), "gapienie"),
 ]
+_SAME_MIASTA = ("krakow", "wroclaw", "poznan", "lodz", "gdansk", "katowic", "slask", "trojmiast")
 _OGONKI = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
 
 
@@ -1009,12 +1285,18 @@ def pomysl_z_tekstu(tekst):
     """Wolny pomysl po polsku -> {"miejsce": id|None, "czynnosci": [EN], "reakcja": klucz|None}. Bez LLM: rdzenie slow."""
     t = " " + _bez_ogonkow(tekst) + " "
     miejsce = None
-    # kolejnosc: najpierw miejsca z dluzszymi/pewniejszymi slowami (wnetrze pociagu przed peronem, przystanek przed tramwajem)
-    for mid in ("pociag", "przystanek", "przejscie_dla_pieszych", "przejscie_podziemne", "plac_nowy", "plac_zamkowy",
-                "lazienki", "rynek_krakow", "rynek_wroclaw", "palac_kultury", "nowy_swiat", "galeria_foodcourt",
-                "galeria_pasaz") + tuple(MIEJSCA):
-        if _pasuje(t, MIEJSCA[mid]["slowa"]):
-            miejsce = mid
+    # kolejnosc: najpierw miejsca z dluzszymi/pewniejszymi slowami (wnetrze pociagu przed peronem, przystanek przed tramwajem);
+    # sama nazwa miasta ("we Wroclawiu") wybiera miejsce dopiero, gdy nic innego nie pasuje - "w galerii we Wroclawiu" = galeria
+    kolejnosc = ("pociag", "przystanek", "przejscie_dla_pieszych", "przejscie_podziemne", "plac_nowy", "plac_zamkowy",
+                 "lazienki", "rynek_krakow", "rynek_wroclaw", "palac_kultury", "nowy_swiat", "galeria_foodcourt",
+                 "galeria_pasaz") + tuple(MIEJSCA)
+    for tylko_miejsca in (True, False):
+        for mid in kolejnosc:
+            slowa = [s for s in MIEJSCA[mid]["slowa"] if not (tylko_miejsca and s in _SAME_MIASTA)]
+            if _pasuje(t, slowa):
+                miejsce = mid
+                break
+        if miejsce:
             break
     czynnosci = []
     for rdzenie, en in CZYNNOSCI:
@@ -1224,38 +1506,66 @@ SZABLON_PELNY = (
     "and body proportions. Keep her exactly recognizable in every frame, never blend her with anyone, only one of her."
     "{LINIA_STROJU}\n"
     "[{IMIE}] {TOZ}. Hair: {WLOSY}. {WZROST}Outfit: {STROJ}.\n"
-    "[Place] {OPIS} Real Polish details: {DETALE}. Signs and price tags in Polish (zł), mostly too far to read, no brand logos. "
+    "[Place] {OPIS} Real Polish details: {DETALE}. {SZYLDY} "
     "{POGODA}Ordinary Polish people of all ages in {SEZON} clothes ({UBRANIA}) go about their business; nobody looks like a "
     "model.\n"
     "[Action] {AKCJA}\n"
     "She acts like a normal person busy with her own task: relaxed posture, small weight shifts, natural hand movements; she "
-    "never looks into the lens and never poses. Bystanders react only briefly and naturally: {REAKCJE}.\n"
-    "[Camera] Ordinary iPhone, main 1x lens (about 24 mm), hand-held at chest-to-eye height by someone {OPERATOR}, filming "
-    "discreetly: constant small shake, off-centre framing corrected late, people sometimes pass between the lens and her. "
-    "{RUCH} Deep phone focus, the background as sharp as she is. No tripod, gimbal, drone, slow motion or cinematic moves.\n"
+    "never looks into the lens and never poses. Bystanders react only briefly and naturally: {REAKCJE}.{SUBTELNIE}\n"
+    "[Camera] {KAMERA}\n"
     "[Phone look] {SWIATLO}. Auto exposure and white balance readjust visibly as the phone turns; bright windows and sky clip "
     "to white, shadows slightly muddy with fine digital noise; natural, slightly flat colours, mild over-sharpening and "
     "compression like an Instagram upload. Realistic skin texture, no beauty filter, no colour grading.\n"
-    "[Sound] Phone-microphone sound: {DZWIEKI}; people nearby talk in Polish (words unclear). Dialogue language: Polish. "
-    "{KOMENTARZ}No background music.\n"
+    "[Sound] {DZWIEK}\n"
     "[Result] A real clip someone filmed in Poland and posted on Instagram: natural scale and perspective (feet on the ground, "
     "her height correct next to people and objects), real-world physics. No subtitles, captions, added text, stickers or "
     "watermarks."
 )
+# [Camera]: klasyczna (nagrywajacy idzie/stoi obok) albo z ukrycia (KAMERY_UKRYTE - nigdy nie podchodzi, ona nie widzi telefonu)
+KAMERA_KLASYCZNA = ("Ordinary iPhone, main 1x lens (about 24 mm), hand-held at chest-to-eye height by someone {OPERATOR}, "
+                    "filming discreetly: constant small shake, off-centre framing corrected late, people sometimes pass between "
+                    "the lens and her. {RUCH} Deep phone focus, the background as sharp as she is. No tripod, gimbal, drone, slow "
+                    "motion or cinematic moves.")
+KAMERA_Z_UKRYCIA = ("Ordinary iPhone (1x lens, a little digital zoom), secretly filmed by someone {OPERATOR} who pretends not to "
+                    "be filming. {RUCH} They keep their distance the whole time and never walk up to her; she never notices the "
+                    "phone. Constant small hand shake, deep phone focus, the background as sharp as she is. No tripod, gimbal, "
+                    "drone, slow motion or cinematic moves.")
+# [Sound]: komentarz mowi model wideo (z_modelem) albo wideo ma tylko dzwiek otoczenia, a komentarz dogrywa ElevenLabs (bez_mowy)
+DZWIEK_Z_MODELEM = ("Phone-microphone sound: {DZWIEKI}; people nearby talk in Polish (words unclear). Dialogue language: "
+                    "Polish. {KOMENTARZ}No background music.")
+DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}; people nearby murmur in Polish (words unclear). The person filming "
+                   "stays silent: no clear speech close to the phone. No background music.")
 
 SZABLON_KROTKI = (
     "Candid vertical 9:16 smartphone video, real footage, not a film: someone secretly films {IMIE}, the young woman from the "
     "reference photos, in {KROTKO}, Poland, on an ordinary {PORA} in {SEZON}. Keep her face, skin, piercings and body exactly as "
     "in the reference photos; never blend her with anyone; only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}Outfit: {STROJ}.\n"
-    "Place: {OPIS} Signs in Polish, too far to read. Ordinary Polish people in {SEZON} clothes go about their business.\n"
-    "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.\n"
-    "Camera: ordinary iPhone, 1x lens, hand-held by someone {OPERATOR}: small shake, off-centre framing, deep focus, no "
-    "cinematic moves. {RUCH}\n"
+    "Place: {OPIS} {SZYLDY} Ordinary Polish people in {SEZON} clothes go about their business.\n"
+    "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.{SUBTELNIE}\n"
+    "Camera: {KAMERA}\n"
     "Look: {SWIATLO}; phone auto exposure, windows and sky blown out, slight noise in the shadows, natural flat colours, "
     "realistic skin, no beauty filter.\n"
-    "Sound: ambience ({DZWIEKI}); dialogue language Polish. {KOMENTARZ}No music.\n"
+    "Sound: {DZWIEK}\n"
     "No subtitles, captions, text overlays or watermarks."
 )
+KAMERA_KROTKA = "ordinary iPhone, 1x lens, hand-held by someone {OPERATOR}: small shake, off-centre framing, deep focus, no cinematic moves. {RUCH}"
+KAMERA_KROTKA_UKRYTA = ("ordinary iPhone, secretly filmed by someone {OPERATOR} who pretends not to film and never walks up to "
+                        "her: {RUCH} Small shake, deep focus, no cinematic moves.")
+DZWIEK_KROTKI_Z_MODELEM = "ambience ({DZWIEKI}); dialogue language Polish. {KOMENTARZ}No music."
+DZWIEK_KROTKI_BEZ_MOWY = "ambience only ({DZWIEKI}), Polish murmur in the background; the person filming stays silent. No music."
+
+
+def szyldy(miejsce_id, nazwy="prawdziwe", obiekt_id=None):
+    """Zdanie o napisach: prawdziwe polskie slowa i ceny w zl (user: wymyslone nazwy sklepow i 'Z6£' zamiast zl)."""
+    przyklad = SZYLDY.get(miejsce_id)
+    zdanie = "Signs are in correct Polish with Polish letters" + (f" (e.g. {przyklad})" if przyklad else "")
+    zdanie += "; prices are written the Polish way, like '19,99 zł'"
+    obiekty = obiekty_miejsca(miejsce_id)
+    if nazwy == "prawdziwe" and obiekt_id in obiekty and miejsce_id in ("galeria_foodcourt", "galeria_pasaz"):
+        zdanie += f"; the real name {obiekty[obiekt_id][0].split(' (')[0]} appears on the mall's own signs"
+    if nazwy != "prawdziwe":
+        zdanie += "; no brand logos"
+    return zdanie + "."
 
 
 def _pierwsze_zdanie(tekst):
@@ -1308,9 +1618,13 @@ def zbuduj(slug, opcje=None, los=None):
         rozdzielczosc ("auto" = <= 8 s -> 1080p, dluzsze -> 720p), wlosy {kolor, fryzura, grzywka}, stroj ("zdjecia" |
         "codzienny" | "cosplay" | "wlasny" | "plik:<nazwa ze stroje/>"), stroj_tekst, reakcja (klucz REAKCJE), komentarz
         ("losowy" | "bez" | "wlasny" | tekst z KOMENTARZE), komentarz_tekst, sezon ("auto" | klucz SEZONY), pora ("auto" |
-        klucz PORY_DNIA), kamera ("auto" | klucz KAMERY), ustalone (losowe wybory z poprzedniego budowania - ten sam prompt).
+        klucz PORY_DNIA), kamera ("auto" = z ukrycia wg miejsca | klucz KAMERY), ustalone (losowe wybory z poprzedniego
+        budowania - ten sam prompt). zp-2: stroj "odwazny" | "odwazny:<id STROJE_ODWAZNE>", nazwy ("prawdziwe" | "opisowe"),
+        obiekt (id z obiekty_miejsca, "" = wg miasta z pomyslu / losowo), glos ("model" | "tts"; "auto" rozstrzyga fabryka),
+        wymowa ("zwykla" | "fonetyczna" - tylko komentarz mowiony przez model).
     Zwraca {"prompt", "obrazy" (sciezki), "znaki", "limit", "ostrzezenia", "ustalone", "model", "mode", "parametry",
-            "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon"}.
+            "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon", "glos", "komentarz",
+            "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja"}.
     Rzuca ValueError przy zlych opcjach (model, dlugosc, brak zdjec persony, za dlugi prompt...)."""
     o = dict(opcje or {})
     u = dict(o.get("ustalone") or {})
@@ -1377,9 +1691,19 @@ def zbuduj(slug, opcje=None, los=None):
         u.get("pora") if u.get("pora") in PORY_DNIA else _wybierz(los, list(m.get("pory") or ("rano", "popoludnie"))))
     sz = SEZONY[sezon]
 
-    # --- kamera ---
+    # --- kamera (domyslnie z ukrycia: z daleka / z biodra / zza filaru - feedback usera 2026-10-07) ---
     kamera = o.get("kamera") if o.get("kamera") in KAMERY else (
-        u.get("kamera") if u.get("kamera") in KAMERY else (pomysl or {}).get("kamera") or m.get("kamera") or "stoi_obok")
+        u.get("kamera") if u.get("kamera") in KAMERY else kamera_ukryta(miejsce_id))
+
+    # --- prawdziwa nazwa miejsca (galeria Posnania, dworzec Kraków Główny, Jeżyce...) albo opis bez nazwy ---
+    nazwy = (o.get("nazwy") or "prawdziwe").strip()
+    if nazwy not in NAZWY_TRYBY:
+        raise ValueError(f"Nieznany tryb nazw '{nazwy}' (prawdziwe albo opisowe).")
+    obiekt = None
+    if nazwy == "prawdziwe" and obiekty_miejsca(miejsce_id):
+        chce = o.get("obiekt") if o.get("obiekt") in obiekty_miejsca(miejsce_id) else u.get("obiekt")
+        obiekt = wybierz_obiekt(miejsce_id, tekst or (pomysl or {}).get("pl", ""), los, chce=chce)
+    krotko = fraza_miejsca(miejsce_id, obiekt)
 
     # --- akcja ---
     if pomysl:
@@ -1407,16 +1731,27 @@ def zbuduj(slug, opcje=None, los=None):
         reakcje = REAKCJE[rk_auto][1] if rk_auto else ((pomysl or {}).get("reakcje") or m["reakcje"])
     else:
         reakcje = REAKCJE[rk][1]
+    zdziwienie = rk in REAKCJE_ZDZIWIENIE
 
     # --- stroj ---
     stroj_wybor = (o.get("stroj") or "zdjecia").strip()
     stroj_plik = None
+    stroj_id = None
     linia_stroju = ""
     obrazy_n = len(baza.sciezki_referencji(slug))
     if not obrazy_n:
         raise ValueError(f"{imie} nie ma zdjec w referencje/ - bez nich model nie wie, kogo pokazac.")
     if stroj_wybor == "zdjecia":
         stroj = "the same outfit she wears in the reference photos"
+    elif stroj_wybor == "odwazny" or stroj_wybor.startswith("odwazny:"):
+        stroj_id = stroj_wybor.split(":", 1)[1] if ":" in stroj_wybor else (
+            u.get("stroj_id") if u.get("stroj_tryb") == "odwazny" and u.get("stroj_id") in STROJE_ODWAZNE
+            else _wybierz(los, sorted(stroje_odwazne_na(sezon))))
+        if stroj_id not in STROJE_ODWAZNE:
+            raise ValueError(f"Nieznany stroj '{stroj_id}'.")
+        u["stroj_id"], u["stroj_tryb"] = stroj_id, "odwazny"
+        stroj = (f"{STROJE_ODWAZNE[stroj_id][1]} - a bold, eye-catching street look that makes people turn their heads (not the "
+                 f"clothes from the reference photos)")
     elif stroj_wybor == "codzienny":
         pasujace = [s for s, pory in STROJE_CODZIENNE if sezon in pory] or [s for s, _ in STROJE_CODZIENNE]
         opis = u.get("stroj_opis") if u.get("stroj_tryb") == "codzienny" and u.get("stroj_opis") else _wybierz(los, pasujace)
@@ -1487,27 +1822,47 @@ def zbuduj(slug, opcje=None, los=None):
 
     operator = (pomysl or {}).get("operator") or (m.get("operator") if kamera == m.get("kamera") else None) or KAMERY[kamera][1]
     ruch = KAMERY[kamera][2].format(t1=t1)
+    ukryta = kamera in KAMERY_UKRYTE
+
+    # --- glos komentarza: model wideo (opcjonalnie zapis fonetyczny ą/ę) albo cisza zza kamery + ElevenLabs po generacji ---
+    glos = (o.get("glos") or "model").strip()
+    if glos not in GLOSY:
+        raise ValueError(f"Nieznany glos komentarza '{glos}'.")
+    glos = "model" if glos == "auto" else glos           # "auto" rozstrzyga fabryka (klucz ElevenLabs) przed zbuduj()
+    wymowa = (o.get("wymowa") or "zwykla").strip()
+    if wymowa not in WYMOWY:
+        raise ValueError(f"Nieznana wymowa '{wymowa}'.")
+    mowi_model = bool(kom_tekst) and glos == "model"
+    w_klamrach = fonetycznie(kom_tekst) if wymowa == "fonetyczna" else kom_tekst
+    ton = "half-whispering in disbelief" if zdziwienie else "amused"
+    po = "Then a quiet, stunned exhale" if zdziwienie else "Then a short stifled laugh"
+    subtelnie = SUBTELNE_REAKCJE if zdziwienie else ""
+    napisy = szyldy(miejsce_id, nazwy, obiekt)
 
     if mi["szablon"] == "pelny":
-        if kom_tekst:
-            komentarz = (f"At about {t_kom} s the person filming says quietly off-screen (amused, native Polish accent): "
-                         f"{{{kom_tekst}}} Then a short stifled laugh; {imie} does not react. ")
-        else:
-            komentarz = ""
+        komentarz = (f"At about {t_kom} s the person filming says quietly off-screen ({ton}, native Polish accent): "
+                     f"{{{w_klamrach}}} {po}; {imie} does not react. ") if mowi_model else ""
+        dzwiek = (DZWIEK_Z_MODELEM if glos == "model" or not kom_tekst else DZWIEK_BEZ_MOWY).format(
+            DZWIEKI=m["dzwieki"], KOMENTARZ=komentarz)
+        kamera_blok = (KAMERA_Z_UKRYCIA if ukryta else KAMERA_KLASYCZNA).format(OPERATOR=operator, RUCH=ruch)
         prompt = SZABLON_PELNY.format(
-            SEK=dlugosc, KROTKO=m["krotko"], PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
+            SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
             REF=_lista_tokenow(obrazy_n), IMIE=imie, WLOSY_REF="" if wlosy_zmienione else "hair, ",
             LINIA_STROJU=linia_stroju, TOZ=toz.rstrip("."), WLOSY=wlosy, WZROST=(wzrost + " ") if wzrost else "",
-            STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], POGODA=pogoda, UBRANIA=sz["ubrania"], AKCJA=akcja,
-            REAKCJE=reakcje, OPERATOR=operator, RUCH=ruch, SWIATLO=swiatlo, DZWIEKI=m["dzwieki"], KOMENTARZ=komentarz)
+            STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], SZYLDY=napisy, POGODA=pogoda, UBRANIA=sz["ubrania"], AKCJA=akcja,
+            REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=dzwiek)
     else:
-        komentarz = (f"The person filming says quietly off-screen (amused): {{{kom_tekst}}} " if kom_tekst else "")
+        komentarz = (f"At about {t_kom} s the person filming says quietly off-screen ({ton}): {{{w_klamrach}}} "
+                     if mowi_model else "")
+        dzwiek = (DZWIEK_KROTKI_Z_MODELEM if glos == "model" or not kom_tekst else DZWIEK_KROTKI_BEZ_MOWY).format(
+            DZWIEKI=m["dzwieki"], KOMENTARZ=komentarz)
+        kamera_blok = (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA).format(OPERATOR=operator, RUCH=ruch)
         toz_k = _WZORZEC_TOKENU.sub("the reference photos", toz)
         prompt = SZABLON_KROTKI.format(
-            IMIE=imie, KROTKO=m["krotko"], PORA=PORY_DNIA[pora][1], SEZON=sz["en"], TOZ=toz_k.rstrip("."),
+            IMIE=imie, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], TOZ=toz_k.rstrip("."),
             WLOSY=wlosy, WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "", STROJ=stroj, OPIS=_pierwsze_zdanie(m["opis"]),
-            AKCJA=akcja, REAKCJE=reakcje, OPERATOR=operator, RUCH=ruch, SWIATLO=swiatlo, DZWIEKI=m["dzwieki"],
-            KOMENTARZ=komentarz)
+            SZYLDY=napisy, AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo,
+            DZWIEK=dzwiek)
     prompt = re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", prompt)).strip()
 
     obrazy = obrazy_rolki(slug, stroj_plik)
@@ -1522,15 +1877,21 @@ def zbuduj(slug, opcje=None, los=None):
     tytul = (pomysl["pl"] if pomysl else tekst)[:120]
     u.update({"ziarno": ziarno, "pomysl_id": (pomysl or {}).get("id"), "miejsce": miejsce_id, "sezon": sezon, "pora": pora,
               "kamera": kamera})
+    if obiekt:
+        u["obiekt"] = obiekt
     if kom_tekst and kom == "losowy":
         u["komentarz"] = kom_tekst
+    obiekt_nazwa = obiekty_miejsca(miejsce_id)[obiekt][0] if obiekt else None
     return {
         "prompt": prompt, "obrazy": obrazy, "znaki": len(prompt), "limit": mi["limit_znakow"], "ostrzezenia": ostrzezenia,
         "ustalone": u, "model": model, "mode": mi["mode"], "parametry": dict(mi["parametry"]),
         "generate_audio": mi["generate_audio"], "rozdzielczosc": rozdz, "dlugosc": dlugosc, "tytul": tytul,
-        "miejsce": miejsce_id, "miejsce_nazwa": m["nazwa"], "pomysl_id": (pomysl or {}).get("id"), "szablon": WERSJA_SZABLONU,
+        "miejsce": miejsce_id, "miejsce_nazwa": m["nazwa"] + (f" – {obiekt_nazwa}" if obiekt_nazwa else ""),
+        "pomysl_id": (pomysl or {}).get("id"), "szablon": WERSJA_SZABLONU,
         "wlosy_zmienione": wlosy_zmienione, "stroj_plik": stroj_plik, "komentarz": kom_tekst,
-        "sezon": sezon, "pora": pora, "kamera": kamera,
+        "sezon": sezon, "pora": pora, "kamera": kamera, "glos": glos if kom_tekst else "bez", "wymowa": wymowa,
+        "komentarz_t": t_kom if kom_tekst else None, "obiekt": obiekt, "obiekt_nazwa": obiekt_nazwa, "nazwy": nazwy,
+        "stroj_id": stroj_id, "stroj_tryb": stroj_wybor.split(":")[0], "reakcja": rk,
     }
 
 
@@ -1592,9 +1953,17 @@ def katalog(slug=None):
                   "fryzury": [[k, v[0]] for k, v in WLOSY_FRYZURY.items()],
                   "grzywki": [[k, v[0]] for k, v in WLOSY_GRZYWKI.items()]},
         "stroje": [[k, v] for k, v in STROJE_TRYBY.items()],
+        "stroje_odwazne": [[k, v[0], list(v[2])] for k, v in STROJE_ODWAZNE.items()],
         "reakcje": [[k, v[0]] for k, v in REAKCJE.items()],
+        "reakcje_zdziwienie": list(REAKCJE_ZDZIWIENIE),
+        "linie_reakcji": LINIE_REAKCJI,
         "komentarze": KOMENTARZE,
         "kamery": [[k, v[0]] for k, v in KAMERY.items()],
+        "kamery_ukryte": list(KAMERY_UKRYTE),
+        "glosy": [[k, v] for k, v in GLOSY.items()],
+        "wymowy": [[k, v] for k, v in WYMOWY.items()],
+        "nazwy": [[k, v] for k, v in NAZWY_TRYBY.items()],
+        "obiekty": {mid: [[k, v[0]] for k, v in obiekty_miejsca(mid).items()] for mid in OBIEKTY_MIEJSC},
         "sezony": [[k, v["nazwa"]] for k, v in SEZONY.items()], "sezon_teraz": sezon_z_daty(),
         "pory": [[k, v[0]] for k, v in PORY_DNIA.items()],
     }

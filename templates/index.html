@@ -247,73 +247,103 @@
           </details>
         </section>
 
-        <!-- ===================== Z PROMPTU (scenariusz.py, /api/z-promptu) ===================== -->
+        <!-- ===================== Z PROMPTU (scenariusz.py + asystent.py, /api/z-promptu) ===================== -->
         <section class="strona" id="strona-z-promptu" hidden>
           <div class="naglowek-strony">
-            <div><h1>Rolka z promptu</h1><p>Bez filmiku: piszesz pomysł, a fabryka robi rolkę z Twoją personą – jak nagraną zwykłym telefonem w Polsce. Zanim cokolwiek wyda, pokaże cenę.</p></div>
+            <div><h1>Rolka z promptu</h1><p>Bez filmiku: napisz w kilku słowach, co ma się dziać – asystent dobierze resztę (prawdziwe miejsce w Polsce, odważny strój, kamerę z ukrycia, reakcje ludzi), pokaże cenę i zrobi rolkę.</p></div>
           </div>
 
           <form class="karta zp" id="form-zp" autocomplete="off">
-            <div class="zp-siatka">
-              <div class="pole"><label for="zp-persona">Persona</label><select id="zp-persona"></select></div>
-              <div class="pole"><label for="zp-model">Model</label><select id="zp-model"></select></div>
-              <div class="pole"><label for="zp-dlugosc">Długość</label><select id="zp-dlugosc"></select></div>
-              <div class="pole"><label for="zp-rozdz">Jakość</label><select id="zp-rozdz"></select></div>
-            </div>
-            <small class="pole-info" id="zp-model-info"></small>
+            <div class="zp-prosty">
+              <div class="pole zp-persona-pole"><label for="zp-persona">Persona</label><select id="zp-persona"></select></div>
 
-            <div class="pole">
-              <label for="zp-pomysl">Pomysł – po polsku, jednym zdaniem</label>
-              <textarea id="zp-pomysl" rows="2" placeholder="np. stoi w kolejce w sklepiku pod blokiem, chłopaki się gapią"></textarea>
-              <div class="rzad zp-pomysl-rzad">
-                <button class="btn btn-maly" type="button" data-akcja="zp-losuj">Losuj pomysł</button>
-                <select id="zp-gotowe" aria-label="Gotowe pomysły"><option value="">…albo wybierz gotowy pomysł</option></select>
+              <div class="pole">
+                <label for="zp-pomysl">Napisz krótko, co ma się dziać</label>
+                <textarea id="zp-pomysl" rows="2" placeholder="np. zamawia jedzenie w galerii w Poznaniu"></textarea>
+                <div class="rzad zp-pomysl-rzad">
+                  <button class="btn btn-maly" type="button" data-akcja="zp-losuj">Losuj</button>
+                  <button class="btn btn-maly" type="button" data-akcja="zp-dobierz" id="zp-btn-dobierz" title="Asystent dobierze wszystko jeszcze raz (Twoje ręczne zmiany zostają)">Dobierz inaczej</button>
+                </div>
               </div>
-            </div>
 
-            <div class="zp-siatka">
-              <div class="pole"><label for="zp-miejsce">Miejsce w Polsce</label><select id="zp-miejsce"></select></div>
-              <div class="pole"><label for="zp-stroj">Strój</label><select id="zp-stroj"></select>
-                <input type="text" id="zp-stroj-tekst" placeholder="np. czarna kurtka, szerokie dżinsy, glany" hidden></div>
-              <div class="pole"><label for="zp-reakcja">Reakcja ludzi</label><select id="zp-reakcja"></select></div>
-              <div class="pole"><label for="zp-komentarz">Komentarz zza kamery</label><select id="zp-komentarz"></select>
-                <input type="text" id="zp-komentarz-tekst" placeholder="np. Ale odwaga." maxlength="80" hidden></div>
-            </div>
-
-            <fieldset class="zp-wlosy">
-              <legend>Włosy</legend>
-              <div class="zp-siatka">
-                <div class="pole"><label for="zp-wlosy-kolor">Kolor</label><select id="zp-wlosy-kolor"></select></div>
-                <div class="pole"><label for="zp-wlosy-fryzura">Fryzura</label><select id="zp-wlosy-fryzura"></select></div>
-                <div class="pole"><label for="zp-wlosy-grzywka">Grzywka</label><select id="zp-wlosy-grzywka"></select></div>
+              <div class="zp-asystent" id="zp-asystent" aria-live="polite">
+                <div class="zp-asystent-linia"><span class="zp-asystent-etykieta">Asystent dobrał:</span> <span id="zp-asystent-tekst">napisz pomysł albo kliknij „Losuj”.</span></div>
+                <small class="zp-asystent-dlaczego" id="zp-asystent-dlaczego"></small>
               </div>
-              <small class="pole-info" id="zp-wlosy-info">Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.</small>
-            </fieldset>
 
-            <details class="zp-wiecej">
-              <summary><span class="ikona" data-ikona="chevron-dol"></span>Więcej: pora roku, pora dnia, kto nagrywa</summary>
+              <div class="zp-cena" id="zp-cena" aria-live="polite">Cena pojawi się tutaj (sprawdzenie nic nie kosztuje).</div>
+              <ul class="zp-uwagi" id="zp-uwagi" hidden></ul>
+
+              <button class="btn btn-glowny btn-duzy zp-zrob" type="button" data-akcja="zp-zrob" id="zp-btn-zrob" disabled>Zrób rolkę</button>
+              <small class="pole-info zp-zrob-info">Zanim cokolwiek zejdzie, zapytam o zgodę i pokażę cenę.</small>
+            </div>
+
+            <details class="zp-szczegoly" id="zp-szczegoly">
+              <summary><span class="ikona" data-ikona="chevron-dol"></span>Zmień szczegóły</summary>
+              <p class="muted zp-szczegoly-info">To, co tu zmienisz, asystent zostawi (nie nadpisze przy kolejnym pomyśle). <button class="btn btn-maly btn-tekst" type="button" data-akcja="zp-przywroc">Oddaj wszystko asystentowi</button></p>
+
               <div class="zp-siatka">
-                <div class="pole"><label for="zp-sezon">Pora roku</label><select id="zp-sezon"></select></div>
-                <div class="pole"><label for="zp-pora">Pora dnia</label><select id="zp-pora"></select></div>
-                <div class="pole"><label for="zp-kamera">Kto nagrywa</label><select id="zp-kamera"></select></div>
+                <div class="pole"><label for="zp-model">Model</label><select id="zp-model" data-zp-pole="model"></select></div>
+                <div class="pole"><label for="zp-dlugosc">Długość</label><select id="zp-dlugosc" data-zp-pole="dlugosc"></select></div>
+                <div class="pole"><label for="zp-rozdz">Jakość</label><select id="zp-rozdz" data-zp-pole="rozdzielczosc"></select></div>
+              </div>
+              <small class="pole-info" id="zp-model-info"></small>
+
+              <div class="pole">
+                <label for="zp-gotowe">Gotowe pomysły</label>
+                <select id="zp-gotowe" aria-label="Gotowe pomysły"><option value="">…wybierz gotowy pomysł</option></select>
+              </div>
+
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-miejsce">Miejsce w Polsce</label><select id="zp-miejsce" data-zp-pole="miejsce"></select></div>
+                <div class="pole"><label for="zp-obiekt">Która galeria / dworzec / dzielnica</label><select id="zp-obiekt" data-zp-pole="obiekt"></select></div>
+                <div class="pole"><label for="zp-nazwy">Nazwy miejsc</label><select id="zp-nazwy" data-zp-pole="nazwy"></select></div>
+              </div>
+
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-stroj">Strój</label><select id="zp-stroj" data-zp-pole="stroj"></select>
+                  <input type="text" id="zp-stroj-tekst" placeholder="np. czarna kurtka, szerokie dżinsy, glany" hidden></div>
+                <div class="pole"><label for="zp-reakcja">Reakcja ludzi</label><select id="zp-reakcja" data-zp-pole="reakcja"></select></div>
+                <div class="pole"><label for="zp-kamera">Kto nagrywa (kamera)</label><select id="zp-kamera" data-zp-pole="kamera"></select></div>
+              </div>
+
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-komentarz">Komentarz zza kamery</label><select id="zp-komentarz" data-zp-pole="komentarz"></select>
+                  <input type="text" id="zp-komentarz-tekst" placeholder="np. Widziałaś to?" maxlength="80" hidden></div>
+                <div class="pole"><label for="zp-glos">Kto mówi komentarz</label><select id="zp-glos" data-zp-pole="glos"></select></div>
+                <div class="pole"><label for="zp-wymowa">Pisownia dla modelu</label><select id="zp-wymowa" data-zp-pole="wymowa"></select></div>
+              </div>
+              <small class="pole-info" id="zp-glos-info"></small>
+
+              <fieldset class="zp-wlosy">
+                <legend>Włosy</legend>
+                <div class="zp-siatka">
+                  <div class="pole"><label for="zp-wlosy-kolor">Kolor</label><select id="zp-wlosy-kolor" data-zp-pole="wlosy"></select></div>
+                  <div class="pole"><label for="zp-wlosy-fryzura">Fryzura</label><select id="zp-wlosy-fryzura" data-zp-pole="wlosy"></select></div>
+                  <div class="pole"><label for="zp-wlosy-grzywka">Grzywka</label><select id="zp-wlosy-grzywka" data-zp-pole="wlosy"></select></div>
+                </div>
+                <small class="pole-info" id="zp-wlosy-info">Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.</small>
+              </fieldset>
+
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-sezon">Pora roku</label><select id="zp-sezon" data-zp-pole="sezon"></select></div>
+                <div class="pole"><label for="zp-pora">Pora dnia</label><select id="zp-pora" data-zp-pole="pora"></select></div>
+                <div class="pole" data-zaawansowane><label for="zp-glos-id">Głos komentarza (ElevenLabs Voice ID)</label>
+                  <input type="text" id="zp-glos-id" placeholder="puste = dobiorę sam (polski, kobiecy)" spellcheck="false"></div>
+              </div>
+
+              <details class="zp-prompt" id="zp-prompt-wrap" hidden>
+                <summary><span class="ikona" data-ikona="chevron-dol"></span><span>Prompt dla AI (<span id="zp-znaki">0</span> znaków)</span></summary>
+                <textarea id="zp-prompt" class="mono" rows="14" readonly spellcheck="false"></textarea>
+                <small class="pole-info" data-zaawansowane>Tryb pełny: możesz go poprawić przed „Zrób rolkę” (cena się nie zmienia, numery zdjęć &lt;&lt;&lt;image_N&gt;&gt;&gt; zostaw).</small>
+              </details>
+
+              <div class="karta-stopka zp-przyciski">
+                <button class="btn" type="button" data-akcja="zp-pokaz" id="zp-btn-pokaz">Pokaż prompt</button>
+                <button class="btn" type="button" data-akcja="zp-losuj-szczegoly" title="Wylosuj od nowa drobne losowe szczegóły (pora dnia, ziarno)">Inne drobiazgi</button>
+                <button class="btn" type="button" data-akcja="zp-cena" id="zp-btn-cena">Sprawdź cenę</button>
               </div>
             </details>
-
-            <div class="zp-cena" id="zp-cena" aria-live="polite">Kliknij „Sprawdź cenę” – to nic nie kosztuje.</div>
-            <ul class="zp-uwagi" id="zp-uwagi" hidden></ul>
-
-            <details class="zp-prompt" id="zp-prompt-wrap" hidden>
-              <summary><span class="ikona" data-ikona="chevron-dol"></span><span>Prompt dla AI (<span id="zp-znaki">0</span> znaków)</span></summary>
-              <textarea id="zp-prompt" class="mono" rows="14" readonly spellcheck="false"></textarea>
-              <small class="pole-info" data-zaawansowane>Tryb pełny: możesz go poprawić przed „Zrób rolkę” (cena się nie zmienia, numery zdjęć &lt;&lt;&lt;image_N&gt;&gt;&gt; zostaw).</small>
-            </details>
-
-            <div class="karta-stopka zp-przyciski">
-              <button class="btn" type="button" data-akcja="zp-pokaz" id="zp-btn-pokaz">Pokaż prompt</button>
-              <button class="btn" type="button" data-akcja="zp-losuj-szczegoly" data-zaawansowane title="Wylosuj od nowa komentarz, kamerę i inne losowe szczegóły">Inne szczegóły</button>
-              <button class="btn" type="button" data-akcja="zp-cena" id="zp-btn-cena">Sprawdź cenę</button>
-              <button class="btn btn-glowny btn-duzy" type="button" data-akcja="zp-zrob" id="zp-btn-zrob" disabled>Zrób rolkę</button>
-            </div>
           </form>
 
           <section class="karta" id="zp-lista-karta">

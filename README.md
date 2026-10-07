@@ -52,25 +52,31 @@ Ręcznie (panel albo konsola):
    przerabiany, żeby brzmiał jak nagranie z telefonu w pokoju – `lipsync_glos_styl`: telefon / czysty / brak), **Zdjęcia**
    (model obrazu z referencjami, co drugie w stroju z folderu *Stroje*), **Podpis** z banku tekstów.
 
-### Rolka z promptu (bez filmiku) – zakładka „Z promptu”
+### Rolka z promptu (bez filmiku) – zakładka „Z promptu” (panel 3.0)
 
-Piszesz pomysł po polsku (albo „Losuj pomysł” / lista gotowych), a fabryka robi z niego długi angielski prompt do
-**Seedance 2.5** (Higgsfield, tryb „z referencji”) ze zdjęciami persony – rolka ma wyglądać jak nagrana zwykłym telefonem
-w prawdziwym polskim miejscu (bloki z wielkiej płyty, klatka schodowa, sklepik pod blokiem, dyskont, galeria, tramwaj, dworzec,
-Rynek w Krakowie, Krupówki, molo w Sopocie… – 41 miejsc), z ludźmi, którzy reagują po swojemu, i krótkim komentarzem po polsku
-zza kamery.
+Piszesz w kilku słowach, co ma się dziać (albo **Losuj**), a **asystent** sam dobiera resztę: prawdziwe miejsce w Polsce
+(galeria Posnania, Stary Browar, Wroclavia, Złote Tarasy, Manufaktura…, dworzec Kraków Główny, Jeżyce, Praga, Rynek w Krakowie,
+Krupówki… – 41 miejsc), **odważny, przyciągający wzrok strój** na porę roku (krótkie spódniczki, dekolty, ekscentryczne
+zestawienia – legalna moda uliczna), **kamerę z ukrycia** (z daleka, z biodra, zza filaru – nagrywający udaje, że nie nagrywa),
+reakcję ludzi (ktoś się odwraca drugi raz, starsza para kręci głową, kasjerka zamiera…) i krótki komentarz zza kamery po polsku
+(„Widziałaś to?”, „Jak ona może tak chodzić?”). Pod spodem jedno zdanie „dlaczego”.
 
-1. Wybierz personę, model (Seedance 2.5 – najlepszy; Wan 3.0 Prime / Gemini Omni – taniej), długość (8/10/15 s; ≤ 8 s → 1080p,
-   dłuższe → 720p), miejsce, strój (domyślnie jak na jej zdjęciach; codzienny w jej stylu; cosplay tylko gdy wybierzesz),
-   włosy (domyślnie jej własne; np. różowe, pastelowy błękit, turkusowe kucyki jak Miku, czarne, srebrne, rude, lawendowe,
-   dwukolorowe, z grzywką / bez, kucyk, koki, warkocze…), reakcję ludzi i komentarz.
-2. **Pokaż prompt** – zobaczysz, co pójdzie do AI. **Sprawdź cenę** – Higgsfield liczy koszt za darmo (10 s 720p ≈ 70 kr).
-3. **Zrób rolkę (70 kr)** – dopiero po wycenie. Tuż przed wysłaniem fabryka liczy cenę jeszcze raz i nic nie wyśle, gdyby wyszła
-   wyższa. Te same bezpieczniki (min. saldo, max na rolkę, limit dzienny) i to samo „nigdy dwa razy za jedną rolkę”.
-4. Gotowa rolka: `tu rolki zrobione\<persona>\NNN_prompt_<miejsce>.mp4` (po Media Tool), widać ją też w Rolkach.
+1. Wybierz personę, napisz pomysł (np. „zamawia jedzenie w galerii w Poznaniu”). Asystent dobiera, a panel sam sprawdza cenę
+   (za darmo). Wszystko da się zmienić w **Zmień szczegóły** (model, długość, miejsce, która galeria, strój, reakcja, komentarz,
+   kto mówi komentarz, włosy…) – Twoich zmian asystent nie nadpisze.
+2. **Zrób rolkę (70 kr)** – zanim cokolwiek zejdzie, pyta o zgodę z ceną. Tuż przed wysłaniem fabryka liczy cenę jeszcze raz i
+   nic nie wyśle, gdyby wyszła wyższa. Te same bezpieczniki (min. saldo, max na rolkę, limit dzienny) i „nigdy dwa razy za jedną rolkę”.
+3. Gotowa rolka: `tu rolki zrobione\<persona>\NNN_prompt_<miejsce>.mp4` (po Media Tool). Na karcie rolki: **Dobra / Słaba** –
+   asystent uczy się z ocen (i z odrzuceń filtra NSFW/IP) i dobiera coraz lepiej.
 
-Wzrost persony (Ustawienia → Persona → Wzrost) pomaga dobrze ją wyskalować obok ludzi. Konsola: `python fabryka.py --modelka noemi
-z-promptu "stoi w kolejce w sklepiku pod blokiem" --sucho` (prompt + cena, 0 kr).
+**Komentarz zza kamery**: z dobrym kluczem **ElevenLabs** (Ustawienia → Konta, klucz zaczyna się od `sk_`) wideo powstaje z samym
+dźwiękiem otoczenia, a komentarz dogrywa ElevenLabs v3 (poprawna polszczyzna, szept zza kamery, w sekundzie reakcji). Bez
+klucza mówi model wideo – z pisownią „jak się czyta” (wyglonda zamiast wygląda), bo modele przekręcają ą/ę. Rolkę z głosem
+ElevenLabs, który się nie dograł, poprawisz przyciskiem **Dograj głos** (tylko znaki ElevenLabs, zero kredytów Higgsfield).
+
+**Asystent**: z kluczem **OpenRouter** (Ustawienia → Konta, za darmo, bez weryfikacji dowodem; klucz `sk-or-…`) dobiera
+darmowy model AI, bez klucza – reguły (też działa). Konsola: `python fabryka.py --modelka noemi z-promptu "stoi w kolejce
+w dyskoncie w Poznaniu" --asystent --sucho` (prompt + cena, 0 kr); `python fabryka.py --modelka noemi dograj-glos 7`.
 
 Automatycznie - **Autopilot** (przełącznik w panelu): co `autopilot_co_minut` minut robi
 skanuj → generuj (Higgsfield albo yapper) → Media Tool → zdjęcia (`zdjecia_dziennie`) → podpisy → rolka na Telegram, dla każdej
@@ -136,6 +142,8 @@ Konsola robi to samo: `python fabryka.py status | skanuj | koszt | generuj --tak
 | Rolki (Wan 3.0 / Wan 3.0 Prime, Seedance, Kling...) | yapper.so Public API | klucz API (yapper.so → Account → API, Read+Write, płatny plan) | Konta + Persona → Generowanie: dostawca *yapper* |
 | Rolki (Seedance 2.5 Edit Turbo; też Seedance 2.5 Edit, Wan 3.0 / Prime) | WaveSpeedAI REST API | klucz API (wavespeed.ai/dashboard → API Keys; logowanie Google/GitHub, bez dowodu) + doładowanie w $ | Konta + Persona → Generowanie: dostawca *WaveSpeed* (albo zapas po NSFW) |
 | Lipsync + TTS (ElevenLabs) | sync.so API | klucz API (sync.so/settings/api-keys) | Konta + Lipsync |
+| Komentarz zza kamery (rolki z promptu) | ElevenLabs API (eleven_v3) | klucz `sk_…` (elevenlabs.io → Developers → API Keys) | Konta |
+| Asystent „Z promptu” | OpenRouter (darmowe modele) | klucz `sk-or-…` (openrouter.ai/keys, bez doładowania) | Konta |
 | Zdjęcia persony | Higgsfield CLI (np. `nano_banana_2`, `text2image_soul_v2` z Soul ID) | jak wyżej | Persona → Zdjęcia |
 
 Kredyty każdego dostawcy liczymy osobno (`budzet.json`, poza gitem) - z jobów, nie z różnicy salda. Uwaga: kredyty yapper mają inną skalę
@@ -162,6 +170,8 @@ rolki-ai/
   app.py + templates/ + static/   panel Flask :5077 (API w API.md), /widget = małe okno z saldem i kolejką
   fabryka.py             logika: status / skanuj / koszt / generuj / wznow / pierz / zdjecia / lipsync / podpis / autopilot / foldery / nsfw / ustaw / budzet / z-promptu
   scenariusz.py          rolka z promptu: katalog polskich miejsc, gotowe pomysły, włosy, stroje, budowanie promptu (bez wysyłania)
+  asystent.py            asystent zakładki Z promptu: dobiera ustawienia (OpenRouter albo reguły) i uczy się z ocen/odrzuceń
+  komentarz_glos.py      komentarz zza kamery z ElevenLabs dograny po generacji (ffmpeg)
   autopilot.py           pętla: telefon -> skanuj -> generuj (hamulec) -> pranie -> zdjęcia -> podpisy -> rolka na Telegram (konto persony); bez lipsyncu
   zdjecia.py             zdjęcia persony (model obrazu + referencje albo Soul ID; co drugie w stroju ze stroje/)
   lipsync.py             wideo + głos -> sync.so (albo model Higgsfield); TTS z tekstu

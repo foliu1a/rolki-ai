@@ -944,6 +944,26 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
 .zp-uwagi { margin: 0; padding: 10px 14px 10px 30px; background: var(--uwaga-tlo); border-radius: var(--promien-m); font-size: 14px;
   color: var(--tekst); display: flex; flex-direction: column; gap: 4px; }
 .zp-przyciski { flex-wrap: wrap; }
+/* widok prosty (3.0): persona, pomysl, linijka asystenta, cena, jeden duzy przycisk; reszta w „Zmien szczegoly” */
+.zp-prosty { display: flex; flex-direction: column; gap: 14px; }
+.zp-persona-pole { max-width: 340px; }
+.zp-asystent { background: var(--akcent-tlo); border: 1px solid var(--akcent-linia); border-radius: var(--promien-m);
+  padding: 12px 14px; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.zp-asystent-etykieta { font-weight: 600; color: var(--akcent-jasny); }
+.zp-asystent-dlaczego { display: block; margin-top: 4px; color: var(--szary); font-size: 14px; }
+.zp-asystent .kropka { vertical-align: middle; margin-right: 6px; }
+.zp-zrob { width: 100%; min-height: 52px; font-size: 17px; }
+.zp-zrob-info { margin-top: -6px; }
+.zp-szczegoly > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px;
+  color: var(--akcent-jasny); font-size: 15px; min-height: 40px; }
+.zp-szczegoly > summary::-webkit-details-marker { display: none; }
+.zp-szczegoly > summary svg { width: 18px; height: 18px; transition: transform .2s; }
+.zp-szczegoly[open] > summary svg { transform: rotate(180deg); }
+.zp-szczegoly[open] { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--linia-2); padding-top: 6px; }
+.zp-szczegoly-info { margin: 0; font-size: 14px; }
+.rolka-ocena { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; color: var(--szary); }
+.btn.aktywny { border-color: var(--akcent); background: var(--akcent-tlo); color: var(--tekst); }
 @media (max-width: 720px) {
   .zp-przyciski .btn { flex: 1 1 100%; }
+  .zp-persona-pole { max-width: none; }
 }

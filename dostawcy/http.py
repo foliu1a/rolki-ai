@@ -65,6 +65,34 @@ def zapytanie(metoda, url, dane=None, naglowki=None, timeout=60, surowe_cialo=No
     raise ostatni
 
 
+def zapytanie_bajty(metoda, url, dane=None, naglowki=None, timeout=120, powtorki=2):
+    """Jak zapytanie(), ale zwraca SUROWE bajty odpowiedzi (np. mp3 z ElevenLabs TTS) i jej Content-Type: (bajty, typ).
+    `dane` idzie jako JSON. 4xx (poza 429) od razu BladHTTP; 5xx, 429 i bledy sieci - powtorki."""
+    naglowki_req = {"User-Agent": UA}
+    naglowki_req.update(naglowki or {})
+    cialo = None
+    if dane is not None:
+        cialo = json.dumps(dane).encode("utf-8")
+        naglowki_req["Content-Type"] = "application/json"
+    ostatni = None
+    powtorki = max(1, int(powtorki or 1))
+    for proba in range(1, powtorki + 1):
+        req = urllib.request.Request(url, data=cialo, method=metoda.upper(), headers=naglowki_req)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as odp:
+                return odp.read(), (odp.headers.get("Content-Type") or "")
+        except urllib.error.HTTPError as e:
+            tekst = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            ostatni = BladHTTP(e.code, tekst, url)
+            if e.code < 500 and e.code != 429:
+                raise ostatni
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+            ostatni = BladHTTP(0, f"blad sieci: {e}", url)
+        if proba < powtorki:
+            time.sleep(2 ** (proba - 1))
+    raise ostatni
+
+
 def multipart(url, pola=None, pliki=None, naglowki=None, timeout=900):
     """multipart/form-data: `pola` = {nazwa: tekst}, `pliki` = {nazwa: sciezka}."""
     granica = "----rolkiai" + uuid.uuid4().hex

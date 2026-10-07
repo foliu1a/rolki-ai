@@ -19,6 +19,7 @@ import autopilot
 import baza
 import dostawcy
 import fabryka
+import asystent
 import scenariusz
 import sekrety
 
@@ -32,7 +33,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.9"
+WERSJA = "3.0"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -538,9 +539,14 @@ def _pomysl_dla_panelu(p):
     if fabryka.z_promptu(p):
         zp = p.get("z_promptu") or {}
         info = scenariusz.MODELE.get(zp.get("model") or "", {})
+        glos = {"tts": "głos ElevenLabs" + ("" if p.get("glos_dograny") else " (do dogrania)"),
+                "model": "głos modelu"}.get(zp.get("glos") or "", "")
         p["z_promptu_opis"] = " · ".join(x for x in (zp.get("miejsce_nazwa"), (info.get("nazwa") or zp.get("model") or "").split(" –")[0],
                                                        f"{zp.get('dlugosc')} s" if zp.get("dlugosc") else "", zp.get("rozdzielczosc"),
-                                                       "inne włosy" if zp.get("wlosy_zmienione") else "") if x)
+                                                       "inne włosy" if zp.get("wlosy_zmienione") else "", glos) if x)
+        p["z_promptu_dlaczego"] = (zp.get("asystent") or {}).get("dlaczego") or ""
+        p["mozna_dograc_glos"] = (zp.get("glos") == "tts" and bool(zp.get("komentarz")) and not p.get("glos_dograny")
+                                  and p.get("status") in ("gotowe", "wygenerowany"))
         p.pop("info_zrodla", None)
     # rozdzielczosc tej rolki (zasada: <= 8 s -> 1080p, dluzsze -> 720p) - zapisana przy generacji albo wyliczona z dlugosci klipu
     if not p.get("resolution") and fabryka.czas_klipu(p):
@@ -653,6 +659,10 @@ def api_usun_pomysl(pid):
             for k in ("plik_wynikowy", "lipsync_plik"):
                 if p.get(k) and os.path.isfile(p[k]) and _plik_dozwolony(p[k]):
                     os.remove(p[k])
+        try:
+            asystent.archiwizuj_usuniety(aktywna, p)     # asystent pamieta, ze ta rolka nie przypadla do gustu
+        except OSError:
+            pass
         baza.usun_pomysl(aktywna, pid)
     except ValueError as e:
         return _blad(e)
@@ -662,7 +672,8 @@ def api_usun_pomysl(pid):
 # ---------------- rolka z promptu (zakladka "Z promptu", scenariusz.py) ----------------
 
 OPCJE_Z_PROMPTU = ("pomysl_id", "tekst", "miejsce", "model", "dlugosc", "rozdzielczosc", "wlosy", "stroj", "stroj_tekst", "reakcja",
-                   "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone")
+                   "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone", "obiekt", "nazwy", "glos", "wymowa",
+                   "asystent")
 
 
 def _slug_z_promptu(dane):
@@ -675,7 +686,7 @@ def _slug_z_promptu(dane):
 
 def _opcje_z_promptu(dane):
     opcje = {k: dane[k] for k in OPCJE_Z_PROMPTU if k in dane and dane[k] is not None}
-    for k in ("wlosy", "ustalone"):
+    for k in ("wlosy", "ustalone", "asystent"):
         if k in opcje and not isinstance(opcje[k], dict):
             raise ValueError(f"{k} musi byc slownikiem.")
     if "dlugosc" in opcje:
@@ -697,7 +708,56 @@ def api_z_promptu_katalog():
         return _blad(e)
     kat = scenariusz.katalog(slug)
     kat["domyslne"] = dict(baza.USTAWIENIA_DOMYSLNE["z_promptu"], **(baza.ustawienia_modelki(slug).get("z_promptu") or {}))
+    kat["glos_tts"] = _stan_tts()
+    kat["glos_id"] = baza.ustawienia_modelki(slug).get("z_promptu_glos") or ""
+    kat["asystent_llm"] = bool(sekrety.klucz("openrouter"))
     return _ok(**kat)
+
+
+def _stan_tts():
+    """Czy komentarz moze isc przez ElevenLabs (klucz jest i dziala) - sprawdzenie bez kosztu, cache 10 min."""
+    if not sekrety.klucz("elevenlabs"):
+        return {"ok": False, "komunikat": "brak klucza ElevenLabs – komentarz mówi model wideo (z poprawioną pisownią ą/ę)"}
+    try:
+        import komentarz_glos
+        ok, kom = komentarz_glos.tts_dostepne()
+    except Exception as e:
+        ok, kom = False, str(e)
+    return {"ok": ok, "komunikat": "ElevenLabs działa – komentarz dograny po generacji" if ok else kom}
+
+
+@app.route("/api/z-promptu/asystent", methods=["POST"])
+def api_z_promptu_asystent():
+    """Asystent (agent w tle): krotki pomysl PL -> opcje (miejsce, stroj, kamera, reakcja, komentarz, wlosy, dlugosc, model)
+    + jedno zdanie 'dlaczego'. Darmowy model OpenRouter, gdy jest klucz; inaczej reguly. ZERO kosztow (nic nie wycenia).
+    {slug?, tekst, pomysl_id?, zablokowane: {pole: wartosc ustawiona recznie}}."""
+    dane = request.json or {}
+    try:
+        slug = _slug_z_promptu(dane)
+        zab = dane.get("zablokowane") or {}
+        if not isinstance(zab, dict):
+            raise ValueError("zablokowane musi byc slownikiem.")
+        tts = _stan_tts()
+        glos = "tts" if tts["ok"] else "model"
+        w = asystent.dobierz(slug, (dane.get("tekst") or "").strip(), pomysl_id=dane.get("pomysl_id") or None,
+                             zablokowane=zab, uzyj_llm=not dane.get("bez_llm"),
+                             glos_efektywny=zab.get("glos") if zab.get("glos") in ("tts", "model") else glos)
+    except LookupError as e:
+        return _blad(e, 404)
+    except ValueError as e:
+        return _blad(e)
+    return _ok(slug=slug, glos_tts=tts, **w)
+
+
+@app.route("/api/pomysly/<int:pid>/ocena", methods=["POST"])
+def api_ocena_pomyslu(pid):
+    """Ocena rolki z promptu: {"ocena": "dobra" | "slaba" | null} - asystent uczy sie z niej przy kolejnym dobieraniu."""
+    try:
+        aktywna = _wymaga_modelki()
+        pomysl = asystent.ocen(aktywna, pid, (request.json or {}).get("ocena"))
+    except ValueError as e:
+        return _blad(e)
+    return _ok(pomysl=_pomysl_dla_panelu(pomysl))
 
 
 @app.route("/api/z-promptu/losuj", methods=["POST"])
@@ -848,6 +908,10 @@ def _funkcja_akcji(typ, slug, dane):
     if typ == "podglad":
         pid = int(dane["id"])
         return lambda log, stop: {"plik": fabryka.podglad(slug, pid, log=log)}
+    if typ == "dograj_glos":
+        # komentarz ElevenLabs do gotowej rolki z promptu (glos tts) - tylko znaki ElevenLabs, zero kredytow Higgsfield
+        pid = int(dane["id"])
+        return lambda log, stop: {"plik": fabryka.dograj_glos(slug, pid, log=log)}
     if typ == "telegram_wyslij":
         from dostawcy import telegram
         p = baza.pomysl(slug, int(dane["id"]))
@@ -1077,7 +1141,10 @@ JAK_LOGOWAC = {
                  "-> utworz klucz i wklej go tutaj. Doladuj konto (Billing, karta albo PayPal) - bez pieniedzy na koncie rolki nie rusza. "
                  "Potem ustaw dzienny limit w Ustawienia -> Limity (bez limitu fabryka nic tam nie wyda).",
     "sync": "https://sync.so/settings/api-keys -> New API key",
-    "elevenlabs": "elevenlabs.io -> profil -> API keys (opcjonalnie; TTS idzie tez przez sync.so)",
+    "elevenlabs": "elevenlabs.io -> Developers -> API Keys -> Create (klucz zaczyna sie od sk_; uprawnienie Text to Speech + "
+                  "Voices: read) - glos komentarza zza kamery w rolkach z promptu (eleven_v3, poprawna polszczyzna)",
+    "openrouter": "https://openrouter.ai/keys -> Create key (konto przez Google/GitHub, BEZ weryfikacji dowodem, bez doladowania - "
+                  "asystent uzywa tylko darmowych modeli). Klucz zaczyna sie od sk-or-",
     "telegram": "W Telegramie napisz do @BotFather: /newbot, nadaj nazwe -> dostaniesz token. Wklej go tu. "
                 "Potem napisz do swojego bota /start - od tej chwili wysylasz mu filmiki, a on odsyla gotowe rolki.",
 }
@@ -1159,8 +1226,12 @@ def api_nsfw():
 @app.route("/api/konta", methods=["POST"])
 def api_zapisz_klucz():
     dane = request.json or {}
+    klucz = (dane.get("klucz") or "").strip()
     try:
-        sekrety.zapisz_klucz(dane.get("dostawca", ""), dane.get("klucz", ""))
+        if klucz and dane.get("dostawca") in sekrety.PREFIKSY and not klucz.startswith(sekrety.PREFIKSY[dane["dostawca"]]):
+            raise ValueError(f"To nie wyglada na klucz {sekrety.DOSTAWCY[dane['dostawca']]['nazwa']} - prawdziwy zaczyna sie od "
+                             f"'{sekrety.PREFIKSY[dane['dostawca']]}'. Skopiuj go jeszcze raz (Konta -> jak zdobyc klucz).")
+        sekrety.zapisz_klucz(dane.get("dostawca", ""), klucz)
     except ValueError as e:
         return _blad(e)
     _konta_test.pop(dane.get("dostawca"), None)
@@ -1190,7 +1261,10 @@ def api_test_konta():
         elif d == "elevenlabs":
             from dostawcy import elevenlabs
             dziala, komunikat = elevenlabs.gotowy()
+            elevenlabs._stan_klucza.clear()
             _saldo.pop("elevenlabs", None)
+        elif d == "openrouter":
+            dziala, komunikat = asystent.test_klucza()
         elif d == "telegram":
             from dostawcy import telegram
             dziala, komunikat = telegram.gotowy()

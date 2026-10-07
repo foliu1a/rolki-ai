@@ -56,8 +56,10 @@ USTAWIENIA_DOMYSLNE = {
     "zapas_nsfw": [],               # zapas po odrzuceniu NSFW/IP: kroki po kolei, np. [{"dostawca": "yapper", "model": "wan-3.0-prime"},
                                     # {"dostawca": "wavespeed", "model": "alibaba/wan-3.0/reference-to-video"}]; [] = wylaczone.
                                     # Kazdy krok wymaga dziennego limitu swojego dostawcy (yapper / wavespeed).
-    "z_promptu": {"model": "seedance_2_5", "dlugosc": 10, "stroj": "zdjecia", "komentarz": "losowy",   # zakladka "Z promptu":
-                  "reakcja": "losowa"},     # domyslne wybory formularza (scenariusz.py). Zawsze Higgsfield, cosplay tylko recznie.
+    "z_promptu": {"model": "seedance_2_5", "dlugosc": 10, "stroj": "odwazny", "komentarz": "losowy",   # zakladka "Z promptu":
+                  "reakcja": "losowa", "kamera": "auto", "glos": "auto", "nazwy": "prawdziwe",     # domyslne wybory formularza
+                  "wymowa": "fonetyczna"},  # (scenariusz.py; asystent.py dobiera reszte). Zawsze Higgsfield, cosplay tylko recznie.
+    "z_promptu_glos": "",           # ElevenLabs Voice ID komentarza zza kamery ("" = komentarz_glos dobiera z konta: polski, kobiecy)
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie

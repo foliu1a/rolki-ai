@@ -1409,12 +1409,78 @@ def _sukces(slug, p, d, w, kr, krok, ust, log, lipsync, wynik):
                    zapas=model)
     else:
         _zdarzenie(log, slug, "ok", f"#{pid}: WYGENEROWANE ({ile}, dzis {dzis}) -> {surowy}", pomysl=pid)
-    gotowy = _postprodukcja(slug, pid, surowy, nazwa, ust, log=log)
+    do_prania = _komentarz_po_generacji(slug, baza.pomysl(slug, pid), surowy, log) or surowy
+    gotowy = _postprodukcja(slug, pid, do_prania, nazwa, ust, log=log)
     if gotowy:
         _zdarzenie(log, slug, "ok", f"#{pid}: GOTOWE -> {gotowy}", pomysl=pid, plik=gotowy)
     if lipsync is not False:
         _lipsync_po_generacji(slug, baza.pomysl(slug, pid), gotowy or surowy, ust, log)
     return True
+
+
+def _komentarz_po_generacji(slug, p, surowy, log):
+    """Rolka z promptu z glosem "tts": komentarz zza kamery z ElevenLabs dogrywany do wideo z samym otoczeniem (komentarz_glos).
+    Zwraca sciezke wideo z komentarzem albo None (wtedy rolka idzie dalej bez komentarza - nigdy nie psuje oplaconej rolki)."""
+    zp = (p or {}).get("z_promptu") or {}
+    if not (z_promptu(p) and zp.get("glos") == "tts" and zp.get("komentarz")):
+        return None
+    try:
+        import komentarz_glos
+        plik = komentarz_glos.dograj(slug, p["id"], surowy, zp["komentarz"], zp.get("komentarz_t") or 4, log=log)
+        baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=True, glos_plik=plik, glos_blad=None)
+        return plik
+    except Exception as e:
+        tekst = f"#{p['id']}: komentarz ElevenLabs nie dograny ({e}) - rolka ma tylko dzwiek otoczenia; 'Dograj glos' w panelu"
+        _zdarzenie(log, slug, "uwaga", tekst, pomysl=p["id"])
+        baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=False, glos_blad=str(e)[:300])
+        return None
+
+
+def plik_surowy(slug, p):
+    """Surowy wynik rolki (modelki/<slug>/wyniki/NNN_<nazwa>.raw.*) albo None."""
+    folder = baza.folder_wynikow(slug)
+    pref = f"{int(p['id']):03d}_{_nazwa_wyniku(p)}.raw"
+    for n in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if n.startswith(pref) and n.lower().endswith(ROZSZERZENIA_WIDEO):
+            return os.path.join(folder, n)
+    return None
+
+
+def dograj_glos(slug, pid, log=None):
+    """Dogranie komentarza ElevenLabs do GOTOWEJ rolki z promptu z glosem "tts" (np. gdy przy generacji nie bylo dobrego klucza):
+    surowy plik (sam dzwiek otoczenia) + glos -> Media Tool -> ten sam gotowy plik. Kosztuje tylko znaki ElevenLabs, zero
+    kredytow Higgsfield, nic nie wysyla do generacji. Zwraca sciezke gotowego pliku."""
+    log = log or _log
+    p = baza.pomysl(slug, int(pid))
+    zp = p.get("z_promptu") or {}
+    if not z_promptu(p):
+        raise ValueError("Glos dogrywam tylko do rolek z promptu.")
+    if p.get("status") not in ("gotowe", "wygenerowany", "postprodukcja"):
+        raise ValueError(f"#{pid} nie jest jeszcze gotowa (status {p.get('status')}).")
+    if zp.get("glos") != "tts":
+        raise ValueError("Ta rolka ma komentarz mowiony przez model wideo - drugi glos by go zdublowal. Zrob nowa rolke "
+                         "(z dobrym kluczem ElevenLabs komentarz dogrywa sie sam).")
+    if not zp.get("komentarz"):
+        raise ValueError("Ta rolka nie ma komentarza zza kamery.")
+    surowy = plik_surowy(slug, p)
+    if not surowy:
+        raise ValueError(f"Nie znajduje surowego pliku rolki #{pid} w modelki/{slug}/wyniki/.")
+    import komentarz_glos
+    try:
+        plik = komentarz_glos.dograj(slug, p["id"], surowy, zp["komentarz"], zp.get("komentarz_t") or 4, log=log)
+    except (komentarz_glos.BladGlosu, dostawcy.BladDostawcy) as e:
+        baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=False, glos_blad=str(e)[:300])
+        raise ValueError(f"Nie dogralem glosu: {e}")
+    baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=True, glos_plik=plik, glos_blad=None)
+    gotowy = _postprodukcja(slug, p["id"], plik, _nazwa_wyniku(p), baza.ustawienia_modelki(slug), log=log)
+    _zdarzenie(log, slug, "ok", f"#{pid}: komentarz dograny -> {gotowy or plik}", pomysl=p["id"])
+    return gotowy or plik
+
+
+def cmd_dograj_glos(args):
+    slug = _slug(args.modelka)
+    print(dograj_glos(slug, args.id))
+    return 0
 
 
 def _niepowodzenie(slug, p, d, w, kr, powod, ust, log, wynik, zapas_info=""):
@@ -1861,7 +1927,31 @@ def _dane_z_promptu(sc):
     """Wynik scenariusz.zbuduj -> pole 'z_promptu' pomyslu (to, z czego zlecenie() buduje generacje i wznowienie)."""
     return {k: sc.get(k) for k in ("model", "mode", "dlugosc", "rozdzielczosc", "parametry", "generate_audio", "obrazy",
                                    "pomysl_id", "miejsce", "miejsce_nazwa", "wlosy_zmienione", "stroj_plik", "komentarz",
-                                   "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje")}
+                                   "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje", "glos", "wymowa",
+                                   "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy", "stroj_id", "stroj_tryb", "reakcja")}
+
+
+def _rozstrzygnij_glos(opcje):
+    """glos "auto" -> "tts" (dobry klucz ElevenLabs: wideo z samym otoczeniem + komentarz dograny po generacji) albo "model"
+    (komentarz mowi model wideo). Raz rozstrzygniety glos jedzie w `ustalone` - wycena i "Zrob rolke" daja ten sam prompt."""
+    o = dict(opcje or {})
+    if (o.get("glos") or "") == "auto":
+        u = o.get("ustalone") or {}
+        if u.get("glos") in ("tts", "model"):
+            o["glos"] = u["glos"]
+        else:
+            import komentarz_glos
+            o["glos"] = komentarz_glos.rozstrzygnij_glos("auto")
+    return o
+
+
+def _zbuduj_z_promptu(slug, opcje):
+    import scenariusz
+    o = _rozstrzygnij_glos(opcje)
+    sc = scenariusz.zbuduj(slug, o)
+    if o.get("glos") in ("tts", "model"):
+        sc["ustalone"]["glos"] = o["glos"]
+    return sc
 
 
 def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
@@ -1869,14 +1959,14 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     NIC nie tworzy). Zwraca slownik dla panelu/CLI: prompt, znaki, obrazy (nazwy), rozdzielczosc, dlugosc, model, ustalone,
     ostrzezenia + kr (wycena), saldo, dzis {wydano (z rezerwa w toku), limit}, min_kredyty, max_kredyty_na_rolke,
     mozna (bezpieczniki przepuszczaja), powody (czemu nie). ValueError przy zlych opcjach."""
-    import scenariusz
-    sc = scenariusz.zbuduj(slug, opcje)
+    sc = _zbuduj_z_promptu(slug, opcje)
     ust = baza.ustawienia_modelki(slug)
     nazwa = DOSTAWCA_Z_PROMPTU
     min_k, max_k = bezpiecznik(ust, nazwa)
-    wynik = {k: sc[k] for k in ("prompt", "znaki", "limit", "ostrzezenia", "ustalone", "model", "rozdzielczosc", "dlugosc",
-                                "tytul", "miejsce", "miejsce_nazwa", "pomysl_id", "wlosy_zmienione", "komentarz", "sezon",
-                                "pora", "kamera")}
+    wynik = {k: sc.get(k) for k in ("prompt", "znaki", "limit", "ostrzezenia", "ustalone", "model", "rozdzielczosc", "dlugosc",
+                                    "tytul", "miejsce", "miejsce_nazwa", "pomysl_id", "wlosy_zmienione", "komentarz", "sezon",
+                                    "pora", "kamera", "glos", "wymowa", "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy",
+                                    "stroj_id", "reakcja")}
     wynik.update({"obrazy": [os.path.basename(o) for o in sc["obrazy"]], "kr": None, "saldo": None,
                   "dzis": {"wydano": baza.wydano_z_rezerwa(nazwa), "limit": baza.limit_dzienny(nazwa)},
                   "min_kredyty": min_k, "max_kredyty_na_rolke": max_k, "mozna": False, "powody": [], "dostawca": nazwa})
@@ -1916,14 +2006,16 @@ def dodaj_z_promptu(slug, opcje, prompt=None, kr=None):
     """Tworzy pomysl 'nowy' typu 'prompt' z ZAMROZONYM promptem i lista zdjec (bez wysylania). prompt = tekst po recznej
     poprawce (sprawdzany: limit znakow, numery zdjec); kr = wycena, ktora user widzial (zapis w pomysle). Zwraca id."""
     import scenariusz
-    sc = scenariusz.zbuduj(slug, opcje)
+    sc = _zbuduj_z_promptu(slug, opcje)
     tekst = (prompt or "").strip() or sc["prompt"]
     if tekst != sc["prompt"]:
         bledy, _ = scenariusz.sprawdz(tekst, sc["model"], len(sc["obrazy"]))
         if bledy:
             raise ValueError(" ".join(bledy))
     zp = _dane_z_promptu(sc)
-    zp["opcje"] = {k: v for k, v in (opcje or {}).items() if k != "ustalone"}
+    zp["opcje"] = {k: v for k, v in (opcje or {}).items() if k not in ("ustalone", "asystent")}
+    if isinstance((opcje or {}).get("asystent"), dict):
+        zp["asystent"] = {k: opcje["asystent"].get(k) for k in ("dlaczego", "zrodlo", "podsumowanie")}
     zp["wycena"] = kr
     zp["prompt_reczny"] = tekst != sc["prompt"]
     pid = baza.dodaj_pomysl(slug, sc["tytul"] or f"z promptu: {sc['miejsce_nazwa']}", tekst, stroj=sc.get("stroj_plik"),
@@ -1938,11 +2030,19 @@ def cmd_z_promptu(args):
     slug = _slug(args.modelka)
     opcje = {"tekst": args.tekst or "", "pomysl_id": args.gotowy or "", "miejsce": args.miejsce or "", "model": args.model,
              "dlugosc": args.dlugosc, "rozdzielczosc": args.rozdzielczosc, "stroj": args.stroj, "komentarz": args.komentarz,
-             "reakcja": args.reakcja, "sezon": args.sezon, "pora": args.pora,
+             "reakcja": args.reakcja, "sezon": args.sezon, "pora": args.pora, "kamera": args.kamera, "glos": args.glos,
+             "wymowa": args.wymowa, "nazwy": args.nazwy, "obiekt": args.obiekt or "",
              "wlosy": {"kolor": args.wlosy, "fryzura": args.fryzura, "grzywka": args.grzywka}}
     if args.gotowy and not args.tekst:
         import scenariusz
         opcje["tekst"] = scenariusz.POMYSLY_PO_ID[args.gotowy]["pl"] if args.gotowy in scenariusz.POMYSLY_PO_ID else ""
+    if args.asystent:
+        import asystent
+        reczne = {k: v for k, v in opcje.items() if k in ("miejsce", "kamera", "reakcja", "obiekt") and v not in ("", "auto", "losowa")}
+        reczne.update(model=args.model, dlugosc=args.dlugosc)
+        a = asystent.dobierz(slug, opcje["tekst"], pomysl_id=args.gotowy, zablokowane=reczne)
+        opcje = dict(a["opcje"], asystent=a)
+        print(f"asystent ({a['zrodlo']}): {a['podsumowanie']}\n  dlaczego: {a['dlaczego']}" + (f"\n  {a['uwaga']}" if a["uwaga"] else ""))
     w = wycena_z_promptu(slug, opcje, z_cena=True)
     print(w["prompt"])
     print(f"\n--- {w['znaki']} znakow, {len(w['obrazy'])} zdjec, {w['model']} {w['dlugosc']} s {w['rozdzielczosc']}, "
@@ -2301,9 +2401,15 @@ def main(argv=None):
     s.add_argument("--komentarz", default="losowy"); s.add_argument("--reakcja", default="losowa")
     s.add_argument("--sezon", default="auto"); s.add_argument("--pora", default="auto")
     s.add_argument("--wlosy", default="wlasne"); s.add_argument("--fryzura", default="wlasna"); s.add_argument("--grzywka", default="wlasna")
+    s.add_argument("--kamera", default="auto"); s.add_argument("--glos", default="model", choices=("auto", "tts", "model"))
+    s.add_argument("--wymowa", default="zwykla", choices=("zwykla", "fonetyczna"))
+    s.add_argument("--nazwy", default="prawdziwe", choices=("prawdziwe", "opisowe")); s.add_argument("--obiekt", help="np. posnania")
+    s.add_argument("--asystent", action="store_true", help="asystent dobiera miejsce/stroj/kamere/reakcje/komentarz (OpenRouter albo reguly)")
     s.add_argument("--sucho", action="store_true", help="tylko prompt i darmowa wycena")
     s.add_argument("--tak", "-y", action="store_true", help="bez pytania o cene"); s.add_argument("--timeout", default="30m")
     s.set_defaults(f=cmd_z_promptu)
+    s = sub.add_parser("dograj-glos", help="komentarz ElevenLabs do gotowej rolki z promptu (glos tts) - tylko znaki ElevenLabs")
+    s.add_argument("id", type=int); s.set_defaults(f=cmd_dograj_glos)
     s = sub.add_parser("wznow", help="dokoncz rolki w toku (job wyslany przed restartem/timeoutem) - odpytuje ten sam job, nic nie wysyla")
     s.add_argument("--timeout", default="30m"); s.set_defaults(f=cmd_wznow)
     s = sub.add_parser("ocen", help="Virality Predictor na wyniku (kosztuje kredyty)"); s.add_argument("id", type=int); s.set_defaults(f=cmd_ocen)

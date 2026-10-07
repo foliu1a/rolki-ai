@@ -23,12 +23,14 @@ def dane(tmp_path, monkeypatch):
     monkeypatch.setattr(baza, "PLIK_DZIENNIKA", str(tmp_path / "dziennik.jsonl"))
     monkeypatch.setattr(sekrety, "PLIK_KLUCZY", str(tmp_path / "klucze.json"))
     monkeypatch.setenv("ROLKI_PULPIT", str(tmp_path / "pulpit" / "ROLKI AI"))   # foldery "na pulpicie" tez w tmp
-    for env in ("YAPPER_API_KEY", "WAVESPEED_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN"):
+    for env in ("YAPPER_API_KEY", "WAVESPEED_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(env, raising=False)
     import time
     monkeypatch.setattr(time, "sleep", lambda s: None)
     from dostawcy import wavespeed, yapper
     yapper.wyczysc_cache()          # lista modeli/schematy yappera z poprzedniego testu
+    from dostawcy import elevenlabs
+    elevenlabs._stan_klucza.clear()  # cache "czy klucz ElevenLabs dziala" z poprzedniego testu
     wavespeed._ostatnia_wycena.clear()
     return tmp_path
 

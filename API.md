@@ -139,6 +139,24 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
   dostawcy wyjdzie wyższa (panel wysyła cenę z pytania „Robić?”).
 - Profil persony: `POST /api/profil {"wzrost_cm": "158-160", "wlosy": "long straight platinum blonde hair"}` (zły wzrost = 400).
 
+### Rolka z promptu 3.0 – asystent, głos, nowe opcje
+- Nowe opcje (wszystkie endpointy z-promptu): `stroj: "odwazny" | "odwazny:<id>"` (katalog `stroje_odwazne [[id, etykieta,
+  pory]]`), `kamera` (domyślnie z ukrycia wg miejsca, `kamery_ukryte`), `nazwy: "prawdziwe" | "opisowe"`, `obiekt` (id z
+  `obiekty[miejsce]`: galerie, dworce, stacje metra, dzielnice, miasta), `glos: "auto" | "tts" | "model"` (auto = tts, gdy klucz
+  ElevenLabs działa), `wymowa: "fonetyczna" | "zwykla"`, `asystent {dlaczego, zrodlo, podsumowanie}` (zapisywane w rolce).
+  Reakcje zdziwienia: `reakcje_zdziwienie`, `linie_reakcji {reakcja: [polskie linie]}`. Katalog ma też `glosy`, `wymowy`, `nazwy`,
+  `glos_tts {ok, komunikat}`, `glos_id` (ustawienie `z_promptu_glos`), `asystent_llm` (jest klucz OpenRouter).
+- Wycena zwraca dodatkowo `glos` (rozstrzygnięty), `wymowa`, `komentarz_t` (sekunda komentarza), `obiekt`, `obiekt_nazwa`, `nazwy`,
+  `stroj_id`, `reakcja`; `ustalone.glos` zamraża głos (ten sam prompt przy „Zrób rolkę”).
+- `POST /api/z-promptu/asystent {slug?, tekst, pomysl_id?, zablokowane: {pole: wartość ustawiona ręcznie}, bez_llm?}` →
+  `{opcje, podsumowanie, dlaczego, zrodlo: "openrouter:<model>" | "reguly", uwaga, nauka, glos_tts}` – **0 kr**, nic nie wycenia.
+- `POST /api/pomysly/<id>/ocena {"ocena": "dobra" | "slaba" | null}` – ocena rolki z promptu (nauka asystenta); `DELETE` rolki z
+  promptu dopisuje ją do `modelki/<slug>/asystent_archiwum.json` (gotowa bez oceny = słaba).
+- Akcja `{"typ": "dograj_glos", "id": 7}` – komentarz ElevenLabs do gotowej rolki z głosem `tts` (tylko znaki ElevenLabs).
+  Karta rolki: `z_promptu_dlaczego`, `mozna_dograc_glos`, `ocena`, `glos_dograny`, `glos_blad`.
+- Konta: `openrouter` (klucz `sk-or-…`, test = `GET /api/v1/key`, darmowe). `POST /api/konta` odrzuca klucz ElevenLabs bez `sk_`
+  i OpenRouter bez `sk-or-` (400).
+
 ## Modelki (persony)
 - `POST /api/modelki` `{"nazwa": "Noemi", "instagram": "@uroczanoemi"}` → `{"slug": "noemi"}` (ustawia jako aktywną)
 - `POST /api/modelki/aktywna` `{"slug": "noemi"}`
