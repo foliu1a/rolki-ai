@@ -31,7 +31,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.7"
+WERSJA = "2.8"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -180,7 +180,7 @@ _konta_test = {}
 CZEKAJ_NA_SALDO_S = 3   # tyle /api/stan czeka na swieze saldo; dluzej = oddaje stare i dociaga w tle
 
 
-NAZWY_KONT_Z_KLUCZEM = {"yapper": "yapper.so", "elevenlabs": "ElevenLabs"}
+NAZWY_KONT_Z_KLUCZEM = {"yapper": "yapper.so", "wavespeed": "WaveSpeed", "elevenlabs": "ElevenLabs"}
 
 
 def _pobierz_saldo(nazwa):
@@ -221,11 +221,13 @@ def _saldo_dostawcy(nazwa, wymus=False):
 
 
 def _salda(wymus=False, dostawca_aktywnej=None):
-    """Salda do paska w panelu: Higgsfield zawsze, yapper.so gdy jest klucz albo robi rolki aktywnej persony,
-    ElevenLabs (znaki TTS) gdy jest klucz."""
+    """Salda do paska w panelu: Higgsfield zawsze, yapper.so / WaveSpeed (centy USD) gdy jest klucz albo robi rolki aktywnej
+    persony, ElevenLabs (znaki TTS) gdy jest klucz."""
     nazwy = ["higgsfield"]
     if dostawca_aktywnej == "yapper" or sekrety.klucz("yapper"):
         nazwy.append("yapper")
+    if dostawca_aktywnej == "wavespeed" or sekrety.klucz("wavespeed"):
+        nazwy.append("wavespeed")
     if sekrety.klucz("elevenlabs"):
         nazwy.append("elevenlabs")
     return {n: _saldo_dostawcy(n, wymus) for n in nazwy}
@@ -254,6 +256,9 @@ def _lista_modeli(dostawca, typ=None, odswiez=False):
     elif dostawca == "yapper":
         from dostawcy import yapper
         surowe = yapper.modele_wideo() if (typ in (None, "", "video")) else yapper.modele()
+    elif dostawca == "wavespeed":
+        from dostawcy import wavespeed
+        surowe = wavespeed.modele()          # modele, ktore fabryka umie wyslac (bez zapytania do API, bez klucza)
     else:
         from dostawcy import higgsfield
         surowe = higgsfield.modele(typ)
@@ -363,12 +368,16 @@ def api_stan():
     jakosc = fabryka.jakosc_i_koszt(aktywna) if aktywna else None
     dzis = _dzis(aktywna)
     if jakosc and jakosc["koszt_rolki"]:
-        # ile rolek jeszcze "wejdzie" dzis: limit dzienny Higgsfield (z rezerwa rolek w toku) i saldo (ponad min_kredyty), co nizsze
-        limit, wydano = baza.limit_dzienny("higgsfield"), baza.wydano_z_rezerwa("higgsfield")
-        zostalo = [(limit - wydano) // jakosc["koszt_rolki"]] if limit else []
-        kredyty = (salda.get("higgsfield") or {}).get("kredyty")
+        # ile rolek jeszcze "wejdzie" dzis: limit dzienny (z rezerwa rolek w toku) i saldo (ponad minimum), co nizsze -
+        # Higgsfield w kredytach, persona na WaveSpeed w centach USD (bez limitu WaveSpeed nie wejdzie zadna)
+        ws = jakosc.get("dostawca") == "wavespeed"
+        konto = "wavespeed" if ws else "higgsfield"
+        limit, wydano = baza.limit_dzienny(konto), baza.wydano_z_rezerwa(konto)
+        zostalo = [(limit - wydano) // jakosc["koszt_rolki"]] if limit else ([0] if ws else [])
+        kredyty = (salda.get(konto) or {}).get("kredyty")
         if kredyty is not None:
-            zostalo.append(max(0, int(kredyty) - int(baza.ustawienia_modelki(aktywna).get("min_kredyty") or 0)) // jakosc["koszt_rolki"])
+            min_k = fabryka.bezpiecznik(baza.ustawienia_modelki(aktywna), konto)[0]
+            zostalo.append(max(0, int(kredyty) - int(min_k)) // jakosc["koszt_rolki"])
         dzis["rolek_zostalo"] = max(0, min(zostalo)) if zostalo else None
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
@@ -447,7 +456,7 @@ def _dzis(aktywna):
     zdjecia = sum(len(baza.zdjecia_z_dnia(s)) for s in baza.lista_modelek())
     bledy = len([w for w in baza.dziennik_ostatnie(500, typ="blad") if baza.dzien_lokalny(w.get("czas")) == dzien])
     return {"rolki": rolki, "zdjecia": zdjecia, "bledy": bledy,
-            "kredyty": {d: baza.wydano_dzis(d) for d in ("higgsfield", "yapper", "sync")},
+            "kredyty": {d: baza.wydano_dzis(d) for d in ("higgsfield", "yapper", "sync", "wavespeed")},   # wavespeed/sync: centy USD
             "rolki_persony": len(baza.pomysly_z_dnia(aktywna)) if aktywna else 0}
 
 
@@ -578,14 +587,16 @@ GENERUJE_SIE = ("Ta rolka wlasnie sie generuje - fabryka dokonczy ja sama (takze
 @app.route("/api/pomysly/<int:pid>/ponow", methods=["POST"])
 def api_ponow_pomysl(pid):
     """'Sprobuj jeszcze raz'. Rolka odrzucona przez filtr (NSFW/IP) przy wlaczonym zapas_nsfw zaczyna od pierwszego kroku zapasu
-    (Seedance odrzucilby te same wejscia) - chyba ze to rolka ze strojem ze zdjecia (wariant B), jej zapas nie dotyczy."""
+    (Seedance odrzucilby te same wejscia) - chyba ze to rolka ze strojem ze zdjecia (wariant B), a zaden krok zapasu nie zachowa
+    stroju (Wan bierze stroj z filmu; WaveSpeed Seedance dostaje prompt persony i stroj zachowa)."""
     try:
         aktywna = _wymaga_modelki()
         p = baza.pomysl(aktywna, pid)
         if p.get("status") == "w_toku":
             return _blad(GENERUJE_SIE, 409)
         zapas = baza.ustawienia_modelki(aktywna).get("zapas_nsfw") or []
-        krok = 1 if p.get("powod") in fabryka.POWODY_ZAPASU and zapas and not p.get("stroj") else None
+        krok = 1 if (p.get("powod") in fabryka.POWODY_ZAPASU and zapas
+                     and (not p.get("stroj") or fabryka.zapas_dla_stroju(zapas))) else None
         pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="nowy", notatki="", krok_startowy=krok)
     except ValueError as e:
         return _blad(e)
@@ -598,7 +609,7 @@ def api_przerwij_czekanie(pid):
     bo kredyty mogly juz zejsc. Rolka dostaje status 'blad' z prosba o sprawdzenie w apce; potem dziala Ponow/Usun.
     Nie wolno w trakcie samego wysylania (wtedy 409)."""
     if not (request.json or {}).get("potwierdzam"):
-        return _blad("Potwierdz: kredyty za te rolke mogly juz zejsc - sprawdz najpierw w apce Higgsfield/yapper.")
+        return _blad("Potwierdz: kredyty za te rolke mogly juz zejsc - sprawdz najpierw w apce Higgsfield/yapper/WaveSpeed.")
     try:
         aktywna = _wymaga_modelki()
         p = baza.pomysl(aktywna, pid)
@@ -609,7 +620,7 @@ def api_przerwij_czekanie(pid):
         marker = p.get("w_toku") or {}
         job = marker.get("job_id") or p.get("job_id")
         notatki = (f"Przerwane recznie (czekanie na {marker.get('dostawca') or '?'} {marker.get('model') or ''}"
-                   + (f", job {job}" if job else ", bez numeru joba") + f"). {fabryka.SPRAWDZ_W_APCE}")
+                   + (f", job {job}" if job else ", bez numeru joba") + f"). {fabryka.sprawdz_w_apce(marker.get('dostawca'))}")
         pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="blad", w_toku=None, krok_startowy=None, powod="inny", notatki=notatki)
     except ValueError as e:
         return _blad(e)
@@ -799,7 +810,11 @@ def _rzutuj(klucz, wartosc):
             wartosc = json.loads(wartosc or "[]")
         if not isinstance(wartosc, list) or not all(isinstance(k, dict) and k.get("dostawca") and k.get("model") for k in wartosc):
             raise ValueError('zapas_nsfw: lista krokow [{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...]')
-        return [{"dostawca": str(k["dostawca"]).strip().lower(), "model": str(k["model"]).strip()} for k in wartosc]
+        kroki = [{"dostawca": str(k["dostawca"]).strip().lower(), "model": str(k["model"]).strip()} for k in wartosc]
+        zle = [k["dostawca"] for k in kroki if k["dostawca"] not in dostawcy.NAZWY_ZAPASU]
+        if zle:
+            raise ValueError(f"zapas_nsfw: nieznany dostawca {', '.join(zle)} (dozwolone: {', '.join(dostawcy.NAZWY_ZAPASU)})")
+        return kroki
     if klucz in ("duration", "generate_audio"):
         if wartosc in ("", None, "null"):
             return None
@@ -829,7 +844,10 @@ def api_zapisz_ustawienia():
         return _blad(e)
     dane = request.json or {}
     zmiany = {}
-    rozdzielczosc_przed = baza.ustawienia_modelki(slug).get("resolution")
+    przed = baza.ustawienia_modelki(slug)
+    rozdzielczosc_przed = przed.get("resolution")
+    # koszt rolki zalezy tez od dostawcy i modelu (kredyty Higgsfield vs centy WaveSpeed) - po zmianie liczymy od nowa
+    cena_przed = (przed.get("dostawca"), (przed.get("wavespeed") or {}).get("model"), (przed.get("yapper") or {}).get("model"))
     try:
         for k, v in dane.items():
             if k == "prompt_a_tekst":
@@ -850,8 +868,9 @@ def api_zapisz_ustawienia():
         return _blad(e)
     if "autopilot" in zmiany:
         baza.dziennik_zapisz("info", f"autopilot dla {slug}: {'wlaczony' if zmiany['autopilot'] else 'wylaczony'}", modelka=slug)
-    if ust.get("resolution") != rozdzielczosc_przed:
-        fabryka.uniewaznij_koszty(slug)      # stare szacunki kosztu rolek nie pasuja do nowej rozdzielczosci
+    cena_po = (ust.get("dostawca"), (ust.get("wavespeed") or {}).get("model"), (ust.get("yapper") or {}).get("model"))
+    if ust.get("resolution") != rozdzielczosc_przed or cena_po != cena_przed:
+        fabryka.uniewaznij_koszty(slug)      # stare szacunki kosztu rolek nie pasuja do nowej rozdzielczosci / dostawcy / modelu
     return _ok(ustawienia=ust)
 
 
@@ -915,6 +934,9 @@ def api_usun_plik():
 JAK_LOGOWAC = {
     "higgsfield": "Logowanie: zaloguj-higgsfield.bat (Firefox) albo `higgsfield auth login`, potem `higgsfield workspace set <id>`",
     "yapper": "yapper.so -> Account -> API -> Create key (zaznacz Read + Write). Klucz pokazuje sie tylko raz - skopiuj od razu. Wymaga platnego planu.",
+    "wavespeed": "Zaloguj sie (Google albo GitHub) na https://wavespeed.ai/dashboard -> API Keys, czyli https://wavespeed.ai/accesskey "
+                 "-> utworz klucz i wklej go tutaj. Doladuj konto (Billing, karta albo PayPal) - bez pieniedzy na koncie rolki nie rusza. "
+                 "Potem ustaw dzienny limit w Ustawienia -> Limity (bez limitu fabryka nic tam nie wyda).",
     "sync": "https://sync.so/settings/api-keys -> New API key",
     "elevenlabs": "elevenlabs.io -> profil -> API keys (opcjonalnie; TTS idzie tez przez sync.so)",
     "telegram": "W Telegramie napisz do @BotFather: /newbot, nadaj nazwe -> dostaniesz token. Wklej go tu. "
@@ -963,7 +985,8 @@ def api_statystyki():
                 zdjecia[d] += 1
     bud = baza.budzet()
     kredyty = {"higgsfield": bud.get("wydatki", {}), "yapper": (bud.get("dostawcy", {}).get("yapper") or {}).get("wydatki", {}),
-               "sync": (bud.get("dostawcy", {}).get("sync") or {}).get("wydatki", {})}
+               "sync": (bud.get("dostawcy", {}).get("sync") or {}).get("wydatki", {}),
+               "wavespeed": (bud.get("dostawcy", {}).get("wavespeed") or {}).get("wydatki", {})}     # centy USD
     bledy = {d: 0 for d in dni}
     for w in baza.dziennik_ostatnie(2000, typ="blad"):
         d = baza.dzien_lokalny(w.get("czas"))
@@ -1021,6 +1044,10 @@ def api_test_konta():
             from dostawcy import yapper
             dziala, komunikat = yapper.gotowy()
             _saldo.pop("yapper", None)
+        elif d == "wavespeed":
+            from dostawcy import wavespeed
+            dziala, komunikat = wavespeed.gotowy()        # GET /balance - nic nie kosztuje
+            _saldo.pop("wavespeed", None)
         elif d == "elevenlabs":
             from dostawcy import elevenlabs
             dziala, komunikat = elevenlabs.gotowy()
@@ -1139,7 +1166,7 @@ def api_dziennik():
 @app.route("/api/budzet")
 def api_budzet():
     dzis = {}
-    for d, jednostka in (("higgsfield", "kr"), ("yapper", "kr"), ("sync", "c")):
+    for d, jednostka in (("higgsfield", "kr"), ("yapper", "kr"), ("sync", "c"), ("wavespeed", "c")):
         dzis[d] = {"wydano": baza.wydano_dzis(d), "limit": baza.limit_dzienny(d), "jednostka": jednostka}
     return _ok(budzet=baza.budzet(), dzis=dzis)
 
@@ -1148,6 +1175,8 @@ def api_budzet():
 def api_zapisz_budzet():
     dane = request.json or {}
     d = dane.get("dostawca", "higgsfield")
+    if d not in dostawcy.NAZWY + ("sync",):
+        return _blad(f"Nieznany dostawca '{d}'.")
     try:
         baza.zapisz_limit_dzienny(int(dane.get("max_kredyty_dziennie", 0) or 0), d)
     except (TypeError, ValueError) as e:
@@ -1291,7 +1320,7 @@ def api_zamknij():
     konsola.stop.set()
     if trwa:
         komunikat = (f"Teraz trwa: {konsola.stan.get('typ') or 'wysylanie rolki'}. Zamkne panel, gdy skonczy sie biezacy krok "
-                     f"(wysylanie rolki do Higgsfield/yapper nie jest przerywane). Rolka, ktora juz sie generuje, dokonczy sie "
+                     f"(wysylanie rolki do Higgsfield/yapper/WaveSpeed nie jest przerywane). Rolka, ktora juz sie generuje, dokonczy sie "
                      f"po ponownym uruchomieniu - bez drugiej oplaty.")
         baza.dziennik_zapisz("info", "panel zamknie sie po biezacym kroku (aktualizacja / zamknij) - " + komunikat)
         threading.Thread(target=_zamknij_gdy_wolne, daemon=True).start()

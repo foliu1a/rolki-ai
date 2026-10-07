@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timezone
 
 import baza
+import dostawcy
 import fabryka
 
 if sys.platform == "win32":
@@ -132,9 +133,14 @@ def _status_tekst():
         ust = baza.ustawienia_modelki(slug)
         ap = baza.autopilot_stan(slug)
         d = ust.get("dostawca") or "higgsfield"
+        if dostawcy.jednostka(d) == "c":
+            wydane = (f"{dostawcy.kwota(baza.wydano_dzis(d), d)}/"
+                      f"{dostawcy.kwota(baza.limit_dzienny(d), d) if baza.limit_dzienny(d) else '-'} ({d})")
+        else:
+            wydane = f"{baza.wydano_dzis(d)}/{baza.limit_dzienny(d) or '-'} kr"
         linie.append(f"{slug}: czeka {st.get('nowy', 0)}, " + (f"robi sie {st['w_toku']}, " if st.get("w_toku") else "")
                      + f"gotowe {st.get('gotowe', 0)}, nie wyszlo {st.get('blad', 0)}; "
-                     f"dzis {len(baza.pomysly_z_dnia(slug))} rolek, {baza.wydano_dzis(d)}/{baza.limit_dzienny(d) or '-'} kr"
+                     f"dzis {len(baza.pomysly_z_dnia(slug))} rolek, {wydane}"
                      + (" | AUTOPILOT: " + ("PAUZA - " + ap["pauza"] if ap.get("pauza") else ("wlaczony" if ust.get("autopilot") else "wylaczony"))))
     return "\n".join(linie) or "Brak person."
 
@@ -153,7 +159,7 @@ def raport_dnia(wymus=False):
     for slug in baza.lista_modelek():
         rolki = baza.pomysly_z_dnia(slug)
         d = baza.ustawienia_modelki(slug).get("dostawca") or "higgsfield"
-        linie.append(f"- {slug}: {len(rolki)} rolek, {len(baza.zdjecia_z_dnia(slug))} zdjec, {baza.wydano_dzis(d)} kr ({d})")
+        linie.append(f"- {slug}: {len(rolki)} rolek, {len(baza.zdjecia_z_dnia(slug))} zdjec, {dostawcy.kwota(baza.wydano_dzis(d), d)} ({d})")
     bledy = [w for w in baza.dziennik_ostatnie(500, typ="blad") if baza.dzien_lokalny(w.get("czas")) == dzis]
     if bledy:
         linie.append(f"Problemy dzis: {len(bledy)} (szczegoly w panelu -> Historia)")

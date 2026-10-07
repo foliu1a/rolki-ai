@@ -1,7 +1,7 @@
 # rolki-ai — instrukcja dla Claude
 
-Fabryka rolek AI per "modelka" (persona): filmik zrodlowy -> Seedance 2.5 Edit (CLI Higgsfield) albo Wan 3.0 (yapper.so API)
--> Media Tool -> lipsync (sync.so) -> gotowy plik + podpis; do tego zdjecia persony i autopilot.
+Fabryka rolek AI per "modelka" (persona): filmik zrodlowy -> Seedance 2.5 Edit (CLI Higgsfield), Wan 3.0 (yapper.so API) albo
+Seedance 2.5 Edit Turbo (WaveSpeedAI API) -> Media Tool -> lipsync (sync.so) -> gotowy plik + podpis; do tego zdjecia persony i autopilot.
 Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktorych ma prawa.
 
 ## Podzial rol
@@ -28,6 +28,10 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   `baza.dopisz_wydatek(kr, d, job_id=)`). Koszt liczony Z JOBA, nie z roznicy salda (user generuje tez recznie w apce - to nie zjada
   limitu fabryki): Higgsfield = wycena `generate cost` za udany job, 0 za odrzucony (kredyty wracaja); yapper = `creditsUsed`, 0 gdy
   `refunded`/failed. `rozliczone` (job_id per dostawca) = ten sam job liczy sie raz, takze po wznowieniu. sync.so: szacunek w centach USD.
+  WaveSpeed (`dostawcy.wavespeed`): kwoty w CENTACH USD (saldo, wycena, limit dnia, `wavespeed.min_kredyty`/`max_kredyty_na_rolke`
+  domyslnie 0/400 = $4); `WYMAGA_LIMITU` - bez dziennego limitu WaveSpeed ZERO zapytan (i jako dostawca rolek, i jako krok zapasu),
+  wskazowka `fabryka.BRAK_LIMITU_WAVESPEED`. Koszt = wycena sprzed wyslania (WaveSpeed nie podaje kosztu w wyniku): udany = wycena,
+  odrzucony przez moderacje = wycena na wszelki wypadek (Refund Policy nie mowi, czy oddaja), failed/timeout/cancelled = 0 (zwrot auto).
   Bezpieczniki dzienne licza `baza.wydano_z_rezerwa(d)` = wydane + `koszt_w_toku(d)` (wyceny rolek w toku wszystkich person), a
   `autopilot_max_rolek_dziennie` / `max_rolek` licza tez rolki w toku - kilka wolnych jobow naraz nie przebije limitu.
 - `powtorki` (ustawienia, 2) = ponowne WYSLANIE tylko wtedy, gdy NIC nie poszlo (blad przed znacznikiem `wysylam`, np. przy wgrywaniu
@@ -52,6 +56,12 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   `metadata.rolki_klucz`); brak: yapper po `CZAS_NA_WYSLANIE_S` (180 s) wraca do kolejki (ten sam klucz = ten sam proces), Higgsfield
   czeka 60 min od `wysylam_od`, potem blad "sprawdz w apce" (`_niepewne_wyslanie`) - nigdy samo nie wysyla. Lista jobow nie odpowiada
   > 24 h albo job po 24 h dalej "trwa" -> blad (bez nowego wysylania). Okno "wysylania" (`trwa_wysylanie`) trwa do zapisu job_id.
+- WaveSpeed (2026-10-07) nie ma Idempotency-Key (`IDEMPOTENTNY = False`, sciezka jak Higgsfield): wszystkie media wgrane PRZED
+  `wysylam`, `POST /{model}` RAZ (`powtorki=1`, tak robi oficjalne SDK). Odpowiedz 4xx = serwer odrzucil, zadanie NIE powstalo ->
+  `znacznik(wysylam=False)` (fabryka moze wyslac ponownie; 429 = powtorka po 10 s, 400/401/402/403 = blad trwaly). Blad sieci / 5xx =
+  nie wiadomo -> `wavespeed.znajdz`: lista `POST /predictions {model}` NIE ma wejsc zadania, wiec szuka po modelu i czasie (okno
+  `wysylam_od` -3/+10 min) z pominieciem jobow znanych fabryce (`baza.znane_job_id`); DOKLADNIE jedno = nasze, zero/kilka = czekamy 60 min,
+  potem blad "Sprawdz w apce WaveSpeed" (`fabryka.sprawdz_w_apce(dostawca)`) - nigdy drugie wysylanie.
 - `baza.blokada_generacji(slug)` (plik `modelki/<slug>/generacja.lock`, msvcrt/fcntl) = jedna generacja naraz na persone takze miedzy
   procesami (panel + `python fabryka.py generuj` + agent) -> drugi dostaje stop "zajete".
 - `/api/zamknij` i `aktualizuj.bat` nie zabijaja wysylania: panel konczy sie po bezpiecznym punkcie (`fabryka.trwa_wysylanie()`), bat
@@ -65,7 +75,7 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 
 ## Rozdzielczosc (zasada usera 2026-10-04)
 
-- Klip <= 8 s -> 1080p, dluzszy -> 720p - Higgsfield (Seedance) i yapper (Wan). Liczy sie dlugosc (pocietego) klipu z `info_zrodla`
+- Klip <= 8 s -> 1080p, dluzszy -> 720p - Higgsfield (Seedance), yapper (Wan) i WaveSpeed (Turbo nie ma 480p -> 720p). Liczy sie dlugosc (pocietego) klipu z `info_zrodla`
   w chwili generacji (`fabryka.rozdzielczosc_rolki`, `PROG_1080P_S`); idzie do `generate cost`/dryRun, bezpiecznika i zapytania, zapisana
   w pomysle (`resolution`). Ustawienie `resolution` persony = tylko pomysly bez filmiku. Ciecie (`max_sekund_rolki`) bez zmian.
   Zmierzone `generate cost` 2026-10-04: 6,04 s -> 1080p 73 / 720p 46 kr; 10,03 s -> 1080p 121 / 720p 76 kr (1080p <= 8 s miesci sie w 150).
@@ -86,6 +96,10 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   "NSFW -> zapas <model>". Miedzy krokami rolka ma status `nowy` + `krok_startowy` (awaria = rusza od zapasu). "Ponow" przy nsfw/ip
   z wlaczonym zapasem = `krok_startowy: 1`. Rolki ze strojem ze zdjecia (wariant B) NIE ida na zapas (wan.txt bierze stroj z filmu -
   zapas zgubilby stroj): zero zapytan do yappera, notatka w rolce. "not eligible" (plan) to nie IP - zapasu nie uruchamia. NSFW/IP to `wynik['odrzucone']` - hamulec autopilota ich nie liczy (tylko awarie techniczne).
+  Kroki moga byc tez `{"dostawca": "wavespeed", "model": ...}` (`dostawcy.NAZWY_ZAPASU`, panel odrzuca innych). `_BezZapasu` (brak/wyczerpany
+  limit, saldo) pomija tylko kroki TEGO dostawcy - krok innego dostawcy dalej probuje (`_nastepny_krok_innego_dostawcy`). Wariant B: krok
+  WaveSpeed Seedance dostaje prompt persony (B, stroj = ostatnie @Image), wiec stroj zachowa (`zapas_dla_stroju`, "Ponow" od zapasu);
+  kroki Wan (yapper, WaveSpeed Wan) sa pomijane, a gdy nie ma kroku Seedance - jak dawniej `_BezZapasu(wszystkie=True)`.
   `fabryka.wskazowki_nsfw(slug)` / `GET /api/nsfw` /
   `python fabryka.py nsfw`: ryzykowne slowa w promptach (`SLOWA_RYZYKOWNE`), liczba odrzucen, wskazowki. Filtr Higgsfield+Seedance
   sprawdza naraz filmik, referencje, stroj i prompt - user mial odrzucenia "mimo niewinnego filmiku" najpewniej przez zdjecia strojow
@@ -126,7 +140,9 @@ lipsync.py          zrob(slug, wideo, audio, styl=) -> przygotuj_glos (ffmpeg: s
                     (jak rolka) -> wyniki_dir/<n>_lipsync.mp4; tts_z_tekstu. Ustawienie lipsync_glos_styl. Autopilot wysyla wersje
                     z ustami na Telegram raz (telegram_wyslano_lipsync). api.sync.so jest ZABLOKOWANE z chmury - testy tylko lokalnie.
 dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobierz + rolki: zlec/sprawdz/koncowy/koszt_joba/znajdz/
-                    IDEMPOTENTNY): higgsfield.py (CLI), yapper.py (REST; cialo per model z GET /models + schema.json, wycena dryRun),
+                    IDEMPOTENTNY, JEDNOSTKA kr|c, WYMAGA_LIMITU; `dostawcy.kwota(k, nazwa)` = "46 kr" / "$2.60"):
+                    higgsfield.py (CLI), yapper.py (REST; cialo per model z GET /models + schema.json, wycena dryRun),
+                    wavespeed.py (REST WaveSpeedAI; MODELE = Seedance 2.5 Edit Turbo/Edit, Wan 3.0/Prime R2V z cennikiem; centy USD),
                     elevenlabs.py (TYLKO gotowy/saldo_szczegoly: zostalo znakow TTS z GET /v1/user/subscription - do paska sald;
                     NAZWY_SALDA = NAZWY + elevenlabs; glos z tekstu nadal przez sync.so),
                     sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
@@ -134,10 +150,10 @@ dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobier
                     (tylko te z ustawien telegram_czat; obce ignorowane); `czat_dla(konto)`; limity 20 MB pobieranie / 50 MB
                     wysylka), http.py (urllib: JSON, multipart, PUT, pobierz, powtorki)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
-                    env (YAPPER_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
+                    env (YAPPER_API_KEY, WAVESPEED_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
 mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
 klatki.py           ffprobe/ffmpeg: info, klatki PNG, arkusz.jpg (siatka do ogladania), potnij (dlugie zrodla na kawalki po 30 s)
-sekrety.py          klucze API (yapper, sync, elevenlabs, telegram = token bota)
+sekrety.py          klucze API (yapper, wavespeed, sync, elevenlabs, telegram = token bota)
 baza.py             warstwa danych (modelki/<slug>/*.json, budzet, dziennik.jsonl) - zawsze przez nia, nie edytuj JSON-ow recznie
 postprocess.py      (nieuzywany - do skasowania, decyzja usera 2026-10-04)
 app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle naraz (Konsola), autopilot jako watek,
@@ -146,8 +162,9 @@ app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle n
 templates/, static/ index.html + style.css + app.js (SPA, vanilla JS, bez CDN), widget.html (/widget - male okno)
 panel.py            (stary panel w konsoli - do skasowania, decyzja usera 2026-10-04)
 modelki/<slug>/
-  ustawienia.json   patrz baza.USTAWIENIA_DOMYSLNE (komentarze = dokumentacja): dostawca, model/mode/aspect/resolution/duration,
-                    mode_bez_zrodla, yapper{model,resolution,duration,prompt,min_kredyty,max_kredyty_na_rolke}, prompty A/B,
+  ustawienia.json   patrz baza.USTAWIENIA_DOMYSLNE (komentarze = dokumentacja): dostawca (higgsfield|yapper|wavespeed), model/mode/aspect/resolution/duration,
+                    mode_bez_zrodla, yapper{model,resolution,duration,prompt,min_kredyty,max_kredyty_na_rolke},
+                    wavespeed{model,generate_audio,parametry,min_kredyty,max_kredyty_na_rolke - centy USD}, prompty A/B,
                     stroj_domyslny, prompt_auto, soul_id, min_kredyty, max_kredyty_na_rolke, powtorki, zrodla_dir, wyniki_dir,
                     mediatool, autopilot*, telegram_wysylaj, telegram_czat, zdjecia_* (+zdjecia_stroje, zdjecia_prompt_stroj),
                     lipsync_* (lipsync_auto domyslnie False), tts_*
@@ -163,7 +180,8 @@ modelki/<slug>/
                     telegram_wyslano, powod (nsfw|ip|inny przy bledzie)
   pociete.json      dlugie zrodla (>30 s) juz pociete na modelki/<slug>/zrodla_ciete/ (skanuj je pomija; dziel_dlugie)
   autopilot_stan.json  hamulec: bledy_z_rzedu, pauza, pauza_od
-  zdjecia.json / lipsync.json / uploady.json / uploady_yapper.json / profil.json / szablony.json / teksty.json / uzyte_tekstow.json
+  zdjecia.json / lipsync.json / uploady.json / uploady_yapper.json / uploady_wavespeed.json (URL-e plikow wgranych do WaveSpeed,
+                    max 6 dni - WaveSpeed trzyma 7) / profil.json / szablony.json / teksty.json / uzyte_tekstow.json
   generacja.lock    blokada generacji (miedzy procesami)
 ```
 
@@ -187,7 +205,9 @@ udawanym CLI Higgsfield (`tests/conftest.py`: `UdawaneCLI`) i udawanym HTTP (`te
 nie wydaja kredytow, nie ruszaja `modelki/`, `budzet.json`, kluczy ani Media Tool. Panel: `tests/test_app.py` (Flask test client).
 Nowa logika = nowy test. `UdawaneCLI` udaje tez serwer jobow (`generate create` bez --wait zapisuje job, `job()` = generate get,
 `joby()` = generate list); `UdawanyHTTP` porownuje DOKLADNE adresy (pelne URL-e - endswith ukryl kiedys sklejony completeUrl).
-Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/test_zapas_nsfw.py, rozdzielczosc: tests/test_rozdzielczosc.py.
+Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/test_zapas_nsfw.py, rozdzielczosc: tests/test_rozdzielczosc.py,
+WaveSpeed (udawany HTTP `HTTPWaveSpeed` z automatycznymi biletami uploadu, DOKLADNE adresy https://api.wavespeed.ai/api/v3/...):
+tests/test_wavespeed.py.
 
 ## Higgsfield CLI - fakty (zweryfikowane na binarce 1.1.26, 2026-10-02)
 
@@ -242,6 +262,38 @@ Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/tes
   (lipsync-2, lipsync-2-pro, sync-3). Rozliczenie z dolu (bez salda); darmowy plan: 3 generacje/mies, 20 s, watermark.
 - sync.so nie byl testowany na zywo. Jak API odpowie inaczej niz w dostawcy/*.py, popraw parser (testy w tests/test_dostawcy.py).
 
+## WaveSpeedAI - fakty (z dokumentacji i oficjalnego SDK, 2026-10-07; BEZ klucza - nic nie bylo wolane na zywo)
+
+- Zrodla: https://wavespeed.ai/docs (submit-task, get-result, upload-files-api, check-balance, pricing-api, predictions-api,
+  error-codes, refund-policy), strony modeli, SDK github.com/WaveSpeedAI/wavespeed-python (`src/wavespeed/api/client.py`).
+  Konto: logowanie Google/GitHub, bez KYC; platnosc przedplacona (karta/Stripe, PayPal...), kredyty nie wygasaja; poziom Bronze bez
+  doladowania = 5 zadan/min, 2 naraz. Klucz: dashboard -> API Keys (https://wavespeed.ai/accesskey), `WAVESPEED_API_KEY` / panel Konta.
+- `https://api.wavespeed.ai/api/v3`, `Authorization: Bearer`, koperta `{code, message, data}`. `GET /balance` -> data.balance (USD).
+  `POST /{model_id}` (cialo = parametry modelu) -> data {id, status "created", urls.get}; `GET /predictions/{id}/result` -> status
+  created|processing|completed|failed|cancelled|timeout|deleted, outputs [url], error. `POST /predictions {page, page_size, model}` ->
+  data.items (bez wejsc zadania!). Upload: `POST /media/uploads {filename, size, content_type}` -> data {download_url, upload {method PUT,
+  url podpisany, headers}} -> PUT naglowkami biletu 1:1 (BEZ klucza), bez "complete"; plik zyje 7 dni, max 200 MB. Stary sposob:
+  `POST /media/upload/binary` multipart `file` (uzywany, gdy bilet da 404/405). Darmowa wycena: `POST /model/price {model_id, inputs}`
+  -> {price, discounted_price (to sie placi), discount_rate} - media z inputs WaveSpeed mierzy sam.
+- Bledy: 1200 moderacja ("The content contains sensitive information.") -> `status 'nsfw'` (+ `has_nsfw_contents` przy completed),
+  1400/1401 parametry, 1402 media, 1407 insufficient_credits, 5004 timeout. Nieudane = zwrot automatyczny (Refund Policy).
+- Modele (`wavespeed.MODELE`, panel: lista bez zapytania do API): `bytedance/seedance-2.5/video-edit-turbo` (domyslny; 720p/1080p,
+  filmik max 15 s - dluzszy przycinamy do KOPII `zrodla_ciete/<nazwa>_max15s.mp4`, cena (wejscie+wyjscie) x $0.11 + wyjscie x $0.02
+  (720p) / $0.04 (1080p): 10 s 1080p = $2.60, 720p = $2.40), `bytedance/seedance-2.5/video-edit` (480p $0.11, 720p $0.22, 1080p $0.55 za
+  sekunde wejscia+wyjscia), `alibaba/wan-3.0/reference-to-video` ($0.05/0.10/0.20 za s filmiku ref + wyjscia) i `alibaba/wan-3.0-prime/...`
+  ($0.075/0.15/0.30). Szacunek z cennika liczy sekundy w gore (Wan: "rounded up"); `wycena()` = WIEKSZA z cennika i API (cennik =
+  podloga - API, ktore nie zmierzy filmiku albo poda 0, nie obnizy bezpiecznika). Na stronach jest teraz ~10% rabatu - bezpiecznik
+  liczy pelna cene.
+- Cialo: Seedance edit = `{prompt, video, reference_images, resolution, generate_audio}` (bez aspect_ratio - proporcje z filmiku);
+  prompt = prompt persony A/B z `@[Image N](image_N)` -> `@Image N` (ta sama kolejnosc: referencje 01_, 02_..., stroj ostatni);
+  `generate_audio=false` (domyslnie, `wavespeed.generate_audio`) = zostaje ORYGINALNY dzwiek filmiku. Wan R2V = `{prompt z wan.txt,
+  reference_images, reference_videos, resolution, aspect_ratio 9:16, duration = dlugosc klipu (ref + wyjscie <= 30 s),
+  enable_prompt_expansion false, generate_audio}`. `wavespeed.parametry` = dodatkowe pola (bez nadpisywania prompt/video/referencji).
+- NIESPRAWDZONE do pierwszej generacji: limit dlugosci promptu Seedance na WaveSpeed (nieznany; nasze prompty A maja 7-13 tys. znakow -
+  przy 1401 skrocic), czy WaveSpeed honoruje `@Image N` w edycji jak Higgsfield `@[Image N]`, dokladne ksztalty odpowiedzi (parser jest
+  tolerancyjny), czy wycena API dziala dla video-edit, czy moderacja oddaje pieniadze. Pierwsza rolka: krotki klip 720p, sprawdzic koszt
+  w dashboardzie WaveSpeed (Billing / historia) z `p['koszt']` i dziennikiem.
+
 ## Prompty
 
 - Prompty usera sa STALE per persona i NIE zaleza od klipu ("complete character replacement", strój z filmu
@@ -251,6 +303,8 @@ Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/tes
   CLI przekazuje prompt doslownie (nie zna tej skladni) - czy backend ja honoruje, potwierdzic na pierwszej taniej generacji
   (`--draft true` / 480p). yapper NIGDY nie dostaje tej skladni: prompt Wan = `yapper.prompt` albo `prompty/wan.txt` (max 5000 znakow);
   `dostawcy/yapper.py` odmawia (zanim cokolwiek wysle) promptu z @[Image N], za dlugiego albo filmiku > 15 s.
+  WaveSpeed Seedance dostaje prompt persony z zamiana `@[Image N](image_N)` -> `@Image N` (`wavespeed.prompt_na_wavespeed`, tresc bez
+  zmian); WaveSpeed Wan - prompt Wan (te same zasady co yapper: bez @[Image N], max 5000 znakow).
 - Agent moze dopisac do promptu krotka notatke per klip tylko gdy klip tego wymaga (np. tatuaze, tekst na ekranie),
   i tylko na koncu, nie zmieniajac tresci usera. Zmiany w samych plikach prompty/*.txt robi tylko user (panel -> Persona -> Prompty).
 - Brak promptu / referencji -> nie zgaduj, popros usera.
@@ -259,6 +313,6 @@ Podwojne placenie/wznawianie: tests/test_wznawianie.py, zapas po NSFW: tests/tes
 
 - Nie scrapuj Instagrama; zrodla i referencje dostarcza uzytkownik.
 - Wizerunek realnych osob tylko za ich zgoda. Content jest AI - nie pomagaj udawac, ze jest inaczej.
-- Bezpiecznik budzetu (min_kredyty, max_kredyty_na_rolke, limity dzienne, yapper.*) zmienia tylko user.
+- Bezpiecznik budzetu (min_kredyty, max_kredyty_na_rolke, limity dzienne, yapper.*, wavespeed.*) zmienia tylko user.
 - Publikacja jest reczna. Fabryka konczy na pliku w folderze gotowych.
 - Klucze API tylko w klucze.json / env - nigdy w kodzie, commitach ani w czacie.

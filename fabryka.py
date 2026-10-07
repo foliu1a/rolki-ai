@@ -166,15 +166,40 @@ def sprawdz_prompt(slug, ust=None):
 LIMIT_PROMPTU_WAN = 5000
 
 
+def _krok_uzywa_wan(dostawca, model):
+    """Czy krok (dostawca, model) dostaje prompt Wan (prompty/wan.txt): yapper zawsze, WaveSpeed - modele Wan (nie Seedance)."""
+    dostawca = (dostawca or "").strip().lower()
+    if dostawca == "yapper":
+        return True
+    if dostawca == "wavespeed":
+        from dostawcy import wavespeed
+        return not wavespeed.uzywa_promptu_persony(model)
+    return False
+
+
+def uzywa_promptu_wan(ust):
+    """Czy persona gdziekolwiek uzywa promptu Wan: dostawca rolek (yapper / WaveSpeed Wan) albo krok zapas_nsfw."""
+    d = (ust.get("dostawca") or "higgsfield").strip().lower()
+    if d == "yapper" or (d == "wavespeed" and _krok_uzywa_wan(d, (ust.get("wavespeed") or {}).get("model"))):
+        return True
+    return any(isinstance(k, dict) and _krok_uzywa_wan(k.get("dostawca"), k.get("model")) for k in (ust.get("zapas_nsfw") or []))
+
+
+def zapas_dla_stroju(kroki):
+    """Czy ktorykolwiek krok zapas_nsfw zachowa stroj ze zdjecia (wariant B): tylko kroki z promptem persony (WaveSpeed Seedance)."""
+    return any(isinstance(k, dict) and k.get("dostawca") and not _krok_uzywa_wan(k.get("dostawca"), k.get("model"))
+               and (k.get("dostawca") or "").strip().lower() in dostawcy.NAZWY_ZAPASU for k in (kroki or []))
+
+
 def sprawdz_prompt_wan(slug, ust=None):
-    """Prompt Wan (yapper.prompt albo prompty/wan.txt) - sprawdzany tylko, gdy persona go uzywa (dostawca yapper albo zapas_nsfw):
-    max 5000 znakow, bez skladni @[Image N](image_N) z Higgsfielda."""
+    """Prompt Wan (yapper.prompt albo prompty/wan.txt) - sprawdzany tylko, gdy persona go uzywa (dostawca yapper / WaveSpeed Wan
+    albo krok zapas_nsfw z Wan): max 5000 znakow, bez skladni @[Image N](image_N) z Higgsfielda."""
     ust = ust or baza.ustawienia_modelki(slug)
-    if (ust.get("dostawca") or "higgsfield") != "yapper" and not ust.get("zapas_nsfw"):
+    if not uzywa_promptu_wan(ust):
         return []
     wan = baza.prompt_wan(slug)
     if not wan:
-        return ["brak promptu Wan (prompty/wan.txt albo yapper.prompt) - yapper/zapas po NSFW nie ruszy"]
+        return ["brak promptu Wan (prompty/wan.txt albo yapper.prompt) - modele Wan (yapper, WaveSpeed Wan, zapas po NSFW) nie rusza"]
     uwagi = []
     if len(wan) > LIMIT_PROMPTU_WAN:
         uwagi.append(f"prompt Wan ma {len(wan)} znakow, a Wan przyjmuje max {LIMIT_PROMPTU_WAN}")
@@ -212,6 +237,7 @@ def diagnoza():
     except Exception as e:
         wynik.append({"co": "telegram", "ok": False, "info": str(e)})
     wynik += _diagnoza_yappera()
+    wynik += _diagnoza_wavespeed()
     for slug in baza.lista_modelek():
         braki = []
         if not baza.sciezki_referencji(slug):
@@ -249,7 +275,8 @@ def _diagnoza_yappera():
     uzywa = []
     for s in baza.lista_modelek():
         u = baza.ustawienia_modelki(s)
-        if (u.get("dostawca") or "higgsfield") == "yapper" or u.get("zapas_nsfw"):
+        if (u.get("dostawca") or "higgsfield") == "yapper" or any(
+                isinstance(k, dict) and (k.get("dostawca") or "").strip().lower() == "yapper" for k in (u.get("zapas_nsfw") or [])):
             uzywa.append(s)
     if not sekrety.klucz("yapper") and not uzywa:
         return []
@@ -265,6 +292,34 @@ def _diagnoza_yappera():
     else:
         wynik.append({"co": "limit yappera", "ok": False if uzywa else None,
                       "info": "nie ustawiony - zapas po NSFW (yapper) nic nie wyda, dopoki go nie ustawisz (Ustawienia -> Limity)"})
+    return wynik
+
+
+def _uzywa_wavespeed(ust):
+    return (ust.get("dostawca") or "higgsfield") == "wavespeed" or any(
+        isinstance(k, dict) and (k.get("dostawca") or "").strip().lower() == "wavespeed" for k in (ust.get("zapas_nsfw") or []))
+
+
+def _diagnoza_wavespeed():
+    """WaveSpeed: czy klucz dziala (GET /balance) i czy jest dzienny limit - bez niego fabryka nic tam nie wyda.
+    Tylko gdy jest klucz albo ktoras persona robi rolki na WaveSpeed / ma go w zapas_nsfw."""
+    import sekrety
+    uzywa = [s for s in baza.lista_modelek() if _uzywa_wavespeed(baza.ustawienia_modelki(s))]
+    if not sekrety.klucz("wavespeed") and not uzywa:
+        return []
+    try:
+        from dostawcy import wavespeed
+        ok, info = wavespeed.gotowy()
+    except Exception as e:
+        ok, info = False, str(e)
+    wynik = [{"co": "wavespeed", "ok": ok, "info": info}]
+    limit = baza.limit_dzienny("wavespeed")
+    if limit:
+        wynik.append({"co": "limit wavespeed", "ok": True,
+                      "info": f"dzis {dostawcy.kwota(baza.wydano_dzis('wavespeed'), 'wavespeed')}/{dostawcy.kwota(limit, 'wavespeed')}"})
+    else:
+        wynik.append({"co": "limit wavespeed", "ok": False if uzywa else None,
+                      "info": "nie ustawiony - fabryka nic nie wyda na WaveSpeed, dopoki go nie ustawisz (Ustawienia -> Limity)"})
     return wynik
 
 
@@ -314,6 +369,7 @@ def stan_modelki(slug):
         "dostawca": dostawca,
         "budzet": {
             "dostawca": dostawca,
+            "jednostka": dostawcy.jednostka(dostawca),       # kr | c (centy USD - WaveSpeed)
             "wydano_dzis": baza.wydano_dzis(dostawca),
             "limit_dzienny": baza.limit_dzienny(dostawca),
             "min_kredyty": bezpiecznik(ust, dostawca)[0],
@@ -338,7 +394,8 @@ def cmd_status(args):
     print(f"gotowe:   {s['gotowe_dir']}   (Media Tool: {'tak' if ust.get('mediatool') else 'nie'})")
     print("pomysly: " + ", ".join(f"{k}={s['statystyki'].get(k, 0)}" for k in baza.STATUSY))
     b = s["budzet"]
-    print(f"budzet dzienny ({b['dostawca']}): wydano {b['wydano_dzis']}/{b['limit_dzienny']} kr, rolek dzis {b['rolki_dzis']}/{b['max_rolek_dziennie']}")
+    print(f"budzet dzienny ({b['dostawca']}): wydano {dostawcy.kwota(b['wydano_dzis'], b['dostawca'])}/"
+          f"{dostawcy.kwota(b['limit_dzienny'], b['dostawca'])}, rolek dzis {b['rolki_dzis']}/{b['max_rolek_dziennie']}")
     if s["bez_promptu"]:
         print(f"czekaja na prompt ({len(s['bez_promptu'])}): " + ", ".join(f"#{i}" for i in s["bez_promptu"]))
     if s["do_generacji"]:
@@ -353,7 +410,8 @@ def cmd_status(args):
           f"zdjecia dziennie: {ust.get('zdjecia_dziennie')} (dzis {s['zdjecia_dzis']})")
     try:
         d = dostawcy.dostawca(s["dostawca"])
-        print(f"kredyty {s['dostawca']}: {d.saldo()}  (min_kredyty={ust['min_kredyty']}, max/rolka={ust['max_kredyty_na_rolke']})")
+        print(f"saldo {s['dostawca']}: {dostawcy.kwota(d.saldo(), s['dostawca'])}  (min={dostawcy.kwota(b['min_kredyty'], s['dostawca'])}, "
+              f"max/rolka={dostawcy.kwota(b['max_kredyty_na_rolke'], s['dostawca'])})")
     except dostawcy.BladDostawcy as e:
         print(f"kredyty {s['dostawca']}: niedostepne ({e})")
     return 0
@@ -416,11 +474,25 @@ def max_sekund_rolki(ust):
     return max(4, min(MAX_SEKUND_ZRODLA, n))
 
 
-def szacunek_kosztu_rolki(ust, sekundy=None):
-    """Orientacyjny koszt jednej rolki w kredytach Higgsfield: dlugosc x stawka za sekunde rozdzielczosci, ktora wybierze
-    zasada <= 8 s -> 1080p (bez dlugosci - typowa rolka max_sekund_rolki)."""
+def stawki_rolki(ust):
+    """Stawki za sekunde klipu u dostawcy rolek persony: Higgsfield (i yapper - panel pokazuje skale Higgsfielda) =
+    KR_NA_SEKUNDE w kredytach; WaveSpeed = centy USD z cennika wybranego modelu (wejscie + wyjscie, np. Turbo 1080p 26 c/s)."""
+    if (ust.get("dostawca") or "higgsfield") == "wavespeed":
+        from dostawcy import wavespeed
+        try:
+            return wavespeed.stawki_za_sekunde((ust.get("wavespeed") or {}).get("model"))
+        except dostawcy.BladDostawcy:
+            return wavespeed.stawki_za_sekunde(wavespeed.MODEL_DOMYSLNY)
+    return KR_NA_SEKUNDE
+
+
+def szacunek_kosztu_rolki(ust, sekundy=None, stawki=None):
+    """Orientacyjny koszt jednej rolki (domyslnie w kredytach Higgsfield; stawki=stawki_rolki(ust) - u dostawcy persony):
+    dlugosc x stawka za sekunde rozdzielczosci, ktora wybierze zasada <= 8 s -> 1080p (bez dlugosci - typowa rolka
+    max_sekund_rolki)."""
+    stawki = stawki or KR_NA_SEKUNDE
     sek = float(sekundy) if sekundy else max_sekund_rolki(ust)
-    return int(round(sek * KR_NA_SEKUNDE[rozdzielczosc_dla_czasu(sek)]))
+    return int(round(sek * stawki[rozdzielczosc_dla_czasu(sek)]))
 
 
 def preset_jakosci(ust):
@@ -437,19 +509,24 @@ def _opis_rozdzielczosci(max_s):
 
 
 def jakosc_i_koszt(slug, ust=None):
-    """Dla panelu: aktualny zestaw, szacunek kosztu rolki i tabela zestawow z kosztami. Rozdzielczosc = zasada dlugosci klipu."""
+    """Dla panelu: aktualny zestaw, szacunek kosztu rolki i tabela zestawow z kosztami. Rozdzielczosc = zasada dlugosci klipu.
+    Persona na WaveSpeed: kwoty w centach USD (jednostka "c") z cennika modelu i jej bezpiecznik wavespeed.max_kredyty_na_rolke."""
     ust = ust or baza.ustawienia_modelki(slug)
+    dost = ust.get("dostawca") or "higgsfield"
+    stawki = stawki_rolki(ust)
     max_s = max_sekund_rolki(ust)
-    koszt = szacunek_kosztu_rolki(ust)
-    _, max_na_rolke = bezpiecznik(ust, "higgsfield")
+    koszt = szacunek_kosztu_rolki(ust, stawki=stawki)
+    _, max_na_rolke = bezpiecznik(ust, "wavespeed" if dost == "wavespeed" else "higgsfield")
     return {
         "preset": preset_jakosci(ust), "resolution": _opis_rozdzielczosci(max_s), "max_sekund_rolki": max_s,
-        "koszt_rolki": koszt, "koszt_sekundy": KR_NA_SEKUNDE[rozdzielczosc_dla_czasu(max_s)],
-        "koszt_sekundy_1080p": KR_NA_SEKUNDE["1080p"], "koszt_sekundy_720p": KR_NA_SEKUNDE["720p"],
+        "koszt_rolki": koszt, "koszt_sekundy": stawki[rozdzielczosc_dla_czasu(max_s)],
+        "koszt_sekundy_1080p": stawki["1080p"], "koszt_sekundy_720p": stawki["720p"],
         "prog_1080p_s": PROG_1080P_S, "zasada_rozdzielczosci": OPIS_ROZDZIELCZOSCI,
         "za_drogo": koszt > max_na_rolke, "max_kredyty_na_rolke": max_na_rolke,
+        "dostawca": dost, "jednostka": "c" if dost == "wavespeed" else "kr",
         "presety": {n: dict(p, resolution=_opis_rozdzielczosci(p["max_sekund_rolki"]),
-                            koszt_rolki=szacunek_kosztu_rolki(p, p["max_sekund_rolki"])) for n, p in PRESETY_JAKOSCI.items()},
+                            koszt_rolki=szacunek_kosztu_rolki(p, p["max_sekund_rolki"], stawki=stawki))
+                    for n, p in PRESETY_JAKOSCI.items()},
     }
 
 
@@ -659,9 +736,12 @@ def zlecenie(slug, p, ust=None):
         "parametry": dict(ust.get("dodatkowe_parametry") or {}),
         "dostawca": ust.get("dostawca") or "higgsfield",
         "yapper": dict(ust.get("yapper") or {}),
+        "wavespeed": dict(ust.get("wavespeed") or {}),
     }
     # yapper (Wan): wlasny krotki prompt persony (yapper.prompt albo prompty/wan.txt) - bez @[Image N], max 5000 znakow
     z["yapper"]["prompt"] = baza.prompt_wan(slug)
+    # WaveSpeed: Seedance dostaje prompt persony (z["prompt"], @[Image N] -> @Image N), modele Wan - ten sam prompt Wan
+    z["wavespeed"]["prompt_wan"] = z["yapper"]["prompt"]
     return z
 
 
@@ -756,10 +836,10 @@ def koszt(slug, ids=None, limit=None, log=None):
                 log(f"#{p['id']}: zapas po NSFW - {e}")
                 zapas = None
             if not zapas:
-                wynik["pozycje"].append((p["id"], None, "yapper"))
+                wynik["pozycje"].append((p["id"], None, _dostawca_kroku(ust, krok)))
                 continue
             dk, z, k = zapas
-            log(f"#{p['id']}: {k} kr ({dk.NAZWA} {_model(dk, z)}, zapas po NSFW)   {p['opis']}")
+            log(f"#{p['id']}: {dostawcy.kwota(k, dk.NAZWA)} ({dk.NAZWA} {_model(dk, z)}, zapas po NSFW)   {p['opis']}")
             wynik["pozycje"].append((p["id"], k, dk.NAZWA))
             wynik["dostawca"] = dk.NAZWA
             wynik["razem"] += k or 0
@@ -774,9 +854,17 @@ def koszt(slug, ids=None, limit=None, log=None):
         wynik["razem"] += k or 0
         wynik["pozycje"].append((p["id"], k, d.NAZWA))
         baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
-        log(f"#{p['id']}: {k if k is not None else '?'} kr ({z['resolution']})   {p['opis']}")
-    log(f"razem: {wynik['razem']} kr")
+        skad = d.opis_wyceny() if hasattr(d, "opis_wyceny") else ""
+        log(f"#{p['id']}: {dostawcy.kwota(k, d.NAZWA)} ({z['resolution']}{', ' + skad if skad else ''})   {p['opis']}")
+    log(f"razem: {dostawcy.kwota(wynik['razem'], wynik['dostawca'])}")
     return wynik
+
+
+def _dostawca_kroku(ust, krok):
+    """Nazwa dostawcy kroku zapas_nsfw nr `krok` (1..) - do pozycji wyceny panelu."""
+    kroki = ust.get("zapas_nsfw") or []
+    opis = kroki[krok - 1] if 0 < krok <= len(kroki) and isinstance(kroki[krok - 1], dict) else {}
+    return (opis.get("dostawca") or "yapper").strip().lower()
 
 
 def cmd_koszt(args):
@@ -800,6 +888,22 @@ OKNO_NIEPEWNEGO_WYSLANIA_S = 60 * 60   # Higgsfield (bez klucza): create zwrocil
 POWODY_ZAPASU = ("nsfw", "ip")
 SPRAWDZ_W_APCE = ("Sprawdz w apce Higgsfield (lista generacji), czy ta rolka nie powstala - jesli tak, pobierz ja stamtad; "
                   "jesli nie - kliknij 'Sprobuj jeszcze raz'.")
+_SPRAWDZ_W_APCE_DOSTAWCY = {
+    "yapper": ("Sprawdz w apce yapper.so (lista procesow), czy ta rolka nie powstala - jesli tak, pobierz ja stamtad; "
+               "jesli nie - kliknij 'Sprobuj jeszcze raz'."),
+    "wavespeed": ("Sprawdz w apce WaveSpeed (wavespeed.ai -> dashboard -> historia zadan), czy ta rolka nie powstala - jesli tak, "
+                  "pobierz ja stamtad; jesli nie - kliknij 'Sprobuj jeszcze raz'."),
+}
+
+
+def sprawdz_w_apce(dostawca=None):
+    """Prosba 'sprawdz w apce, czy rolka nie powstala' dla dostawcy (Higgsfield - SPRAWDZ_W_APCE)."""
+    return _SPRAWDZ_W_APCE_DOSTAWCY.get((dostawca or "higgsfield").strip().lower(), SPRAWDZ_W_APCE)
+
+
+BRAK_LIMITU_WAVESPEED = ("dzienny limit WaveSpeed nie jest ustawiony - bez niego fabryka nic tam nie wyda. Ustaw go: panel -> "
+                         "Ustawienia -> Limity kredytow (tryb pelny) -> 'WaveSpeed: nie wiecej niz ... $ dziennie' albo "
+                         "`python fabryka.py budzet max_kredyty_dziennie=1000 --dostawca wavespeed` (w centach: 1000 = $10)")
 _WYSYLANIE = set()           # (slug, pid) w trakcie wysylania - wtedy panelu nie wolno zamknac (osierocony job = podwojna oplata)
 _WYSYLANIE_LOCK = threading.Lock()
 
@@ -809,7 +913,12 @@ class JobTrwa(Exception):
 
 
 class _BezZapasu(Exception):
-    """Zapas u tego dostawcy jest teraz niemozliwy (brak/wyczerpany limit dzienny, saldo, odmowa) - pomijamy jego kroki."""
+    """Zapas u tego dostawcy jest teraz niemozliwy (brak/wyczerpany limit dzienny, saldo, odmowa) - pomijamy jego kroki
+    (inny dostawca w zapas_nsfw dalej moze sprobowac). wszystkie=True: zaden krok nie ma sensu (np. stroj ze zdjecia)."""
+
+    def __init__(self, tekst, wszystkie=False):
+        super().__init__(tekst)
+        self.wszystkie = wszystkie
 
 
 def trwa_wysylanie():
@@ -819,9 +928,10 @@ def trwa_wysylanie():
 
 
 def bezpiecznik(ust, dostawca="higgsfield"):
-    """(min_kredyty, max_kredyty_na_rolke) dla dostawcy. yapper ma wlasne (kredyty yapper to inna skala)."""
-    if dostawca == "yapper":
-        y = ust.get("yapper") or {}
+    """(min_kredyty, max_kredyty_na_rolke) dla dostawcy. yapper ma wlasne (kredyty yapper to inna skala), WaveSpeed tez
+    (centy USD: wavespeed.min_kredyty / wavespeed.max_kredyty_na_rolke, domyslnie 0 / 400 = $4.00)."""
+    if dostawca in ("yapper", "wavespeed"):
+        y = ust.get(dostawca) or {}
         return int(y.get("min_kredyty") or 0), int(y.get("max_kredyty_na_rolke") or 400)
     return int(ust["min_kredyty"]), int(ust["max_kredyty_na_rolke"])
 
@@ -901,8 +1011,13 @@ def wskazowki_nsfw(slug, dni=14):
 
 
 def _model(d, z):
-    """Nazwa modelu proby: Higgsfield - job_type (seedance_2_5), yapper - yapper.model (wan-3.0-prime)."""
-    return (z.get("yapper") or {}).get("model") if d.NAZWA == "yapper" else (z.get("model") or "seedance_2_5")
+    """Nazwa modelu proby: Higgsfield - job_type (seedance_2_5), yapper - yapper.model (wan-3.0-prime), WaveSpeed -
+    wavespeed.model (bytedance/seedance-2.5/video-edit-turbo)."""
+    if d.NAZWA == "yapper":
+        return (z.get("yapper") or {}).get("model")
+    if d.NAZWA == "wavespeed":
+        return (z.get("wavespeed") or {}).get("model") or getattr(d, "MODEL_DOMYSLNY", "")
+    return z.get("model") or "seedance_2_5"
 
 
 def _teraz_iso():
@@ -1047,8 +1162,8 @@ def _niepewne_wyslanie(slug, p, d, marker, przyczyna, log, wynik):
     k = int(marker.get("koszt") or 0)
     if k:
         baza.dopisz_wydatek(k, d.NAZWA, job_id=f"niepewne:{marker.get('klucz') or pid}")
-    notatki = (f"Wysylanie przerwane ({przyczyna}) - nie wiadomo, czy rolka powstala. {SPRAWDZ_W_APCE}"
-               + (f" {k} kr wliczone do dzisiejszego limitu na wszelki wypadek." if k else ""))
+    notatki = (f"Wysylanie przerwane ({przyczyna}) - nie wiadomo, czy rolka powstala. {sprawdz_w_apce(d.NAZWA)}"
+               + (f" {dostawcy.kwota(k, d.NAZWA)} wliczone do dzisiejszego limitu na wszelki wypadek." if k else ""))
     baza.aktualizuj_pomysl(slug, pid, status="blad", w_toku=None, krok_startowy=None, dostawca=d.NAZWA, powod="inny",
                            notatki=notatki[:2000])
     baza.zapisz_probe(slug, pid, {"dostawca": d.NAZWA, "model": marker.get("model"), "krok": marker.get("krok") or 0,
@@ -1093,8 +1208,13 @@ def _rozlicz(slug, pid, d, w, k, krok, model, log):
         juz = baza.rozliczony(jid, d.NAZWA)
         wydano = baza.dopisz_wydatek(kr, d.NAZWA, job_id=jid)
         if not juz:
-            baza.dziennik_zapisz("kredyty", f"#{pid}: {kr} kr ({d.NAZWA} {model}), dzis {wydano}/{baza.limit_dzienny(d.NAZWA)}",
-                                 modelka=slug, pomysl=pid, kredyty=kr, dostawca=d.NAZWA)
+            if dostawcy.jednostka(d.NAZWA) == "c":
+                tekst = (f"#{pid}: {dostawcy.kwota(kr, d.NAZWA)} ({d.NAZWA} {model}"
+                         f"{', odrzucone - liczone na wszelki wypadek' if powod else ''}), dzis {dostawcy.kwota(wydano, d.NAZWA)}/"
+                         f"{dostawcy.kwota(baza.limit_dzienny(d.NAZWA), d.NAZWA)}")
+            else:
+                tekst = f"#{pid}: {kr} kr ({d.NAZWA} {model}), dzis {wydano}/{baza.limit_dzienny(d.NAZWA)}"
+            baza.dziennik_zapisz("kredyty", tekst, modelka=slug, pomysl=pid, kredyty=kr, dostawca=d.NAZWA)
     baza.zapisz_probe(slug, pid, {"dostawca": d.NAZWA, "model": model, "krok": krok, "job_id": jid, "status": w.get("status"),
                                   "powod": powod, "kr": kr})
     return kr, powod
@@ -1109,18 +1229,31 @@ def _przytnij_do(slug, p, z, max_s, log):
     cel = os.path.join(baza.folder_modelki(slug), "zrodla_ciete", f"{_bezpieczna_nazwa(stem)}_max{int(max_s)}s.mp4")
     if not os.path.isfile(cel):
         klatki.przytnij(z["video"], cel, float(max_s) - 0.1)
-        log(f"#{p['id']}: filmik ma {float(czas):.1f} s - do Wan ide pierwsze {float(max_s) - 0.1:.1f} s (kopia)")
+        log(f"#{p['id']}: filmik ma {float(czas):.1f} s - do zapasu ida pierwsze {float(max_s) - 0.1:.1f} s (kopia)")
     return dict(z, video=cel, video_czas=round(float(max_s) - 0.1, 2))
+
+
+def _nastepny_krok_innego_dostawcy(ust, krok):
+    """Pierwszy krok zapas_nsfw po `krok` u INNEGO dostawcy (1..) albo None - gdy u jednego dostawcy zapas jest niemozliwy
+    (brak limitu, saldo), jego pozostale kroki pomijamy, ale inny dostawca dalej moze sprobowac."""
+    kroki = ust.get("zapas_nsfw") or []
+    ten = (kroki[krok - 1].get("dostawca") if 0 < krok <= len(kroki) and isinstance(kroki[krok - 1], dict) else "") or ""
+    for j in range(krok + 1, len(kroki) + 1):
+        k = kroki[j - 1] if isinstance(kroki[j - 1], dict) else {}
+        if (k.get("dostawca") or "").strip().lower() != ten.strip().lower():
+            return j
+    return None
 
 
 def _przygotuj_zapas(slug, p, ust, krok, log, potwierdz=None, tylko_wycena=False):
     """Krok zapasu nr `krok` (1 = pierwszy z zapas_nsfw): bezpiecznik dostawcy zapasu + wycena. Zwraca (d, z, kr) albo None
     (krok pominiety - wpis w p['proby']). Rzuca _BezZapasu, gdy zapas u tego dostawcy jest teraz niemozliwy: dzienny limit
-    yappera nieustawiony/wyczerpany (wtedy ZERO zapytan do yappera), saldo, odmowa startu."""
+    dostawcy (yapper / WaveSpeed) nieustawiony/wyczerpany (wtedy ZERO zapytan do niego), saldo, odmowa startu."""
     kroki = ust.get("zapas_nsfw") or []
     opis = kroki[krok - 1] if 0 < krok <= len(kroki) and isinstance(kroki[krok - 1], dict) else {}
     nazwa = (opis.get("dostawca") or "").strip().lower()
     model = (opis.get("model") or "").strip()
+    yapper = nazwa == "yapper"
 
     def pomin(powod, tekst):
         _zdarzenie(log, slug, "uwaga", f"#{p['id']}: zapas {nazwa or '?'} {model or '?'} pominiety - {tekst}", pomysl=p["id"])
@@ -1129,46 +1262,62 @@ def _przygotuj_zapas(slug, p, ust, krok, log, potwierdz=None, tylko_wycena=False
                                               "status": "pominiete", "powod": powod, "kr": 0, "info": tekst[:300]})
         return None
 
-    if p.get("stroj"):
+    def kw(x):
+        return dostawcy.kwota(x, nazwa)
+
+    if p.get("stroj") and _krok_uzywa_wan(nazwa, model):
         # wariant B: stroj ma byc ze zdjecia, a prompt Wan (wan.txt) bierze stroj z filmu i traktuje wszystkie zdjecia jak twarz
-        # persony - zapas dalby inna rolke niz chciales, wiec go nie robimy (zero zapytan do yappera)
+        # persony - ten krok dalby inna rolke niz chciales (zero zapytan do niego). Krok z promptem persony (WaveSpeed Seedance)
+        # stroj zachowa - wtedy probujemy dalej.
+        if zapas_dla_stroju(kroki[krok:]):
+            return pomin("stroj", "rolka ze strojem ze zdjecia (wariant B) - ten krok bierze prompt Wan (stroj z filmu), probuje dalej")
         raise _BezZapasu("rolka ze strojem ze zdjecia (wariant B) - prompt Wan bierze stroj z filmu, wiec zapas zgubilby stroj; "
-                         "zrob ja na Higgsfield (inne zdjecie stroju / inny fragment) albo bez zdjecia stroju")
-    if nazwa != "yapper" or not model:
-        return pomin("nieobslugiwany", "zapas obsluguje na razie tylko kroki {\"dostawca\": \"yapper\", \"model\": ...}")
+                         "zrob ja na Higgsfield (inne zdjecie stroju / inny fragment) albo bez zdjecia stroju", wszystkie=True)
+    if nazwa not in dostawcy.NAZWY_ZAPASU or not model:
+        return pomin("nieobslugiwany", "zapas obsluguje kroki {\"dostawca\": \"yapper\" albo \"wavespeed\", \"model\": ...}")
+    if nazwa == "wavespeed":
+        from dostawcy import wavespeed
+        if model not in wavespeed.MODELE:
+            return pomin("nieobslugiwany", f"WaveSpeed: nie znam modelu {model} (znam: {', '.join(wavespeed.MODELE)})")
     limit = baza.limit_dzienny(nazwa)
     if not limit:
-        raise _BezZapasu("dzienny limit yappera nie jest ustawiony - bez niego zapas nic nie wyda. Ustaw go: panel -> Ustawienia -> "
-                         "Limity kredytow (tryb pelny) -> 'yapper.so: nie wiecej niz ... kredytow dziennie' albo "
-                         "`python fabryka.py budzet max_kredyty_dziennie=500 --dostawca yapper`")
+        if yapper:
+            raise _BezZapasu("dzienny limit yappera nie jest ustawiony - bez niego zapas nic nie wyda. Ustaw go: panel -> "
+                             "Ustawienia -> Limity kredytow (tryb pelny) -> 'yapper.so: nie wiecej niz ... kredytow dziennie' albo "
+                             "`python fabryka.py budzet max_kredyty_dziennie=500 --dostawca yapper`")
+        raise _BezZapasu(BRAK_LIMITU_WAVESPEED)
     wydano = baza.wydano_z_rezerwa(nazwa)      # z rezerwa procesow w toku
     if wydano >= limit:
-        raise _BezZapasu(f"dzienny limit yappera wyczerpany ({wydano}/{limit} kr) - zapas jutro albo podnies limit")
+        if yapper:
+            raise _BezZapasu(f"dzienny limit yappera wyczerpany ({wydano}/{limit} kr) - zapas jutro albo podnies limit")
+        raise _BezZapasu(f"dzienny limit WaveSpeed wyczerpany ({kw(wydano)}/{kw(limit)}) - zapas jutro albo podnies limit")
     d = dostawcy.dostawca(nazwa)
     z = zlecenie(slug, p, ust)
     z["dostawca"] = nazwa
-    z["yapper"] = dict(z.get("yapper") or {}, model=model)
+    z[nazwa] = dict(z.get(nazwa) or {}, model=model)
     try:
         zasady = d.zasady_modelu(model)
         z = _przytnij_do(slug, p, z, zasady.get("max_wideo_s"), log)
         saldo = d.saldo()
     except dostawcy.BladDostawcy as e:
-        raise _BezZapasu(f"yapper nie odpowiada ({e})")
+        raise _BezZapasu(f"{dostawcy.NAZWY_LUDZKIE.get(nazwa, nazwa)} nie odpowiada ({e})")
     except Exception as e:      # ffmpeg (przycinanie)
         return pomin("blad", f"nie moge przygotowac filmiku ({e})")
     try:
-        k = d.koszt(z)            # darmowy dryRun: creditsEstimated; odmowa przy canStart=false / blockedBy
+        k = d.koszt(z)            # darmowa wycena: yapper dryRun (creditsEstimated, odmowa przy canStart=false), WaveSpeed cennik/API
     except dostawcy.BladDostawcy as e:
         return pomin("wycena", f"wycena nie wyszla: {e}")
     if tylko_wycena:
         return d, z, k
     min_k, max_k = bezpiecznik(ust, nazwa)
     if k > max_k:
-        return pomin("za_drogo", f"{k} kr > yapper max/rolka {max_k}")
+        return pomin("za_drogo", f"{k} kr > yapper max/rolka {max_k}" if yapper else f"{kw(k)} > WaveSpeed max/rolka {kw(max_k)}")
     if saldo - k < min_k:
-        raise _BezZapasu(f"{k} kr zostawiloby na yapper {saldo - k} < min {min_k}")
+        raise _BezZapasu(f"{k} kr zostawiloby na yapper {saldo - k} < min {min_k}" if yapper
+                         else f"{kw(k)} zostawiloby na WaveSpeed {kw(saldo - k)} < min {kw(min_k)}")
     if wydano + k > limit:
-        return pomin("limit", f"{k} kr przekroczyloby dzienny limit yappera ({wydano}+{k} > {limit})")
+        return pomin("limit", f"{k} kr przekroczyloby dzienny limit yappera ({wydano}+{k} > {limit})" if yapper
+                     else f"{kw(k)} przekroczyloby dzienny limit WaveSpeed ({kw(wydano)}+{kw(k)} > {kw(limit)})")
     if potwierdz is not None and not potwierdz(p, k, saldo - k, wydano + k, limit):
         return pomin("odmowa", "pominiety na zyczenie")
     return d, z, k
@@ -1205,11 +1354,16 @@ def _sukces(slug, p, d, w, kr, krok, ust, log, lipsync, wynik):
                            dostawca=d.NAZWA, model=model, zapas=zapas, wynik_url=urls[0], plik_wynikowy=surowy)
     wynik["wygenerowane"] += 1
     limit_dnia = baza.limit_dzienny(d.NAZWA)
-    if zapas:
-        _zdarzenie(log, slug, "ok", f"#{pid}: NSFW -> zapas {model}: WYGENEROWANE ({kr} kr {d.NAZWA}, dzis "
-                   f"{baza.wydano_dzis(d.NAZWA)}/{limit_dnia}) -> {surowy}", pomysl=pid, zapas=model)
+    if dostawcy.jednostka(d.NAZWA) == "c":
+        ile = f"{dostawcy.kwota(kr, d.NAZWA)} {d.NAZWA}"
+        dzis = f"{dostawcy.kwota(baza.wydano_dzis(d.NAZWA), d.NAZWA)}/{dostawcy.kwota(limit_dnia, d.NAZWA)}"
     else:
-        _zdarzenie(log, slug, "ok", f"#{pid}: WYGENEROWANE ({kr} kr, dzis {baza.wydano_dzis(d.NAZWA)}/{limit_dnia}) -> {surowy}", pomysl=pid)
+        ile, dzis = f"{kr} kr" + (f" {d.NAZWA}" if zapas else ""), f"{baza.wydano_dzis(d.NAZWA)}/{limit_dnia}"
+    if zapas:
+        _zdarzenie(log, slug, "ok", f"#{pid}: NSFW -> zapas {model}: WYGENEROWANE ({ile}, dzis {dzis}) -> {surowy}", pomysl=pid,
+                   zapas=model)
+    else:
+        _zdarzenie(log, slug, "ok", f"#{pid}: WYGENEROWANE ({ile}, dzis {dzis}) -> {surowy}", pomysl=pid)
     gotowy = _postprodukcja(slug, pid, surowy, nazwa, ust, log=log)
     if gotowy:
         _zdarzenie(log, slug, "ok", f"#{pid}: GOTOWE -> {gotowy}", pomysl=pid, plik=gotowy)
@@ -1239,8 +1393,10 @@ def _niepowodzenie(slug, p, d, w, kr, powod, ust, log, wynik, zapas_info=""):
         _zdarzenie(log, slug, "blad", f"#{pid}: ODRZUCONE - model wykryl znana postac/marke (ip_detected){zapas_info}. "
                    f"Sprawdz, czy w filmiku/zdjeciach nie ma logo, celebryty albo postaci z filmu.", pomysl=pid, powod="ip")
     elif w is not None and d is not None and d.udany(w.get("status") or ""):
+        gdzie = (f"`higgsfield generate get {w.get('job_id')} --json`" if d.NAZWA == "higgsfield"
+                 else f"zadanie {w.get('job_id')} w apce {dostawcy.NAZWY_LUDZKIE.get(d.NAZWA, d.NAZWA)}")
         _zdarzenie(log, slug, "blad", f"#{pid}: job {w.get('job_id')} zakonczony, ale nie znajduje URL - NIE powtarzam; sprawdz "
-                   f"`higgsfield generate get {w.get('job_id')} --json`", pomysl=pid)
+                   f"{gdzie}", pomysl=pid)
     else:
         _zdarzenie(log, slug, "blad", f"#{pid}: BLAD ({(blad or (w or {}).get('status') or '?')[:200]}) - status blad, "
                    f"kliknij 'Sprobuj jeszcze raz', gdy poprawisz przyczyne", pomysl=pid)
@@ -1320,7 +1476,7 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
                     if kr_rez:      # job byl wyslany - na wszelki wypadek wliczamy wycene (raz na job)
                         baza.dopisz_wydatek(kr_rez, d.NAZWA, job_id=jid)
                     _niepowodzenie(slug, baza.pomysl(slug, pid), d, dict(teraz, blad=f"job nie skonczyl sie w {MAX_GODZIN_W_TOKU} h - "
-                                   f"{SPRAWDZ_W_APCE}"), kr_rez, "inny", ust, log, wynik)
+                                   f"{sprawdz_w_apce(d.NAZWA)}"), kr_rez, "inny", ust, log, wynik)
                     return
                 job = teraz
             marker = None
@@ -1334,17 +1490,22 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
                 except _BezZapasu as e:
                     zapas_info = f" | zapas pominiety: {e}"
                     _zdarzenie(log, slug, "uwaga", f"#{pid}: zapas po NSFW pominiety - {e}", pomysl=pid)
-                    break
+                    nastepny = None if e.wszystkie else _nastepny_krok_innego_dostawcy(ust, krok)
+                    if nastepny is None:
+                        break
+                    krok = nastepny          # u tego dostawcy sie nie da - probuje kroku innego dostawcy
+                    continue
                 if not przyg:
                     krok += 1
                     continue
                 d, z, k = przyg
             model = _model(d, z)
             if krok > 0:
-                _zdarzenie(log, slug, "info", f"#{pid}: NSFW -> zapas {model} ({d.NAZWA}, ~{k} kr, {z.get('resolution')})", pomysl=pid)
+                _zdarzenie(log, slug, "info", f"#{pid}: NSFW -> zapas {model} ({d.NAZWA}, ~{dostawcy.kwota(k, d.NAZWA)}, "
+                           f"{z.get('resolution')})", pomysl=pid)
             else:
-                _zdarzenie(log, slug, "info", f"#{pid}: start ({d.NAZWA} {model}, {z.get('resolution')}, ~{k} kr) - {p['opis']}",
-                           pomysl=pid)
+                _zdarzenie(log, slug, "info", f"#{pid}: start ({d.NAZWA} {model}, {z.get('resolution')}, ~{dostawcy.kwota(k, d.NAZWA)}) "
+                           f"- {p['opis']}", pomysl=pid)
             try:
                 job = _wyslij(slug, baza.pomysl(slug, pid), d, z, k, krok, ust, log)
             except JobTrwa:
@@ -1478,6 +1639,16 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
     for uwaga in sprawdz_prompt(slug, ust):
         log(f"[UWAGA] {uwaga}")
 
+    limit_dnia = baza.limit_dzienny(nazwa_dostawcy)
+    if getattr(d, "WYMAGA_LIMITU", False) and not limit_dnia:
+        # WaveSpeed placi prawdziwymi dolarami: bez dziennego limitu ZERO zapytan (rolki po NSFW z krok_startowy ida do zapasu)
+        zapasowe = [p for p in lista if _krok_startowy(p, ust)]
+        if len(zapasowe) < len(lista):
+            _zdarzenie(log, slug, "uwaga", f"[STOP] {BRAK_LIMITU_WAVESPEED}")
+            wynik["stop"] = f"brak limitu dziennego {nazwa_dostawcy}"
+        if not zapasowe:
+            return wynik
+        lista = zapasowe
     try:
         saldo = d.saldo()
     except dostawcy.BladDostawcy as e:
@@ -1486,11 +1657,19 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
         return wynik
     if saldo is None:
         saldo = 10 ** 9   # dostawca nie podaje salda - pilnuje tylko limit dzienny
-    limit_dnia = baza.limit_dzienny(nazwa_dostawcy)
     min_kredyty, max_na_rolke = bezpiecznik(ust, nazwa_dostawcy)
-    log(f"saldo {nazwa_dostawcy}: {saldo} kr | dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} "
-        f"(+{baza.koszt_w_toku(nazwa_dostawcy)} w toku) | min_kredyty={min_kredyty} "
-        f"max/rolka={max_na_rolke} | rozdzielczosc: {OPIS_ROZDZIELCZOSCI}")
+
+    def kw(x):
+        return dostawcy.kwota(x, nazwa_dostawcy)
+
+    if dostawcy.jednostka(nazwa_dostawcy) == "c":
+        log(f"saldo {nazwa_dostawcy}: {kw(saldo)} | dzis wydano {kw(baza.wydano_dzis(nazwa_dostawcy))}/{kw(limit_dnia)} "
+            f"(+{kw(baza.koszt_w_toku(nazwa_dostawcy))} w toku) | zostaw min {kw(min_kredyty)} | max/rolka {kw(max_na_rolke)} | "
+            f"rozdzielczosc: {OPIS_ROZDZIELCZOSCI}")
+    else:
+        log(f"saldo {nazwa_dostawcy}: {saldo} kr | dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} "
+            f"(+{baza.koszt_w_toku(nazwa_dostawcy)} w toku) | min_kredyty={min_kredyty} "
+            f"max/rolka={max_na_rolke} | rozdzielczosc: {OPIS_ROZDZIELCZOSCI}")
 
     for p in lista:
         _sprawdz_stop(stop)
@@ -1515,7 +1694,7 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
             continue
         if k is None:
             k = max_na_rolke
-            log(f"#{p['id']}: dostawca nie podal kosztu, zakladam {k} kr")
+            log(f"#{p['id']}: dostawca nie podal kosztu, zakladam {kw(k)}")
         baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
         wydano = baza.wydano_z_rezerwa(nazwa_dostawcy)     # wydane + zarezerwowane przez rolki w toku (wolne joby)
         try:
@@ -1523,17 +1702,18 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
         except dostawcy.BladDostawcy:
             pass
         if k > max_na_rolke:
-            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr ({z['resolution']}) > max/rolka {max_na_rolke} - POMIJAM (zmien ustawienia "
-                       f"albo skroc zrodlo)", pomysl=p["id"])
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {kw(k)} ({z['resolution']}) > max/rolka {kw(max_na_rolke)} - POMIJAM "
+                       f"(zmien ustawienia albo skroc zrodlo)", pomysl=p["id"])
             wynik["pominiete"].append(p["id"])
             continue
         if saldo - k < min_kredyty:
-            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr zostawiloby {saldo - k} < min_kredyty {min_kredyty} - STOP", pomysl=p["id"])
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {kw(k)} zostawiloby {kw(saldo - k)} < min_kredyty {kw(min_kredyty)} - STOP",
+                       pomysl=p["id"])
             wynik["stop"] = "min_kredyty"
             break
         if limit_dnia and wydano + k > limit_dnia:
-            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr przekroczyloby limit dzienny ({wydano}+{k} > {limit_dnia}) - STOP na dzis",
-                       pomysl=p["id"])
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {kw(k)} przekroczyloby limit dzienny ({kw(wydano)}+{kw(k)} > "
+                       f"{kw(limit_dnia)}) - STOP na dzis", pomysl=p["id"])
             wynik["stop"] = "limit dzienny"
             break
         if potwierdz is not None and not potwierdz(p, k, saldo - k, wydano + k, limit_dnia):
@@ -1542,7 +1722,7 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
             continue
         _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=d, k0=k, potwierdz=potwierdz)
 
-    log(f"koniec: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa_dostawcy)}/{limit_dnia} kr"
+    log(f"koniec: {wynik['wygenerowane']} wygenerowanych, dzis wydano {kw(baza.wydano_dzis(nazwa_dostawcy))}/{kw(limit_dnia)}"
         + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
     return wynik
 

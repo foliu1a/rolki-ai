@@ -57,8 +57,14 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - Zdjęcia ze strojów: ustawienia `zdjecia_stroje` (bool, co drugie zdjęcie w kolejnym stroju ze `stroje/`) i `zdjecia_prompt_stroj`
   (dopisek do promptu, strój = ostatni obraz). Akcja `{"typ": "zdjecia", "stroj": "auto"|"bez"|"<plik ze stroje/>"}` (brak = automatycznie).
   Wpis w `/api/zdjecia` ma `stroj` (ścieżka albo null).
+- WaveSpeed (2.8): trzeci dostawca rolek (`dostawca: "wavespeed"`, dostawcy/wavespeed.py, REST WaveSpeedAI). Wszystkie jego kwoty są
+  w **centach USD** (`"jednostka": "c"` – panel pokazuje dolary): `saldo.wavespeed {"kredyty": 1234 = $12,34, "jednostka": "c"}` (gdy klucz
+  albo robi rolki aktywnej persony), `stan.budzet.jednostka` (`"kr"` | `"c"`), `dzis.kredyty.wavespeed`, `statystyki ... kredyty.wavespeed`,
+  `jakosc` persony na WaveSpeed: `"dostawca": "wavespeed", "jednostka": "c"` i stawki/koszty w centach (Turbo: 720p 24 c/s, 1080p 26 c/s
+  sekundy klipu). Bez dziennego limitu WaveSpeed (`/api/budzet` dostawca `wavespeed`) generacja kończy się od razu z
+  `stop: "brak limitu dziennego wavespeed"` i wpisem w dzienniku – zero zapytań do WaveSpeed. `dzis.rolek_zostalo` dla takiej persony = 0.
 - Salda (2.5): `/api/stan.saldo` = `{"higgsfield": {"kredyty", "blad", "czas", "jednostka": "kr"}, "yapper": {...} (gdy klucz albo robi rolki
-  aktywnej persony), "elevenlabs": {"kredyty": zostało znaków, "limit", "plan", "jednostka": "zn", ...} (gdy klucz)}`. Pasek u góry pokazuje
+  aktywnej persony), "wavespeed": {... "jednostka": "c"} (2.8), "elevenlabs": {"kredyty": zostało znaków, "limit", "plan", "jednostka": "zn", ...} (gdy klucz)}`. Pasek u góry pokazuje
   po jednej pastylce na konto (`.saldo-pill`, aktywne konto = ramka akcentu) + „dziś wydałeś X z Y” dla konta robiącego rolki.
   `POST /api/konta/test {"dostawca": "elevenlabs"}` sprawdza klucz przez `GET /v1/user/subscription` (dostawcy/elevenlabs.py: tylko gotowy/saldo).
 - Jakość i koszt (2.2, 2.6): `/api/stan.jakosc` = `{"preset": "oszczednie"|"normalnie"|"najlepiej"|"wlasne", "resolution": "720p (≤8 s → 1080p)",
@@ -82,9 +88,10 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
 - Nowe ustawienia persony: `autopilot_stop_po_bledach` (int, 0 = nigdy), `telegram_wysylaj` (bool), `dziel_dlugie` (bool – filmik > 30 s tnij na kawałki).
 - Autostart (Windows): `autostart.bat` kładzie skrót w folderze Autostart (bez praw administratora); `autostart-usun.bat` wyłącza. Panel nie ma API do tego – pokazuj tylko instrukcję.
 - `modelki[]` w `/api/stan` mają dodatkowo `autopilot_stan` (hamulec tej persony), `rolki_dzis` (int) i `avatar_url` (pierwsze zdjęcie persony albo null).
-- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"yapper"|"limit yappera"|"persona <slug>"|"foldery <slug>"|"telefon <slug>", "ok": true|false|null, "info": "..."}]}`
+- `GET /api/diagnoza` → `{"diagnoza": [{"co": "ffmpeg"|"higgsfield"|"mediatool"|"telegram"|"yapper"|"limit yappera"|"wavespeed"|"limit wavespeed"|"persona <slug>"|"foldery <slug>"|"telefon <slug>", "ok": true|false|null, "info": "..."}]}`
   (`yapper` = GET /credits, `limit yappera` = czy jest dzienny limit – bez niego zapas po NSFW nic nie wyda; obie pozycje tylko, gdy jest klucz
-  yappera albo persona go używa)
+  yappera albo persona go używa (dostawca albo krok zapasu); `wavespeed` = GET /balance ("klucz dziala, saldo $12.34"), `limit wavespeed`
+  = "dzis $2.60/$10.00" albo "nie ustawiony" – tylko, gdy jest klucz WaveSpeed albo persona go używa)
   (null = opcjonalne, nie skonfigurowane). Lista kontrolna „pierwsze kroki”. `foldery <slug>` ma też `wrzutnia`, `gotowe` (ścieżki);
   `telefon <slug>` tylko gdy persona ma `telegram_czat` (ok = to konto napisało /start).
 - `GET /api/statystyki?dni=14` → `{"dni": [{"dzien": "2026-10-03", "rolki": 2, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 90, "yapper": 0, "sync": 0}}, ...], "razem": {...}}` (od najstarszego do dziś).
@@ -154,13 +161,17 @@ Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez 
 - `POST /api/ustawienia` `{"resolution": "1080p", "autopilot": true, "yapper": {"model": "wan-3.0"}, "prompt_a_tekst": "...", "prompt_b_tekst": "...", "zdjecia_prompty_tekst": "..."}`
   → `{"ustawienia": {...}}`. Słowniki (`yapper`, `zdjecia_parametry`, `lipsync_parametry`, `dodatkowe_parametry`) są scalane.
   Klucze ustawień i znaczenie: patrz `baza.USTAWIENIA_DOMYSLNE` (komentarze). Najważniejsze dla GUI:
-  `dostawca` (higgsfield|yapper), `model`, `mode`, `mode_bez_zrodla`, `aspect_ratio`, `resolution`, `duration`,
-  `yapper.model`, `yapper.resolution`, `yapper.duration`, `prompt_auto`, `stroj_domyslny`, `min_kredyty`,
+  `dostawca` (higgsfield|yapper|wavespeed), `model`, `mode`, `mode_bez_zrodla`, `aspect_ratio`, `resolution`, `duration`,
+  `yapper.model`, `yapper.resolution`, `yapper.duration`, `wavespeed.model` (`bytedance/seedance-2.5/video-edit-turbo` domyślnie |
+  `bytedance/seedance-2.5/video-edit` | `alibaba/wan-3.0/reference-to-video` | `alibaba/wan-3.0-prime/reference-to-video`),
+  `wavespeed.generate_audio` (false = oryginalny dźwięk filmiku), `wavespeed.parametry` (dict), `wavespeed.min_kredyty` /
+  `wavespeed.max_kredyty_na_rolke` (centy USD, domyślnie 0 / 400), `prompt_auto`, `stroj_domyslny`, `min_kredyty`,
   `max_kredyty_na_rolke`, `powtorki` (ponowne WYSŁANIE tylko, gdy job nie powstał), `zapas_nsfw` (lista kroków
-  `[{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...]` albo tekst JSON; `[]` = wyłączone), `zrodla_dir`, `wyniki_dir`, `mediatool`, `autopilot`, `autopilot_co_minut`,
+  `[{"dostawca": "yapper"|"wavespeed", "model": "wan-3.0-prime"}, ...]` albo tekst JSON; inny dostawca = 400; `[]` = wyłączone), `zrodla_dir`, `wyniki_dir`, `mediatool`, `autopilot`, `autopilot_co_minut`,
   `autopilot_max_rolek_dziennie`, `telegram_wysylaj`, `telegram_czat`, `zdjecia_model`, `zdjecia_dziennie`, `zdjecia_parametry`, `zdjecia_dir`,
   `zdjecia_stroje`, `zdjecia_prompt_stroj`, `lipsync_dostawca` (sync|higgsfield), `lipsync_model`, `lipsync_auto` (tylko ręczne „Zrób rolkę”),
   `lipsync_parametry.sync_mode`, `tts_model`, `tts_glos`, `tts_glos_typ`.
+  Zmiana `resolution`, `dostawca`, `wavespeed.model` albo `yapper.model` czyści policzone koszty rolek „nowy” (`koszt: null` – liczone od nowa).
 - `POST /api/upload` multipart: pole `typ` ∈ `referencja | stroj | audio | zrodlo`, pliki w polu `pliki` (wiele) → `{"zapisane": ["01_x.png"]}`
   (referencje dostają numer 01_, 02_... na początku nazwy, jeśli go nie mają)
 - `POST /api/pliki/usun` `{"typ": "referencja"|"stroj"|"audio", "nazwa": "01_x.png"}`
@@ -172,14 +183,17 @@ Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez 
   "higgsfield": {"nazwa": "Higgsfield", "typ": "oauth", "ok": true, "komunikat": "zalogowany", "jak": "Logowanie: zaloguj-higgsfield.bat (Firefox) albo `higgsfield auth login`"},
   "yapper": {"nazwa": "yapper.so", "typ": "klucz", "opis": "...", "jest": false, "maska": "", "z_env": false, "ok": null, "komunikat": "", "jak": "yapper.so -> Account -> API -> Create key (Read + Write)"},
   "sync": {"nazwa": "sync.so", "typ": "klucz", "jest": true, "maska": "sk_1…abcd", "z_env": false, "ok": null, "komunikat": "", "jak": "https://sync.so/settings/api-keys"},
+  "wavespeed": {"nazwa": "WaveSpeed", "typ": "klucz", "jest": false, "maska": "", "z_env": false, "ok": null, "komunikat": "", "jak": "... https://wavespeed.ai/dashboard -> API Keys ..."},
   "elevenlabs": {...}}}
 ```
 - `POST /api/konta` `{"dostawca": "yapper", "klucz": "..."}` (pusty klucz = usuń) → `{"konta": {...}}`
-- `POST /api/konta/test` `{"dostawca": "yapper"}` → `{"dziala": true, "komunikat": "1234 kr dostepnych"}`
+- `POST /api/konta/test` `{"dostawca": "yapper"}` → `{"dziala": true, "komunikat": "1234 kr dostepnych"}`; `{"dostawca": "wavespeed"}` →
+  `{"dziala": true, "komunikat": "klucz dziala, saldo $12.34"}` (GET /balance, nic nie kosztuje; przy $0 dopisek "doladuj konto")
 
 ## Modele i głosy (listy do selectów; cache 10 min, `?odswiez=1`)
 - `GET /api/modele?dostawca=higgsfield&typ=image|video|audio` → `{"modele": [{"id": "nano_banana_2", "nazwa": "Nano Banana 2", "typ": "image", "opis": ""}]}`
 - `GET /api/modele?dostawca=yapper` → jak wyżej (modele wideo yapper, np. `wan-3.0`, `wan-3.0-prime`)
+- `GET /api/modele?dostawca=wavespeed` → modele, które fabryka umie wysłać do WaveSpeed (`wavespeed.MODELE`, bez zapytania do API i bez klucza)
 - `GET /api/modele?dostawca=sync` → modele lipsync (`lipsync-2`, `lipsync-2-pro`, `sync-3`...)
 - `GET /api/glosy?dostawca=sync|higgsfield` → `{"glosy": [{"id": "...", "nazwa": "Rachel", "typ": "preset", "opis": "female"}]}`
   Gdy dostawca nie jest zalogowany/brak klucza: `{"ok": false, "blad": "..."}` (400) – GUI pokazuje komunikat, nie wywala się.
@@ -196,8 +210,8 @@ Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez 
   → `wyniki_dir/<nazwa>_lipsync.mp4`. Autopilot wysyła wersję z dopasowanymi ustami na Telegram raz (`telegram_wyslano_lipsync`).
 - `DELETE /api/lipsync/<id>`
 - `GET /api/dziennik?ile=100&typ=blad` → `{"wpisy": [{"czas", "typ", "modelka", "tekst", "dane"}]}` (najnowszy na końcu)
-- `GET /api/budzet` → `{"budzet": {...plik budzet.json...}, "dzis": {"higgsfield": {"wydano": 90, "limit": 300, "jednostka": "kr"}, "yapper": {"wydano": 0, "limit": 0, "jednostka": "kr"}, "sync": {"wydano": 50, "limit": 0, "jednostka": "c"}}}`
-- `POST /api/budzet` `{"dostawca": "higgsfield", "max_kredyty_dziennie": 300}`
+- `GET /api/budzet` → `{"budzet": {...plik budzet.json...}, "dzis": {"higgsfield": {"wydano": 90, "limit": 300, "jednostka": "kr"}, "yapper": {"wydano": 0, "limit": 0, "jednostka": "kr"}, "sync": {"wydano": 50, "limit": 0, "jednostka": "c"}, "wavespeed": {"wydano": 260, "limit": 1000, "jednostka": "c"}}}`
+- `POST /api/budzet` `{"dostawca": "higgsfield", "max_kredyty_dziennie": 300}` (WaveSpeed: w centach, 1000 = $10; nieznany dostawca = 400)
 - `POST /api/autopilot` `{"wlacz": true}` → `{"autopilot": {...jak w /api/stan...}}` (pętla w tle; `wlacz: false` zatrzymuje)
 
 ## Teksty i szablony (bez zmian)

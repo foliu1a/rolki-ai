@@ -57,6 +57,26 @@ function kredytow(n) {
   const v = Number(n);
   return `${liczba(v)} ${odmiana(v, 'kredyt', 'kredyty', 'kredytów')}`;
 }
+// Kwoty dostawców: kredyty (Higgsfield, yapper) albo centy USD (WaveSpeed, sync.so) – centy pokazujemy jako dolary „$2,60”.
+const JEDNOSTKI_DOSTAWCOW = { wavespeed: 'c', sync: 'c' };
+function jednostkaDostawcy(d) { return JEDNOSTKI_DOSTAWCOW[d] || 'kr'; }
+function usd(centy) {
+  if (centy === null || centy === undefined || centy === '' || Number.isNaN(Number(centy))) return '$?';
+  return '$' + (Number(centy) / 100).toFixed(2).replace('.', ',');
+}
+function kwota(n, jednostka) { return jednostka === 'c' ? usd(n) : kredytow(n); }
+function kwotaKrotko(n, jednostka) { return jednostka === 'c' ? usd(n) : `${liczba(n)} kr`; }
+const MODELE_WAVESPEED = {
+  'bytedance/seedance-2.5/video-edit-turbo': 'Seedance 2.5 Turbo', 'bytedance/seedance-2.5/video-edit': 'Seedance 2.5 Edit',
+  'alibaba/wan-3.0/reference-to-video': 'Wan 3.0', 'alibaba/wan-3.0-prime/reference-to-video': 'Wan 3.0 Prime',
+};
+// „rolki robi …” – dostawca i model persony po ludzku
+function opisDostawcy(u) {
+  const d = (u && u.dostawca) || 'higgsfield';
+  if (d === 'yapper') return 'yapper.so (Wan 3.0)';
+  if (d === 'wavespeed') return `WaveSpeed (${MODELE_WAVESPEED[((u.wavespeed || {}).model) || 'bytedance/seedance-2.5/video-edit-turbo'] || (u.wavespeed || {}).model})`;
+  return 'Higgsfield (Seedance 2.5)';
+}
 function nazwaPliku(s) { return s ? String(s).split(/[\\/]/).pop() : ''; }
 // „…\ROLKI AI\tu wrzucasz rolki\Noemi” – ostatnie n członów ścieżki (pełna ścieżka idzie do title)
 function krotkaSciezka(s, n = 3) {
@@ -185,6 +205,9 @@ const SLOWNIK_BLEDOW = [
   [/telegram nie jest sparowany|brak sparowanego czatu|nie jest sparowany/i, 'Najpierw napisz /start do bota na telefonie.'],
   [/ponad 20 ?MB|plik za du[zż]y dla telegrama/i, 'Plik za duży dla Telegrama (max 20 MB).'],
   [/brak tokena bota/i, 'Podłącz telefon: wklej token bota w Ustawienia → Konta.'],
+  [/dzienny limit WaveSpeed nie jest ustawiony|brak limitu dziennego wavespeed/i, 'Ustaw dzienny limit WaveSpeed (Ustawienia → Limity, tryb pełny) – bez niego fabryka nic tam nie wyda.'],
+  [/WaveSpeed: za malo pieniedzy|insufficient.credits/i, 'Za mało pieniędzy na koncie WaveSpeed – doładuj je (wavespeed.ai → Billing).'],
+  [/WaveSpeed odrzucil tresc|moderacja WaveSpeed/i, 'Odrzucone przez moderację WaveSpeed (NSFW) – filtr nie patrzy na kontekst.'],
   [/min_kredyty/i, 'Za mało kredytów na koncie, żeby bezpiecznik pozwolił.'],
   [/limit dzienny/i, 'Dzisiejszy limit kredytów wyczerpany.'],
   [/max\/rolka/i, 'Ta rolka kosztowałaby więcej niż dozwolone na jedną rolkę.'],
@@ -237,7 +260,7 @@ function prostyWynik(typ, w) {
       const poz = Array.isArray(w.pozycje) ? w.pozycje : [];
       if (!poz.length) return 'nie ma czego liczyć';
       const nieznane = poz.filter(p => !p || p[1] === null || p[1] === undefined).length;
-      return `około ${kredytow(w.razem)} za ${poz.length} ${odmiana(poz.length, 'rolkę', 'rolki', 'rolek')}` + (nieznane ? ` (${nieznane} bez policzonego kosztu)` : '');
+      return `około ${kwota(w.razem, jednostkaDostawcy(w.dostawca))} za ${poz.length} ${odmiana(poz.length, 'rolkę', 'rolki', 'rolek')}` + (nieznane ? ` (${nieznane} bez policzonego kosztu)` : '');
     }
     case 'generuj': {
       const z = Number(w.wygenerowane) || 0;
@@ -296,6 +319,8 @@ function prostyTekstWpisu(w) {
   let m;
   if ((m = t.match(/^#(\d+): GOTOWE -> (.+)$/))) return `Rolka #${m[1]} gotowa: ${nazwaPliku(m[2])}`;
   if ((m = t.match(/^#(\d+): WYGENEROWANE \((\d+) kr/))) return `Rolka #${m[1]} zrobiona (${kredytow(m[2])})`;
+  if ((m = t.match(/^#(\d+): (?:NSFW -> zapas \S+: )?WYGENEROWANE \(\$(\d+)\.(\d\d)/))) return `Rolka #${m[1]} zrobiona ($${m[2]},${m[3]} WaveSpeed)`;
+  if ((m = t.match(/^#(\d+): \$(\d+)\.(\d\d) \(/)) && w.typ === 'kredyty') return `Rolka #${m[1]}: wydano $${m[2]},${m[3]} (WaveSpeed)`;
   if ((m = t.match(/^#(\d+): start \(/))) return `Zaczynam rolkę #${m[1]}`;
   if ((m = t.match(/^#(\d+): BLAD po/i))) return `Rolka #${m[1]} nie wyszła`;
   if ((m = t.match(/^#(\d+): tani podglad \(draft, ~(\d+) kr\)/i))) return `Rolka #${m[1]}: robię tani podgląd (~${kredytow(m[2])})`;
@@ -619,30 +644,32 @@ function renderAvatarPersony() {
 
 // Pasek sald u góry: po jednej „pastylce” na konto (Higgsfield · yapper.so · ElevenLabs) + „dziś wydałeś X z Y” dla konta,
 // które robi rolki tej persony. Kropka w pastylce: zielona (jest), czerwona (za mało / nie widzę), szara (sprawdzam).
-const NAZWY_SALD = { higgsfield: 'Higgsfield', yapper: 'yapper.so', elevenlabs: 'ElevenLabs' };
+const NAZWY_SALD = { higgsfield: 'Higgsfield', yapper: 'yapper.so', wavespeed: 'WaveSpeed', elevenlabs: 'ElevenLabs' };
 const JEDNOSTKI_SALD = { kr: ['kredyt', 'kredyty', 'kredytów'], zn: ['znak', 'znaki', 'znaków'], c: ['cent', 'centy', 'centów'] };
 
 function pillSalda(id, s, aktywny, minKr) {
   const nazwa = NAZWY_SALD[id] || id;
   const formy = JEDNOSTKI_SALD[s.jednostka || 'kr'] || JEDNOSTKI_SALD.kr;
+  const dolary = (s.jednostka || 'kr') === 'c';
   const tytul = [];
   let klasa = 'szary', tresc;
   if (s.kredyty !== null && s.kredyty !== undefined) {
     klasa = 'ok';
-    // kredyty skracamy do „kr” (jak w całym panelu), znaki ElevenLabs piszemy słowem – inaczej pasek robi się za długi
+    // kredyty skracamy do „kr” (jak w całym panelu), centy USD (WaveSpeed) pokazujemy jako dolary, znaki ElevenLabs piszemy słowem
     const jedn = (s.jednostka || 'kr') === 'kr' ? 'kr' : odmiana(s.kredyty, ...formy);
-    tresc = `<b>${esc(liczba(s.kredyty))}</b> <small>${esc(jedn)}</small>`;
+    tresc = dolary ? `<b>${esc(usd(s.kredyty))}</b>` : `<b>${esc(liczba(s.kredyty))}</b> <small>${esc(jedn)}</small>`;
     if (id === 'elevenlabs') tytul.push(`ElevenLabs: zostało ${liczba(s.kredyty)}${s.limit ? ' z ' + liczba(s.limit) : ''} znaków do czytania tekstu w tym miesiącu${s.plan ? ' (plan ' + s.plan + ')' : ''}.`);
+    else if (id === 'wavespeed') tytul.push(`WaveSpeed: ${usd(s.kredyty)} na koncie na rolki (Seedance 2.5 Turbo) – 10-sekundowa rolka to ok. $2,40–2,60.`);
     else tytul.push(`${nazwa}: kredyty na rolki${id === 'yapper' ? ' (Wan)' : ' i zdjęcia'} – każda rolka kosztuje ich kilkadziesiąt.`);
     if (aktywny) {
       tytul.push('To konto robi teraz rolki tej persony.');
-      if (s.kredyty < minKr) { klasa = 'zle'; tytul.push(`To mniej niż ${liczba(minKr)} – tyle bezpiecznik każe zostawić na koncie, więc rolki się nie zrobią.`); }
-      else if (minKr) tytul.push(`Bezpiecznik zostawia na koncie co najmniej ${liczba(minKr)}.`);
+      if (s.kredyty < minKr) { klasa = 'zle'; tytul.push(`To mniej niż ${kwotaKrotko(minKr, s.jednostka)} – tyle bezpiecznik każe zostawić na koncie, więc rolki się nie zrobią.`); }
+      else if (minKr) tytul.push(`Bezpiecznik zostawia na koncie co najmniej ${kwotaKrotko(minKr, s.jednostka)}.`);
     }
     if (s.czas) tytul.push(`Stan z ${formatCzas(s.czas)}.`);
   } else if (s.blad) {
     klasa = 'zle';
-    tresc = `<small>nie widzę ${id === 'elevenlabs' ? 'znaków' : 'kredytów'}</small>`;
+    tresc = `<small>nie widzę ${id === 'elevenlabs' ? 'znaków' : (dolary ? 'salda' : 'kredytów')}</small>`;
     tytul.push(prostyBlad(s.blad));
   } else {
     tresc = '<small>sprawdzam…</small>';
@@ -668,10 +695,13 @@ function renderKredyty() {
   if (aktywne.kredyty !== null && aktywne.kredyty !== undefined) { if (aktywne.kredyty < minKr) klasa = 'zle'; }
   else if (aktywne.blad) klasa = 'zle';
   if (s) {
-    html += ` <span class="kredyty-dzis">· dziś ${wydano ? 'wydałeś ' + esc(liczba(wydano)) : 'nic nie wydałeś'}${limit ? ' z ' + esc(liczba(limit)) : ''}</span>`;
-    if (limit && wydano >= limit) { klasa = klasa || 'zle'; tytul.push('Dzisiejszy limit kredytów jest wykorzystany – jutro liczy się od nowa.'); }
-    else if (limit && wydano >= limit * 0.8) { klasa = klasa || 'uwaga'; tytul.push(`Zbliżasz się do dziennego limitu ${liczba(limit)}.`); }
-    else if (limit) tytul.push(`Dzienny limit: ${liczba(limit)} (Ustawienia → Limity, tryb pełny).`);
+    const j = b.jednostka || 'kr';
+    const ile = v => (j === 'c' ? usd(v) : liczba(v));
+    html += ` <span class="kredyty-dzis">· dziś ${wydano ? 'wydałeś ' + esc(ile(wydano)) : 'nic nie wydałeś'}${limit ? ' z ' + esc(ile(limit)) : ''}</span>`;
+    if (limit && wydano >= limit) { klasa = klasa || 'zle'; tytul.push('Dzisiejszy limit jest wykorzystany – jutro liczy się od nowa.'); }
+    else if (limit && wydano >= limit * 0.8) { klasa = klasa || 'uwaga'; tytul.push(`Zbliżasz się do dziennego limitu ${ile(limit)}.`); }
+    else if (limit) tytul.push(`Dzienny limit: ${ile(limit)} (Ustawienia → Limity, tryb pełny).`);
+    else if (dost === 'wavespeed') { klasa = klasa || 'zle'; tytul.push('WaveSpeed nie ma dziennego limitu – bez niego fabryka nic tam nie wyda (Ustawienia → Limity, tryb pełny).'); }
   }
   if (el.innerHTML !== html) el.innerHTML = html;
   const znane = aktywne.kredyty !== null && aktywne.kredyty !== undefined;
@@ -832,7 +862,7 @@ function renderStart() {
   const s = state.stan;
   if (!s) return;
   const u = s.ustawienia || {};
-  $('#start-podtytul').textContent = `${nazwaPersony(state.aktywna) || s.modelka} · rolki robi ${u.dostawca === 'yapper' ? 'yapper.so (Wan 3.0)' : 'Higgsfield (Seedance 2.5)'}`;
+  $('#start-podtytul').textContent = `${nazwaPersony(state.aktywna) || s.modelka} · rolki robi ${opisDostawcy(u)}`;
   renderBanner();
   const niez = (s.niezeskanowane || []).length;
   $('#krok1-info').textContent = niez
@@ -893,7 +923,7 @@ function stanBanera() {
       return { kolor: 'zle', tekst: `Higgsfield nie odpowiada: ${esc(prostyBlad(kom))}`, przycisk: { tekst: 'Zobacz konta', hash: '#ustawienia/konta' } };
     }
   } else if (saldo.blad) {
-    return { kolor: 'zle', tekst: `yapper.so nie odpowiada: ${esc(prostyBlad(saldo.blad))}`, przycisk: { tekst: 'Zobacz konta', hash: '#ustawienia/konta' } };
+    return { kolor: 'zle', tekst: `${esc(NAZWY_SALD[dost] || dost)} nie odpowiada: ${esc(prostyBlad(saldo.blad))}`, przycisk: { tekst: 'Zobacz konta', hash: '#ustawienia/konta' } };
   }
   // 1b. hamulec: autopilot zatrzymał się (np. kilka nieudanych rolek z rzędu) – stoi, dopóki user nie kliknie Wznów
   const pauza = (state.autopilotStan || {}).pauza;
@@ -901,10 +931,12 @@ function stanBanera() {
   // 2. za mało kredytów / limit dzienny
   const minKr = Number(b.min_kredyty !== undefined ? b.min_kredyty : u.min_kredyty) || 0;
   if (saldo.kredyty !== null && saldo.kredyty !== undefined && saldo.kredyty < minKr) {
+    if (dost === 'wavespeed') return { kolor: 'zle', tekst: `Za mało pieniędzy na koncie WaveSpeed (${esc(usd(saldo.kredyty))}). Doładuj je na wavespeed.ai (Billing).` };
     return { kolor: 'zle', tekst: `Za mało kredytów na koncie (${esc(liczba(saldo.kredyty))}). Doładuj albo zaloguj się na inne konto.` };
   }
   const wyd = Number(b.wydano_dzis) || 0, lim = Number(b.limit_dzienny) || 0;
-  if (lim && wyd >= lim) return { kolor: 'zle', tekst: 'Dzisiejszy limit kredytów wykorzystany. Jutro zacznie od nowa.' };
+  if (dost === 'wavespeed' && !lim) return { kolor: 'zle', tekst: 'Rolki robi WaveSpeed, ale nie ma <b>dziennego limitu</b> – bez niego fabryka nic tam nie wyda. Ustaw go w Ustawienia → Limity (tryb pełny – przełącznik w lewym dolnym rogu).', przycisk: { tekst: 'Ustaw limit', hash: '#ustawienia/limity' } };
+  if (lim && wyd >= lim) return { kolor: 'zle', tekst: 'Dzisiejszy limit wykorzystany. Jutro zacznie od nowa.' };
   // 3. persona nie jest gotowa
   if (!(s.referencje || []).length) return { kolor: 'zle', tekst: 'Dodaj zdjęcia persony – bez nich AI nie wie, kogo wstawić do filmiku.', przycisk: { tekst: 'Dodaj zdjęcia persony', hash: '#ustawienia/persona' } };
   if (!s.prompt_a) return { kolor: 'zle', tekst: 'Brak promptu persony – to opis dla AI, co zrobić z filmikiem.', przycisk: { tekst: 'Wpisz prompt', hash: '#ustawienia/prompty' } };
@@ -983,13 +1015,19 @@ function renderDzis() {
   karta.hidden = false;
   const kr = d.kredyty || {}, b = (state.stan && state.stan.budzet) || {}, j = state.jakosc || {};
   const u = (state.stan && state.stan.ustawienia) || {};
-  const yapperRobi = (b.dostawca || u.dostawca || 'higgsfield') === 'yapper';
+  const dost = b.dostawca || u.dostawca || 'higgsfield';
+  const yapperRobi = dost === 'yapper', wsRobi = dost === 'wavespeed';
   const rolki = Number(d.rolki) || 0, zdjecia = Number(d.zdjecia) || 0, bledy = Number(d.bledy) || 0;
-  // kafelek liczy kredyty Higgsfield – limit dzienny bierzemy tylko wtedy, gdy to Higgsfield robi rolki (dla yapper b.limit_dzienny jest w skali yapper)
-  const hf = Number(kr.higgsfield) || 0, yapper = Number(kr.yapper) || 0, limit = yapperRobi ? 0 : (Number(b.limit_dzienny) || 0);
+  // kafelek liczy kredyty Higgsfield – limit dzienny bierzemy tylko wtedy, gdy to Higgsfield robi rolki (dla yapper b.limit_dzienny jest w skali yapper);
+  // persona na WaveSpeed: kafelek w dolarach (centy z budżetu WaveSpeed) i jej limit
+  const hf = Number(kr.higgsfield) || 0, yapper = Number(kr.yapper) || 0, ws = Number(kr.wavespeed) || 0, limit = yapperRobi ? 0 : (Number(b.limit_dzienny) || 0);
+  const dodatki = [yapper > 0 ? `+ ${liczba(yapper)} yapper` : '', ws > 0 && !wsRobi ? `+ ${usd(ws)} WaveSpeed` : '', hf > 0 && wsRobi ? `+ ${liczba(hf)} kr Higgsfield` : ''].filter(Boolean).join(' · ');
   const zostalo = d.rolek_zostalo === null || d.rolek_zostalo === undefined ? null : Number(d.rolek_zostalo);
+  const kafelekKredytow = wsRobi
+    ? { id: 'kredyty', n: ws, tekst: usd(ws), dop2: limit ? ` <small>z ${esc(usd(limit))}</small>` : '', e: limit ? 'wydane dziś na WaveSpeed' : 'WaveSpeed bez dziennego limitu – nic nie wyda', dop: dodatki, klasa: !limit || ws >= limit ? 'zle' : (ws >= limit * 0.8 ? 'uwaga' : '') }
+    : { id: 'kredyty', n: hf, dop2: limit ? ` <small>z ${esc(liczba(limit))}</small>` : '', e: limit ? 'kr wydane dziś' : `${odmiana(hf, 'kredyt wydany', 'kredyty wydane', 'kredytów wydanych')} dziś`, dop: dodatki, klasa: limit && hf >= limit ? 'zle' : (limit && hf >= limit * 0.8 ? 'uwaga' : '') };
   const poz = [
-    { id: 'kredyty', n: hf, dop2: limit ? ` <small>z ${esc(liczba(limit))}</small>` : '', e: limit ? 'kr wydane dziś' : `${odmiana(hf, 'kredyt wydany', 'kredyty wydane', 'kredytów wydanych')} dziś`, dop: yapper > 0 ? `+ ${liczba(yapper)} yapper` : '', klasa: limit && hf >= limit ? 'zle' : (limit && hf >= limit * 0.8 ? 'uwaga' : '') },
+    kafelekKredytow,
     { id: 'zostalo', n: zostalo, tekst: zostalo === null ? '?' : `~${liczba(zostalo)}`, e: zostalo === null ? 'rolek jeszcze dziś – nie wiem' : `${odmiana(zostalo, 'rolka', 'rolki', 'rolek')} jeszcze dziś`, klasa: zostalo === 0 ? 'zle' : (zostalo !== null && zostalo <= 2 ? 'uwaga' : ''), tytul: 'Ile rolek jeszcze dziś wejdzie: liczone z dziennego limitu kredytów i z salda na koncie (ponad minimum z bezpiecznika), co niższe.' },
     { id: 'rolki', n: rolki, e: `${odmiana(rolki, 'rolka zrobiona', 'rolki zrobione', 'rolek zrobionych')}` },
     { id: 'problemy', n: bledy, e: odmiana(bledy, 'problem', 'problemy', 'problemów'), klasa: bledy ? 'zle' : '' },
@@ -998,11 +1036,11 @@ function renderDzis() {
   $('#dzis-liczby').innerHTML = poz.map(p => `<div class="dzis-poz${p.klasa ? ' ' + p.klasa : ''}" id="dzis-${p.id}"${p.zaawansowane ? ' data-zaawansowane' : ''}${p.tytul ? ` title="${esc(p.tytul)}"` : ''}><b>${p.tekst !== undefined ? esc(p.tekst) : esc(liczba(p.n))}${p.dop2 || ''}</b><span>${esc(p.e)}</span>${p.dop ? `<small>${esc(p.dop)}</small>` : ''}</div>`).join('');
   $('#dzis-podtytul').textContent = state.modelki.length > 1 ? 'wszystkie persony razem' : '';
   const koszt = $('#dzis-koszt');
-  // zdanie o koszcie rolki liczy stawki Higgsfield – przy yapper (inna skala kredytów) go nie pokazujemy
+  // zdanie o koszcie rolki: stawki Higgsfield (kr) albo WaveSpeed ($) – przy yapper (inna skala kredytów) go nie pokazujemy
   if (j.koszt_rolki && !yapperRobi) {
     koszt.hidden = false;
-    koszt.innerHTML = `Jedna rolka to ok. <b>${esc(liczba(j.koszt_rolki))} kr</b> (zestaw „${esc(nazwaPresetu(j.preset))}”${j.max_sekund_rolki ? `, do ${esc(j.max_sekund_rolki)}&nbsp;s, ${esc(j.resolution || '')}` : ''}). <a href="#ustawienia/jakosc">Zmień jakość i koszt →</a>`
-      + (j.za_drogo ? `<span class="zle dzis-uwaga">Uwaga: to więcej niż Twój limit na rolkę (${esc(liczba(j.max_kredyty_na_rolke))} kr) – fabryka ją pominie.</span>` : '');
+    koszt.innerHTML = `Jedna rolka to ok. <b>${esc(kwotaKrotko(j.koszt_rolki, j.jednostka))}</b> (zestaw „${esc(nazwaPresetu(j.preset))}”${j.max_sekund_rolki ? `, do ${esc(j.max_sekund_rolki)}&nbsp;s, ${esc(j.resolution || '')}` : ''}${j.jednostka === 'c' ? ', WaveSpeed' : ''}). <a href="#ustawienia/jakosc">Zmień jakość i koszt →</a>`
+      + (j.za_drogo ? `<span class="zle dzis-uwaga">Uwaga: to więcej niż Twój limit na rolkę (${esc(kwotaKrotko(j.max_kredyty_na_rolke, j.jednostka))}) – fabryka ją pominie.</span>` : '');
   } else {
     koszt.hidden = true;
   }
@@ -1191,7 +1229,8 @@ function renderPersony() {
 }
 
 // ---------- Start: „Pierwsze kroki” (lista kontrolna z /api/diagnoza) ----------
-const NAZWY_DIAGNOZY = { ffmpeg: 'ffmpeg (program do filmików)', higgsfield: 'Higgsfield (robi rolki i zdjęcia)', mediatool: 'Media Tool (pranie rolek)', telegram: 'Telefon (Telegram)' };
+const NAZWY_DIAGNOZY = { ffmpeg: 'ffmpeg (program do filmików)', higgsfield: 'Higgsfield (robi rolki i zdjęcia)', mediatool: 'Media Tool (pranie rolek)', telegram: 'Telefon (Telegram)',
+  wavespeed: 'WaveSpeed (tańsze rolki)', 'limit wavespeed': 'Dzienny limit WaveSpeed', yapper: 'yapper.so', 'limit yappera': 'Dzienny limit yappera' };
 const TLUMACZENIA_DIAGNOZY = [
   [/brak zdjec persony/g, 'brak zdjęć persony'],
   [/brak promptu A \(stroj z filmu\) - rolki z filmiku beda bez promptu/g, 'brak promptu A'],
@@ -1269,6 +1308,12 @@ function wierszDiagnozy(w) {
     }
     tekst = info || 'nie udało się utworzyć folderów';
     akcja = `<button class="btn btn-maly btn-glowny" type="button" data-akcja="pk-persona" data-slug="${esc(slug)}" data-hash="#ustawienia/foldery">Sprawdź foldery</button>`;
+  } else if (co === 'wavespeed') {
+    if (ok) tekst = String(w.info || '').replace('klucz dziala, saldo', 'działa, na koncie').replace(/\$(\d+)\.(\d\d)/, '$$$1,$2').replace(' - doladuj konto', ' – doładuj konto');
+    else { tekst = prostyBlad(w.info) || 'nie działa'; akcja = link('Otwórz Konta', '#ustawienia/konta', true); }
+  } else if (co === 'limit wavespeed') {
+    if (ok) tekst = 'dziś ' + String(w.info || '').replace(/^dzis /, '').replace(/\$(\d+)\.(\d\d)/g, '$$$1,$2');
+    else { tekst = 'nie ustawiony – bez niego fabryka nic nie wyda na WaveSpeed'; akcja = link('Ustaw limit', '#ustawienia/limity', ok === false); }
   } else if (co.startsWith('telefon ')) {
     // osobne konto Telegram persony (ustawienie telegram_czat) – musi raz napisać /start do bota
     const slug = co.slice(8).trim();
@@ -1377,8 +1422,8 @@ function ladnyMax(v) {
 function opisDnia(d, dzis) {
   const dt = data(d.dzien + 'T12:00:00');
   const kr = d.kredyty || {};
-  const r = Number(d.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, z = Number(d.zdjecia) || 0, b = Number(d.bledy) || 0;
-  return `${dt ? DNI_TYGODNIA[dt.getDay()] + ' ' : ''}${etykietaDnia(d.dzien)}${dzis ? ' (dziś)' : ''}: ${r} ${odmiana(r, 'rolka', 'rolki', 'rolek')}, ${kredytow(hf)}${yap ? ` (+ ${liczba(yap)} yapper)` : ''}, ${z} ${odmiana(z, 'zdjęcie', 'zdjęcia', 'zdjęć')}, ${b} ${odmiana(b, 'problem', 'problemy', 'problemów')}`;
+  const r = Number(d.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, ws = Number(kr.wavespeed) || 0, z = Number(d.zdjecia) || 0, b = Number(d.bledy) || 0;
+  return `${dt ? DNI_TYGODNIA[dt.getDay()] + ' ' : ''}${etykietaDnia(d.dzien)}${dzis ? ' (dziś)' : ''}: ${r} ${odmiana(r, 'rolka', 'rolki', 'rolek')}, ${kredytow(hf)}${yap ? ` (+ ${liczba(yap)} yapper)` : ''}${ws ? ` (+ ${usd(ws)} WaveSpeed)` : ''}, ${z} ${odmiana(z, 'zdjęcie', 'zdjęcia', 'zdjęć')}, ${b} ${odmiana(b, 'problem', 'problemy', 'problemów')}`;
 }
 
 // Jeden SVG, dwa panele na wspólnej osi dni: słupki = rolki dziennie, pod nimi linia z kropkami = kredyty Higgsfield.
@@ -1439,9 +1484,9 @@ function rysujWykres(dni, W) {
 function tabelaStatystyk(dni) {
   const wiersze = dni.slice().reverse().map(d => {
     const kr = d.kredyty || {};
-    return `<tr><td class="czas">${esc(etykietaDnia(d.dzien))}</td><td>${esc(liczba(d.rolki || 0))}</td><td>${esc(liczba(d.zdjecia || 0))}</td><td>${esc(liczba(kr.higgsfield || 0))}</td><td>${esc(liczba(kr.yapper || 0))}</td><td>${esc(liczba(d.bledy || 0))}</td></tr>`;
+    return `<tr><td class="czas">${esc(etykietaDnia(d.dzien))}</td><td>${esc(liczba(d.rolki || 0))}</td><td>${esc(liczba(d.zdjecia || 0))}</td><td>${esc(liczba(kr.higgsfield || 0))}</td><td>${esc(liczba(kr.yapper || 0))}</td><td>${esc(usd(kr.wavespeed || 0))}</td><td>${esc(liczba(d.bledy || 0))}</td></tr>`;
   }).join('');
-  return `<details class="zwijane cicho" data-zaawansowane><summary>${ikona('chevron-dol')}pokaż jako tabelę</summary><div class="tabela-wrap"><table class="tabela staty-tabela"><thead><tr><th>Dzień</th><th>Rolki</th><th>Zdjęcia</th><th>Kredyty HF</th><th>yapper</th><th>Problemy</th></tr></thead><tbody>${wiersze}</tbody></table></div></details>`;
+  return `<details class="zwijane cicho" data-zaawansowane><summary>${ikona('chevron-dol')}pokaż jako tabelę</summary><div class="tabela-wrap"><table class="tabela staty-tabela"><thead><tr><th>Dzień</th><th>Rolki</th><th>Zdjęcia</th><th>Kredyty HF</th><th>yapper</th><th>WaveSpeed</th><th>Problemy</th></tr></thead><tbody>${wiersze}</tbody></table></div></details>`;
 }
 
 function renderStatystyki(blad = null) {
@@ -1455,7 +1500,7 @@ function renderStatystyki(blad = null) {
       return;
     }
     const dni = s.dni || [], r = s.razem || {}, kr = r.kredyty || {};
-    const rolki = Number(r.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, bledy = Number(r.bledy) || 0, nsfw = Number(r.nsfw) || 0;
+    const rolki = Number(r.rolki) || 0, hf = Number(kr.higgsfield) || 0, yap = Number(kr.yapper) || 0, ws = Number(kr.wavespeed) || 0, bledy = Number(r.bledy) || 0, nsfw = Number(r.nsfw) || 0;
     if (skrot) skrot.textContent = `${rolki} ${odmiana(rolki, 'rolka', 'rolki', 'rolek')} · ${kredytow(hf)}${bledy ? ` · ${bledy} ${odmiana(bledy, 'problem', 'problemy', 'problemów')}` : ''}${nsfw ? ` · filtr NSFW: ${nsfw}` : ''}`;
     // szerokość: gdy karta jest zwinięta, treść ma 0 px – bierzemy szerokość karty minus jej padding
     const szer = Math.max(300, Math.round(kont.clientWidth || (det.clientWidth - 48) || 600));
@@ -1464,7 +1509,7 @@ function renderStatystyki(blad = null) {
     det.dataset.klucz = klucz;
     const liczby = `<div class="staty-liczby">
       <div class="dzis-poz" data-staty-rolki><b>${esc(liczba(rolki))}</b><span>${esc(odmiana(rolki, 'rolka', 'rolki', 'rolek'))} razem</span></div>
-      <div class="dzis-poz" data-staty-kredyty><b>${esc(liczba(hf))}</b><span>${esc(odmiana(hf, 'kredyt', 'kredyty', 'kredytów'))} Higgsfield</span>${yap > 0 ? `<small>+ ${esc(liczba(yap))} yapper</small>` : ''}</div>
+      <div class="dzis-poz" data-staty-kredyty><b>${esc(liczba(hf))}</b><span>${esc(odmiana(hf, 'kredyt', 'kredyty', 'kredytów'))} Higgsfield</span>${yap > 0 || ws > 0 ? `<small>${[yap > 0 ? `+ ${esc(liczba(yap))} yapper` : '', ws > 0 ? `+ ${esc(usd(ws))} WaveSpeed` : ''].filter(Boolean).join(' · ')}</small>` : ''}</div>
       <div class="dzis-poz${bledy ? ' zle' : ''}" data-staty-problemy><b>${esc(liczba(bledy))}</b><span>${esc(odmiana(bledy, 'problem', 'problemy', 'problemów'))}</span>${nsfw ? `<small title="Rolki odrzucone przez filtr treści (NSFW) w ostatnich 14 dniach – kredyty wróciły">odrzucone przez filtr: ${esc(liczba(nsfw))}</small>` : ''}</div>
     </div>`;
     const pusto = !dni.some(d => (Number(d.rolki) || 0) || (Number((d.kredyty || {}).higgsfield) || 0) || (Number(d.bledy) || 0) || (Number(d.zdjecia) || 0));
@@ -1638,23 +1683,32 @@ function kartaRolki(p) {
   const info = p.info_zrodla || {};
   const nazwa = tytulRolki(p);
   const u = (state.stan && state.stan.ustawienia) || {};
-  const higgsfield = (u.dostawca || 'higgsfield') === 'higgsfield';
+  const dostPersony = u.dostawca || 'higgsfield';
+  const higgsfield = dostPersony === 'higgsfield';
+  // szacunek „ok. N” z /api/stan.jakosc umiemy dla Higgsfield (kredyty) i WaveSpeed (dolary) – yapper ma inną skalę
+  const szacuje = higgsfield || dostPersony === 'wavespeed';
+  // kto liczył koszt rolki: zrobiona/nieudana – jej dostawca, czekająca – dostawca persony
+  const jednostkaKosztu = jednostkaDostawcy(status !== 'nowy' && p.dostawca ? p.dostawca : dostPersony);
   const fakty = [];
   fakty.push(p.wariant === 'tekst' ? 'z tekstu' : (p.wariant === 'B' ? 'strój ze zdjęcia' : 'strój z filmu'));
-  const nieaktualny = status === 'nowy' && higgsfield && kosztNieaktualny(p);
-  if (p.koszt !== null && p.koszt !== undefined && !nieaktualny) fakty.push(esc(kredytow(p.koszt)));
-  else if (status === 'nowy' && higgsfield) {
+  const nieaktualny = status === 'nowy' && szacuje && kosztNieaktualny(p);
+  if (p.koszt !== null && p.koszt !== undefined && !nieaktualny) fakty.push(esc(kwota(p.koszt, jednostkaKosztu)));
+  else if (status === 'nowy' && szacuje) {
     // szacunek dla rolki, która czeka: długość filmiku × stawka za sekundę (jakosc.koszt_sekundy); bez długości – koszt typowej rolki.
-    // Stawki są w kredytach Higgsfield – przy yapper (inna skala) szacunku nie pokazujemy.
     const sz = szacunekKosztu(info.czas);
     const j = state.jakosc || {};
+    const dol = j.jednostka === 'c';
     const stawka = info.czas && j.prog_1080p_s ? (Number(info.czas) <= Number(j.prog_1080p_s) ? j.koszt_sekundy_1080p : j.koszt_sekundy_720p) : j.koszt_sekundy;
-    const jak = info.czas ? `${esc(Number(info.czas).toFixed(1).replace('.', ','))} s × ${esc(String(stawka).replace('.', ','))} kr/s (${esc(p.resolution || '')})` : 'typowa rolka w Twoim zestawie jakości';
-    if (sz && nieaktualny) fakty.push(`<span class="uwaga" title="Od ostatniego liczenia (${esc(kredytow(p.koszt))}) zmienił się zestaw „Jakość i koszt”. Szacunek: ${jak}. „Zrób tę rolkę” policzy koszt na nowo, zanim zapyta.">ok. ${esc(liczba(sz))} kr · policz ponownie</span>`);
-    else if (sz) fakty.push(`<span title="Szacunek: ${jak}. Dokładną cenę policzy „Ile kosztuje?”.">ok. ${esc(liczba(sz))} kr</span>`);
+    const jak = info.czas ? `${esc(Number(info.czas).toFixed(1).replace('.', ','))} s × ${dol ? esc(usd(stawka)) + '/s' : esc(String(stawka).replace('.', ',')) + ' kr/s'} (${esc(p.resolution || '')})` : 'typowa rolka w Twoim zestawie jakości';
+    const ok = esc(kwotaKrotko(sz, j.jednostka));
+    if (sz && nieaktualny) fakty.push(`<span class="uwaga" title="Od ostatniego liczenia (${esc(kwota(p.koszt, jednostkaKosztu))}) zmienił się zestaw „Jakość i koszt”. Szacunek: ${jak}. „Zrób tę rolkę” policzy koszt na nowo, zanim zapyta.">ok. ${ok} · policz ponownie</span>`);
+    else if (sz) fakty.push(`<span title="Szacunek: ${jak}. Dokładną cenę policzy „Ile kosztuje?”.">ok. ${ok}</span>`);
   }
   if (p.resolution && p.zrodlo) fakty.push(`<span title="Rozdzielczość wybiera długość klipu: ≤8 s → 1080p, dłuższe → 720p">${esc(p.resolution)}</span>`);
-  if (p.zapas_opis) fakty.push(`<span class="ok rolka-zapas" title="Seedance odrzucił tę rolkę (filtr NSFW), więc zrobił ją zapasowy model (yapper.so). Koszt w kredytach yapper.">${esc(p.zapas_opis)}</span>`);
+  if (p.zapas_opis) {
+    const zapasowy = NAZWY_SALD[p.dostawca] || p.dostawca || 'zapasowy dostawca';
+    fakty.push(`<span class="ok rolka-zapas" title="Pierwszy model odrzucił tę rolkę (filtr NSFW), więc zrobił ją zapasowy model (${esc(zapasowy)}). Koszt u ${esc(zapasowy)}.">${esc(p.zapas_opis)}</span>`);
+  }
   if (p.audio_nazwa || p.audio) fakty.push(`${ikona('audio')}z głosem`);
   if (p.lipsync_plik) fakty.push('usta dopasowane');
   if (p.telegram_wyslano) fakty.push(`<span class="ok" title="Ta rolka poleciała już na telefon">${ikona('ok')}wysłane na telefon</span>`);
@@ -1724,7 +1778,10 @@ function kartaRolki(p) {
   const filtr = status === 'blad' ? (p.powod === 'nsfw' || p.powod === 'ip' ? p.powod : (p.powod ? null : (/nsfw/i.test(p.notatki || '') ? 'nsfw' : (/ip_detected/i.test(p.notatki || '') ? 'ip' : null)))) : null;
   if (filtr === 'nsfw') {
     // odrzucone przez filtr treści: wyraźna plakietka + jedno zdanie + link do Pomocy (czemu i co z tym zrobić)
-    powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}odrzucone przez filtr treści (NSFW)</span><span>Filtr Higgsfield uznał filmik, zdjęcie stroju albo słowo w prompcie za ryzykowne – nie patrzy na kontekst. Kredyty wróciły. <a href="#pomoc/nsfw">Dlaczego? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
+    const kto = p.dostawca === 'wavespeed'
+      ? 'Moderacja WaveSpeed uznała filmik, zdjęcie albo słowo w prompcie za ryzykowne – nie patrzy na kontekst. Koszt liczę do limitu na wszelki wypadek (WaveSpeed nie pisze, czy go oddaje).'
+      : 'Filtr Higgsfield uznał filmik, zdjęcie stroju albo słowo w prompcie za ryzykowne – nie patrzy na kontekst. Kredyty wróciły.';
+    powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}odrzucone przez filtr treści (NSFW)</span><span>${kto} <a href="#pomoc/nsfw">Dlaczego? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
   } else if (filtr === 'ip') {
     powod = `<div class="rolka-filtr"><span class="rolka-filtr-plakietka">${ikona('filtr')}model wykrył znaną postać/markę</span><span>W filmiku, na zdjęciu albo w prompcie jest coś, co wygląda jak znana osoba, logo albo marka. Wrzuć inny fragment albo zasłoń logo. <a href="#pomoc/niewyszla">Co zrobić? → Pomoc</a></span>${state.pelny && p.notatki ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
   } else if (status === 'blad' && p.notatki) powod = `<div class="rolka-powod"><b>Dlaczego:</b> ${esc(prostyBlad(p.notatki))}${state.pelny ? `<small>${esc(p.notatki)}</small>` : ''}</div>`;
@@ -1733,7 +1790,7 @@ function kartaRolki(p) {
     // zapas po NSFW (yapper/Wan): czemu nie ruszył albo co dał – z notatek i listy prób
     const zp = /zapas (?:po NSFW )?pominiety:?\s*(.*)$/i.exec(p.notatki || '');
     const proby = (p.proby || []).filter(x => Number(x.krok) > 0);
-    if (zp) powod += `<div class="rolka-meta">Zapas (Wan) nie ruszył: ${esc(zp[1].slice(0, 300))}</div>`;
+    if (zp) powod += `<div class="rolka-meta">Zapas nie ruszył: ${esc(zp[1].slice(0, 300))}</div>`;
     else if (proby.length) powod += `<div class="rolka-meta">Zapas też nie przeszedł: ${proby.map(x => `${esc(x.model || '?')} – ${esc(x.status || '?')}`).join(', ')}</div>`;
   }
   return `<article class="rolka" data-id="${id}">
@@ -1758,18 +1815,20 @@ function trescKosztu(razem, n, nieznane = 0) {
   const s = state.stan || {};
   const u = s.ustawienia || {}, b = s.budzet || {};
   const dost = b.dostawca || u.dostawca || 'higgsfield';
+  const j = jednostkaDostawcy(dost);
+  const ile = v => (j === 'c' ? usd(v) : liczba(v));
   const saldo = (state.saldo[dost] || {}).kredyty;
   let html = '';
   if (razem !== null && razem !== undefined) {
-    html += `<p>To będzie kosztować około <b>${esc(kredytow(razem))}</b> (${n} ${odmiana(n, 'rolka', 'rolki', 'rolek')}).`;
+    html += `<p>To będzie kosztować około <b>${esc(kwota(razem, j))}</b> (${n} ${odmiana(n, 'rolka', 'rolki', 'rolek')}${j === 'c' ? ', WaveSpeed' : ''}).`;
     if (nieznane) html += ` Dla ${nieznane} ${odmiana(nieznane, 'rolki', 'rolek', 'rolek')} nie udało się policzyć kosztu – fabryka policzy go tuż przed zrobieniem.`;
     html += '</p>';
-    if (saldo !== null && saldo !== undefined) html += `<p>Na koncie masz ${esc(liczba(saldo))}, po zrobieniu zostanie około <b>${esc(liczba(saldo - razem))}</b>.</p>`;
+    if (saldo !== null && saldo !== undefined) html += `<p>Na koncie masz ${esc(ile(saldo))}, po zrobieniu zostanie około <b>${esc(ile(saldo - razem))}</b>.</p>`;
   } else {
     html += `<p><b>Nie udało się policzyć kosztu.</b> Fabryka policzy go tuż przed zrobieniem każdej rolki i zatrzyma się, gdyby przekroczył bezpiecznik.</p>`;
   }
-  if (b.limit_dzienny) html += `<p>Dziś wydano ${esc(liczba(b.wydano_dzis || 0))} z ${esc(liczba(b.limit_dzienny))} dozwolonych.</p>`;
-  html += '<p class="dialog-uwaga">To wyda kredyty.</p>';
+  if (b.limit_dzienny) html += `<p>Dziś wydano ${esc(ile(b.wydano_dzis || 0))} z ${esc(ile(b.limit_dzienny))} dozwolonych.</p>`;
+  html += j === 'c' ? '<p class="dialog-uwaga">To wyda dolary z konta WaveSpeed.</p>' : '<p class="dialog-uwaga">To wyda kredyty.</p>';
   return html;
 }
 
@@ -1778,7 +1837,7 @@ function kosztZWyniku(z, id) {
   const w = poz.find(x => Array.isArray(x) && Number(x[0]) === id);
   return w && w[1] !== null && w[1] !== undefined ? Number(w[1]) : null;
 }
-// Kto wycenił rolkę (trzeci element pozycji): 'yapper' = zapas po NSFW – kredyty yapper.so, inna skala niż Higgsfield.
+// Kto wycenił rolkę (trzeci element pozycji): inny niż dostawca persony = zapas po NSFW (yapper: kredyty yapper.so, WaveSpeed: dolary).
 function dostawcaZWyniku(z, id) {
   const poz = (z && z.wynik && Array.isArray(z.wynik.pozycje)) ? z.wynik.pozycje : [];
   const w = poz.find(x => Array.isArray(x) && Number(x[0]) === id);
@@ -1790,16 +1849,18 @@ async function generujPomysl(id) {
   if (p && !p.prompt_higgsfield) { toast('Ta rolka nie ma promptu – wpisz go (więcej → Wpisz prompt) i zapisz.', 'uwaga'); return; }
   if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
   let koszt = p && p.koszt !== null && p.koszt !== undefined ? Number(p.koszt) : null;
-  let zapas = false;
+  let zapas = null;
   if (koszt === null || kosztNieaktualny(p) || (p && p.krok_startowy)) {
     // brak kosztu albo koszt sprzed zmiany zestawu „Jakość i koszt” – liczymy na nowo (tanie, ~12 s), żeby pytać o prawdziwą kwotę
     const z = await akcjaCzekaj({ typ: 'koszt', ids: [id] }, 'liczę koszt', true);
     if (!z) return;
     koszt = z.blad ? null : kosztZWyniku(z, id);
-    zapas = dostawcaZWyniku(z, id) === 'yapper' && (state.stan && state.stan.dostawca) !== 'yapper';
+    const dz = dostawcaZWyniku(z, id);
+    zapas = dz && dz !== ((state.stan && state.stan.dostawca) || 'higgsfield') ? dz : null;
   }
+  const nazwaZapasu = zapas === 'wavespeed' ? 'WaveSpeed' : 'yapper.so (Wan 3.0)';
   const tresc = zapas
-    ? `<p>Zapas po NSFW: rolka pójdzie na <b>yapper.so (Wan 3.0)</b>${koszt !== null ? ` za ok. <b>${esc(liczba(koszt))} kredytów yapper</b>` : ''} – to inne kredyty niż Higgsfield. Pilnuje tego dzienny limit yappera.</p><p class="dialog-uwaga">To wyda kredyty yapper.so.</p>`
+    ? `<p>Zapas po NSFW: rolka pójdzie na <b>${esc(nazwaZapasu)}</b>${koszt !== null ? ` za ok. <b>${esc(zapas === 'wavespeed' ? usd(koszt) : liczba(koszt) + ' kredytów yapper')}</b>` : ''} – to inne pieniądze niż kredyty Higgsfield. Pilnuje tego dzienny limit ${zapas === 'wavespeed' ? 'WaveSpeed' : 'yappera'}.</p><p class="dialog-uwaga">To wyda ${zapas === 'wavespeed' ? 'dolary z konta WaveSpeed' : 'kredyty yapper.so'}.</p>`
     : trescKosztu(koszt, 1, koszt === null ? 0 : 0);
   const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc, ok: 'Zrób' });
   if (!w) return;
@@ -1822,7 +1883,7 @@ async function taniPodglad(id) {
 
 async function ponowPomysl(id) {
   const d = await api(`/api/pomysly/${id}/ponow`, 'POST', {});
-  if (d && d.od_zapasu) toast('Ta rolka odpadła na filtrze NSFW – tym razem spróbuję od razu na zapasowym modelu (yapper.so, Wan 3.0).', 'info');
+  if (d && d.od_zapasu) toast('Ta rolka odpadła na filtrze NSFW – tym razem spróbuję od razu na zapasowym modelu (z ustawienia „Gdy filtr odrzuci rolkę”).', 'info');
   await ladujRolki(false);
   odswiez();
   await generujPomysl(id);
@@ -2178,7 +2239,12 @@ function zbierzFormularz(form) {
     if (el.type === 'checkbox') v = el.checked;
     else if (el.type === 'radio') { if (!el.checked) return; v = el.value; }
     else if (el.dataset.typ === 'tri') v = el.value === '' ? null : el.value === 'true';
-    else if (el.dataset.typ === 'json') {
+    else if (el.dataset.typ === 'usd') {
+      // pole w dolarach (WaveSpeed) -> centy w ustawieniach/budżecie; puste = domyślne (data-domyslne w centach)
+      const t = String(el.value).trim().replace(',', '.');
+      const x = Number(t);
+      v = t === '' ? (el.dataset.domyslne !== undefined ? Number(el.dataset.domyslne) : null) : (Number.isFinite(x) ? Math.max(0, Math.round(x * 100)) : null);
+    } else if (el.dataset.typ === 'json') {
       const t = el.value.trim();
       if (!t) v = {};
       else {
@@ -2213,6 +2279,7 @@ function wypelnijFormularz(form, dane, tylkoPodane = false) {
     if (el.type === 'checkbox') el.checked = !!v;
     else if (el.type === 'radio') el.checked = String(el.value) === String(v === null || v === undefined ? '' : v);
     else if (el.dataset.typ === 'tri') el.value = v === null || v === undefined ? '' : String(v);
+    else if (el.dataset.typ === 'usd') el.value = v === null || v === undefined || v === '' ? '' : (Number(v) / 100).toFixed(2);
     else if (el.dataset.typ === 'json') el.value = v && typeof v === 'object' && Object.keys(v).length ? JSON.stringify(v) : '';
     else if (el.dataset.typ === 'lista-json') ustawSelectWartosc(el, JSON.stringify(Array.isArray(v) ? v : []));   // zapas_nsfw
     else if (el.tagName === 'SELECT') ustawSelectWartosc(el, v);
@@ -2309,11 +2376,14 @@ async function ladujUstawienia() {
     const dzis = b.dzis || {};
     $('#limit-higgsfield').value = (dzis.higgsfield && dzis.higgsfield.limit !== undefined) ? dzis.higgsfield.limit : ((b.budzet || {}).max_kredyty_dziennie || 0);
     $('#limit-yapper').value = (dzis.yapper && dzis.yapper.limit !== undefined) ? dzis.yapper.limit : 0;
+    // WaveSpeed: limit w centach USD, pole w dolarach
+    $('#limit-wavespeed').value = ((Number((dzis.wavespeed || {}).limit) || 0) / 100).toFixed(2);
   } catch (e) { /* limity są dodatkiem */ }
   ladujKonta().catch(bladToast);
   ladujTeksty().catch(bladToast);
   // listy modeli/głosów dociągamy w tle
   podlaczListe($('#u-yapper-model'), 'modele?dostawca=yapper');
+  podlaczListe($('#u-ws-model'), 'modele?dostawca=wavespeed');
   podlaczListe($('#u-zdjecia-model'), 'modele?dostawca=higgsfield&typ=image');
   podlaczListe($('#u-tts-glos'), 'glosy?dostawca=sync');
   przelaczLipsyncDostawce();
@@ -2356,7 +2426,9 @@ function renderJakosc() {
   if (!j) { kont.innerHTML = '<div class="muted">Sprawdzam ustawienia…</div>'; kont.dataset.klucz = ''; $('#jakosc-ostrzezenie').hidden = true; return; }
   const presety = j.presety || {};
   // przerysowujemy tylko przy zmianie danych (nie porównujemy HTML – przeglądarka serializuje SVG inaczej, więc karta traciłaby fokus co 5 s)
-  const klucz = JSON.stringify([j.preset, j.resolution, j.max_sekund_rolki, j.koszt_rolki, j.za_drogo, j.max_kredyty_na_rolke, presety]);
+  const klucz = JSON.stringify([j.preset, j.resolution, j.max_sekund_rolki, j.koszt_rolki, j.za_drogo, j.max_kredyty_na_rolke, j.jednostka, presety]);
+  // persona na WaveSpeed: kwoty w dolarach (jakosc.jednostka 'c'), Higgsfield – kredyty
+  const ok = v => esc(kwotaKrotko(v, j.jednostka));
   if (kont.dataset.klucz !== klucz) {
     kont.dataset.klucz = klucz;
     const karty = Object.keys(PRESETY_JAKOSCI).filter(k => presety[k]).map(k => {
@@ -2364,14 +2436,14 @@ function renderJakosc() {
       return `<button type="button" class="jakosc-karta${aktywna ? ' aktywna' : ''}" role="radio" aria-checked="${aktywna ? 'true' : 'false'}" data-akcja="jakosc-preset" data-preset="${esc(k)}">
         <span class="jakosc-nazwa">${esc(o.nazwa)}<span class="ikona">${ikona('ok')}</span></span>
         <span class="jakosc-opis">${esc(o.opis)}</span>
-        <span class="jakosc-koszt"><b>ok. ${esc(liczba(p.koszt_rolki))} kr</b> <small>za rolkę · ${esc(p.resolution)}, do ${esc(p.max_sekund_rolki)}&nbsp;s</small></span>
+        <span class="jakosc-koszt"><b>ok. ${ok(p.koszt_rolki)}</b> <small>za rolkę · ${esc(p.resolution)}, do ${esc(p.max_sekund_rolki)}&nbsp;s</small></span>
       </button>`;
     });
     if (j.preset === 'wlasne') {
       karty.push(`<div class="jakosc-karta wlasne aktywna" role="radio" aria-checked="true" aria-disabled="true">
         <span class="jakosc-nazwa">Własne ustawienia<span class="ikona">${ikona('ok')}</span></span>
         <span class="jakosc-opis">${esc(j.resolution || '?')}, rolki do ${esc(j.max_sekund_rolki || '?')}&nbsp;s – ustawione ręcznie w „Jak robić rolki” (tryb pełny). Kliknij zestaw obok, żeby wrócić do gotowego.</span>
-        <span class="jakosc-koszt"><b>ok. ${esc(liczba(j.koszt_rolki))} kr</b> <small>za rolkę</small></span>
+        <span class="jakosc-koszt"><b>ok. ${ok(j.koszt_rolki)}</b> <small>za rolkę</small></span>
       </div>`);
     }
     kont.innerHTML = karty.join('');
@@ -2379,7 +2451,7 @@ function renderJakosc() {
   const ostrz = $('#jakosc-ostrzezenie');
   ostrz.hidden = !j.za_drogo;
   if (j.za_drogo) {
-    $('#jakosc-ostrzezenie-tekst').innerHTML = `Ta rolka (ok. <b>${esc(liczba(j.koszt_rolki))} kr</b>) przekracza Twój limit na jedną rolkę (<b>${esc(liczba(j.max_kredyty_na_rolke))} kr</b>) – fabryka ją pominie. Wybierz <b>Normalnie</b> albo podnieś limit w trybie pełnym (<a href="#ustawienia/limity">Limity kredytów</a>).`;
+    $('#jakosc-ostrzezenie-tekst').innerHTML = `Ta rolka (ok. <b>${ok(j.koszt_rolki)}</b>) przekracza Twój limit na jedną rolkę (<b>${ok(j.max_kredyty_na_rolke)}</b>) – fabryka ją pominie. Wybierz <b>Normalnie</b> albo podnieś limit w trybie pełnym (<a href="#ustawienia/limity">Limity kredytów</a>).`;
   }
 }
 
@@ -2406,7 +2478,7 @@ async function ustawPresetJakosci(nazwa, btn) {
     }
     renderJakosc();
     const j = state.jakosc || {};
-    toast(`Zestaw „${nazwaPresetu(nazwa)}”: jedna rolka to ok. ${liczba(j.koszt_rolki)} kr.`, 'ok');
+    toast(`Zestaw „${nazwaPresetu(nazwa)}”: jedna rolka to ok. ${kwotaKrotko(j.koszt_rolki, j.jednostka)}.`, 'ok');
     odswiez();
   } finally {
     if (btn) btn.disabled = false;
@@ -2447,9 +2519,10 @@ async function zapiszUstawienia(f) {
     if (dane.budzet) {
       // limity dzienne to osobny plik (budzet.json), wspólny dla wszystkich person
       for (const [dost, v] of Object.entries(dane.budzet)) {
-        await api('/api/budzet', 'POST', { dostawca: dost, max_kredyty_dziennie: Math.max(0, Number(v) || 0) });
+        state.budzet = await api('/api/budzet', 'POST', { dostawca: dost, max_kredyty_dziennie: Math.max(0, Number(v) || 0) });
       }
       delete dane.budzet;
+      if (state.kontaPelne) renderKonta();      // karta WaveSpeed pokazuje dzienny limit
     }
     const d = await api('/api/ustawienia', 'POST', dane);
     if (d.ustawienia) {
@@ -2533,6 +2606,7 @@ async function odswiezListy() {
   state.listy = {};
   if (state.strona === 'ustawienia') {
     podlaczListe($('#u-yapper-model'), 'modele?dostawca=yapper', true);
+    podlaczListe($('#u-ws-model'), 'modele?dostawca=wavespeed', true);
     podlaczListe($('#u-zdjecia-model'), 'modele?dostawca=higgsfield&typ=image', true);
     podlaczListe($('#u-tts-glos'), 'glosy?dostawca=sync', true);
     przelaczLipsyncDostawce(true);
@@ -2551,7 +2625,7 @@ async function ladujKonta() {
 
 function renderKonta() {
   const k = state.kontaPelne || {};
-  const kolejnosc = ['higgsfield', 'telegram', 'yapper', 'sync', 'elevenlabs'];
+  const kolejnosc = ['higgsfield', 'telegram', 'wavespeed', 'yapper', 'sync', 'elevenlabs'];
   const ids = kolejnosc.filter(x => k[x]).concat(Object.keys(k).filter(x => !kolejnosc.includes(x)));
   $('#konta-lista').innerHTML = ids.length ? ids.map(id => kartaKonta(id, k[id])).join('') : '<div class="pusto"><b>Brak danych o kontach</b></div>';
 }
@@ -2559,6 +2633,7 @@ function renderKonta() {
 const OPISY_KONT = {
   higgsfield: 'Robi rolki i zdjęcia. Logowanie przez przeglądarkę, bez klucza.',
   yapper: 'Zapasowy sposób robienia rolek (Wan 3.0). Potrzebne tylko, jeśli wybierzesz go w „Jak robić rolki”.',
+  wavespeed: 'Tańsze rolki w 1080p (Seedance 2.5 Edit Turbo, 10 s ≈ $2,60). Płacisz dolarami z doładowania. Potrzebne, jeśli wybierzesz WaveSpeed w „Jak robić rolki” albo jako zapas po NSFW.',
   sync: 'Dopasowanie ust do głosu (lipsync) i głos z tekstu.',
   elevenlabs: 'Opcjonalnie: głos z tekstu.',
   telegram: 'Wysyłasz botowi filmik → fabryka robi rolkę → bot odsyła gotową z podpisem. Komendy: /status, /raport, /stop, /wznow.',
@@ -2573,8 +2648,19 @@ function prostyWynikTestu(w, id = '') {
       .replace('dziala - napisz do niego /start na telefonie, zeby sparowac', 'działa – teraz napisz do niego /start na telefonie');
     return `Działa. ${k}`.trim();
   }
+  const dol = String(w.komunikat || '').match(/\$(\d+)\.(\d\d)/);
+  if (dol) return `Działa. Na koncie $${dol[1]},${dol[2]}.` + (/doladuj/i.test(w.komunikat || '') ? ' Doładuj konto (wavespeed.ai → Billing), żeby robić rolki.' : '');
   const m = String(w.komunikat || '').match(/(\d+)\s*kr/);
   return 'Działa.' + (m ? ` Masz ${kredytow(m[1])}.` : '');
+}
+
+// Karta WaveSpeed w Kontach: dzienny limit (centy USD z /api/budzet) – bez niego fabryka nic tam nie wyda.
+function limitWaveSpeedHtml() {
+  const b = (state.budzet && state.budzet.dzis && state.budzet.dzis.wavespeed) || null;
+  if (!b) return '';
+  return b.limit
+    ? `<div class="konto-czaty">Dzienny limit: <b>${esc(usd(b.limit))}</b> (dziś wydane ${esc(usd(b.wydano || 0))}). Zmienisz go w <a href="#ustawienia/limity">Ustawienia → Limity</a> (tryb pełny).</div>`
+    : `<div class="konto-powod">Dzienny limit WaveSpeed nie jest ustawiony – bez niego fabryka nic tu nie wyda. Ustaw go w <a href="#ustawienia/limity">Ustawienia → Limity</a> (tryb pełny – przełącznik w lewym dolnym rogu).</div>`;
 }
 
 function kartaKonta(id, k) {
@@ -2617,6 +2703,7 @@ function kartaKonta(id, k) {
     else { stanKlasa = ''; stanTekst = 'nie połączone'; }
     srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}
       <ol class="kroki-lista"><li>Wejdź na stronę ${esc(nazwa)} i utwórz klucz API: <span class="konto-jak">${linkuj(k.jak || '')}</span></li><li>Wklej klucz poniżej, kliknij <b>Zapisz</b>, potem <b>Sprawdź</b>.</li></ol>
+      ${id === 'wavespeed' ? limitWaveSpeedHtml() : ''}
       ${k.jest ? `<div class="konto-maska" data-zaawansowane>klucz: ${esc(k.maska || '••••')}${k.z_env ? ' (ze zmiennej środowiskowej)' : ''}</div>` : ''}
       <form class="rzad" data-konto-form="${esc(id)}"><input type="password" name="klucz" placeholder="${k.jest ? 'wklej nowy klucz, żeby podmienić' : 'wklej klucz API'}" autocomplete="off" aria-label="Klucz API ${esc(nazwa)}"><button class="btn btn-glowny" type="submit">Zapisz</button></form>
       <div class="rzad"><button class="btn btn-maly" type="button" data-akcja="konto-test" data-dostawca="${esc(id)}"${k.jest ? '' : ' disabled'}>Sprawdź</button>${k.jest && !k.z_env ? `<button class="btn btn-maly btn-zly" type="button" data-akcja="konto-usun" data-dostawca="${esc(id)}">Usuń klucz</button>` : ''}${wynikHtml}</div>`;

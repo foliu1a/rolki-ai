@@ -43,13 +43,19 @@ USTAWIENIA_DOMYSLNE = {
     "mediatool": True,              # po generacji przepusc wideo przez Media Tool (iPhone meta, GPS, spoof)
     "dodatkowe_parametry": {},      # cokolwiek ekstra dla CLI, np. {"seed": 42}
     # --- dostawca wideo ---
-    "dostawca": "higgsfield",       # kto generuje rolki: higgsfield (Seedance, CLI) | yapper (Wan, API)
+    "dostawca": "higgsfield",       # kto generuje rolki: higgsfield (Seedance, CLI) | yapper (Wan, API) | wavespeed (Seedance Turbo, API)
     "mode_bez_zrodla": "",          # tryb dla pomyslow BEZ filmiku (sam prompt + referencje), np. omni_reference; "" = pomijaj
     "yapper": {"model": "", "resolution": "720p", "duration": 5, "prompt": "", "parametry": {},   # ustawienia yapper.so (model Wan itd.)
                "min_kredyty": 0, "max_kredyty_na_rolke": 400},    # bezpiecznik w kredytach yapper (inna skala niz Higgsfield!)
                                     # yapper.prompt puste = prompty/wan.txt (prompt Wan: max 5000 znakow, bez @[Image N])
+    "wavespeed": {"model": "bytedance/seedance-2.5/video-edit-turbo",   # WaveSpeedAI (dostawcy/wavespeed.py: MODELE)
+                  "generate_audio": False,      # False = Seedance zostawia ORYGINALNY dzwiek filmiku (Wan: bez dzwieku z modelu)
+                  "parametry": {},              # dodatkowe pola zapytania, np. {"enable_web_search": false}
+                  "min_kredyty": 0, "max_kredyty_na_rolke": 400},   # bezpiecznik w CENTACH USD (400 = $4.00 na rolke)
+                                    # prompt: Seedance = prompt persony A/B (@[Image N] -> @Image N), Wan = prompty/wan.txt
     "zapas_nsfw": [],               # zapas po odrzuceniu NSFW/IP: kroki po kolei, np. [{"dostawca": "yapper", "model": "wan-3.0-prime"},
-                                    # {"dostawca": "yapper", "model": "wan-3.0"}]; [] = wylaczone. Wymaga dziennego limitu yappera.
+                                    # {"dostawca": "wavespeed", "model": "alibaba/wan-3.0/reference-to-video"}]; [] = wylaczone.
+                                    # Kazdy krok wymaga dziennego limitu swojego dostawcy (yapper / wavespeed).
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
@@ -964,6 +970,27 @@ def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
 def wydano_z_rezerwa(dostawca=DOSTAWCA_GLOWNY):
     """Wydane dzis + zarezerwowane przez rolki w toku - to porownujemy z limitem dziennym."""
     return wydano_dzis(dostawca) + koszt_w_toku(dostawca)
+
+
+def znane_job_id(dostawca=None):
+    """Numery jobow, ktore fabryka juz zna (wszystkie persony: job_id pomyslu, proby, znaczniki w_toku) - opcjonalnie tylko
+    jednego dostawcy. WaveSpeed nie ma Idempotency-Key, wiec szukajac zadania z przerwanego wysylania pomija te znane."""
+    wynik = set()
+    for slug in lista_modelek():
+        try:
+            pomysly = lista_pomyslow(slug)
+        except (OSError, ValueError):
+            continue
+        for p in pomysly:
+            marker = p.get("w_toku") if isinstance(p.get("w_toku"), dict) else {}
+            if p.get("job_id") and (dostawca is None or p.get("dostawca") in (None, dostawca) or marker.get("dostawca") == dostawca):
+                wynik.add(str(p["job_id"]))
+            if marker.get("job_id") and (dostawca is None or marker.get("dostawca") == dostawca):
+                wynik.add(str(marker["job_id"]))
+            for w in p.get("proby") or []:
+                if isinstance(w, dict) and w.get("job_id") and (dostawca is None or w.get("dostawca") == dostawca):
+                    wynik.add(str(w["job_id"]))
+    return wynik
 
 
 # ---------------- blokada: jedna generacja naraz na persone (takze miedzy procesami) ----------------

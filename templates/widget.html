@@ -67,10 +67,12 @@ async function odswiez() {
   const s = d.stan, hf = (d.saldo || {}).higgsfield || {};
   $('#persona').textContent = s ? `Rolki AI · ${s.modelka}` : 'Rolki AI · brak persony';
   const dost = s ? s.dostawca : 'higgsfield';
-  const saldo = dost === 'yapper' ? ((d.saldo || {}).yapper || {}) : hf;
-  $('#saldo-etykieta').textContent = dost === 'yapper' ? 'kr yapper' : 'kr Higgsfield';
+  const ws = dost === 'wavespeed';             // WaveSpeed: centy USD -> dolary
+  const usd = c => '$' + (Number(c || 0) / 100).toFixed(2).replace('.', ',');
+  const saldo = (dost === 'yapper' || ws) ? ((d.saldo || {})[dost] || {}) : hf;
+  $('#saldo-etykieta').textContent = ws ? 'WaveSpeed' : (dost === 'yapper' ? 'kr yapper' : 'kr Higgsfield');
   const liczba = $('#saldo');
-  liczba.textContent = saldo.kredyty == null ? '—' : saldo.kredyty.toLocaleString('pl-PL');
+  liczba.textContent = saldo.kredyty == null ? '—' : (ws ? usd(saldo.kredyty) : saldo.kredyty.toLocaleString('pl-PL'));
   liczba.className = 'liczba';
   if (s) {
     const b = s.budzet;
@@ -79,7 +81,8 @@ async function odswiez() {
     const proc = b.limit_dzienny ? Math.min(100, Math.round(100 * b.wydano_dzis / b.limit_dzienny)) : 0;
     const pasek = $('#pasek'); pasek.style.width = proc + '%';
     pasek.className = proc >= 100 ? 'zle' : (proc >= 80 ? 'uwaga' : '');
-    $('#dzis').textContent = `dziś ${b.wydano_dzis}${b.limit_dzienny ? '/' + b.limit_dzienny : ''} kr`;
+    $('#dzis').textContent = ws ? `dziś ${usd(b.wydano_dzis)}${b.limit_dzienny ? '/' + usd(b.limit_dzienny) : ' (brak limitu!)'}`
+      : `dziś ${b.wydano_dzis}${b.limit_dzienny ? '/' + b.limit_dzienny : ''} kr`;
     $('#rolki').textContent = `rolki dziś ${b.rolki_dzis}${b.max_rolek_dziennie ? '/' + b.max_rolek_dziennie : ''}`;
     const st = s.statystyki || {};
     $('#k-nowy').textContent = st.nowy ?? 0; $('#k-gotowe').textContent = st.gotowe ?? 0; $('#k-blad').textContent = st.blad ?? 0;

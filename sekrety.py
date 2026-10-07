@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Klucze API dostawcow (yapper.so, sync.so, ...). Zrodla, w tej kolejnosci:
 
-  1. zmienna srodowiskowa (YAPPER_API_KEY, SYNC_API_KEY, ELEVENLABS_API_KEY)
+  1. zmienna srodowiskowa (YAPPER_API_KEY, WAVESPEED_API_KEY, SYNC_API_KEY, ELEVENLABS_API_KEY)
   2. plik klucze.json obok stan.json (w .gitignore - NIGDY nie trafia do gita)
 
 Panel zapisuje klucze przez zapisz_klucz(); w odpowiedziach API pokazujemy tylko zamaskuj().
@@ -16,6 +16,7 @@ PLIK_KLUCZY = os.path.join(os.path.dirname(baza.PLIK_STANU), "klucze.json")
 
 DOSTAWCY = {
     "yapper": {"env": "YAPPER_API_KEY", "nazwa": "yapper.so", "opis": "klucz API z panelu yapper.so"},
+    "wavespeed": {"env": "WAVESPEED_API_KEY", "nazwa": "WaveSpeed", "opis": "klucz API WaveSpeedAI (rolki Seedance 2.5 Edit Turbo)"},
     "sync": {"env": "SYNC_API_KEY", "nazwa": "sync.so", "opis": "klucz API z sync.so (Dashboard -> API keys)"},
     "elevenlabs": {"env": "ELEVENLABS_API_KEY", "nazwa": "ElevenLabs", "opis": "opcjonalnie: glos z tekstu"},
     "telegram": {"env": "TELEGRAM_BOT_TOKEN", "nazwa": "Telegram", "opis": "token bota od @BotFather - telefon jako pilot fabryki"},

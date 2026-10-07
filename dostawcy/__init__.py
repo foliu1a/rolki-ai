@@ -14,12 +14,32 @@ Kazdy dostawca to modul z funkcjami:
     model, mode, generate_audio, soul_id, parametry {...}
 
 Bledy dostawcy (CLI/API/siec) to BladDostawcy - fabryka je lapie i decyduje o powtorce.
+
+Rolki (fabryka._wyslij/_czekaj): zlec(z, klucz, znacznik, log) -> sprawdz(job_id) -> koncowy/udany/nieudany(status),
+koszt_joba(wynik, wycena), znajdz(model, ...) (zadanie z przerwanego wysylania), IDEMPOTENTNY, JEDNOSTKA ("kr" kredyty,
+"c" centy USD - WaveSpeed), WYMAGA_LIMITU (True = bez dziennego limitu fabryka nic u tego dostawcy nie wyda).
 """
 import importlib
 import re
 
-NAZWY = ("higgsfield", "yapper")                 # robia rolki (pelny interfejs)
+NAZWY = ("higgsfield", "yapper", "wavespeed")    # robia rolki (pelny interfejs)
 NAZWY_SALDA = NAZWY + ("elevenlabs",)            # maja saldo do paska w panelu (elevenlabs: tylko gotowy/saldo)
+NAZWY_ZAPASU = ("yapper", "wavespeed")           # dozwolone kroki zapas_nsfw
+JEDNOSTKI = {"higgsfield": "kr", "yapper": "kr", "wavespeed": "c", "sync": "c", "elevenlabs": "zn"}
+NAZWY_LUDZKIE = {"higgsfield": "Higgsfield", "yapper": "yapper.so", "wavespeed": "WaveSpeed", "sync": "sync.so",
+                 "elevenlabs": "ElevenLabs"}
+
+
+def jednostka(nazwa):
+    """Jednostka kwot dostawcy w budzecie: 'kr' (kredyty), 'c' (centy USD), 'zn' (znaki)."""
+    return JEDNOSTKI.get((nazwa or "higgsfield").strip().lower(), "kr")
+
+
+def kwota(k, nazwa="higgsfield"):
+    """Kwota do logow i dziennika: kredyty '46 kr', centy USD (WaveSpeed, sync.so) '$2.60'; None -> '? kr' / '$?'."""
+    if jednostka(nazwa) == "c":
+        return "$?" if k is None else f"${int(k) / 100:.2f}"
+    return f"{k if k is not None else '?'} kr"
 
 
 def sekundy(timeout, domyslnie=1800):
