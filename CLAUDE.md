@@ -138,6 +138,10 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   [--wlosy miku] [--stroj codzienny] --sucho` (prompt + wycena, 0 kr); bez `--sucho` pyta i generuje.
 - Ceny `generate cost` (2026-10-07): Seedance 2.5 omni 8 s 720p 56 / 1080p 96, 10 s 720p 70 / 1080p 120, 15 s 720p 105 kr;
   Wan 3.0 Prime 10 s 720p 30 kr; Gemini Omni Flash 1.1 10 s 720p 30 / 1080p 45 kr. Liczba zdjec nie zmienia ceny.
+- Pierwszy test na zywo (2026-10-07, Noemi #3, galeria_fastfood, Seedance 2.5 10 s 720p, 70 kr, job 5bace290-...): tokeny
+  `<<<image_N>>>` przez CLI TRZYMAJA twarz (platyna, septum, stroj ze zdjec), wyglad telefonu i reakcja pani dobre, komentarz
+  po polsku jest; slabsze: napisy cen wyszly jak "Z6£" (zamiast zl), model dorobil torebke w stylu znanej marki (beat ma juz
+  "small plain black bag"), raz zerka w strone kamery. Generacja ~6 min + Media Tool ~2 min.
 - Testy: tests/test_scenariusz.py (prompt, wlosy, wzrost, katalog bez slow ryzykownych/marek, limity), tests/test_z_promptu.py
   (wycena nic nie tworzy, bezpieczniki, pelna sciezka, wznowienie po promptcie, cena wyzsza = nic, NSFW bez zapasu, endpointy).
 
