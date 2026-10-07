@@ -19,6 +19,7 @@ import autopilot
 import baza
 import dostawcy
 import fabryka
+import scenariusz
 import sekrety
 
 if sys.platform == "win32":
@@ -31,7 +32,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "2.8"
+WERSJA = "2.9"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -501,9 +502,15 @@ def api_profil():
         return _blad(e)
     dane = request.json or {}
     zmiany = {}
-    for pole in ("instagram", "opis_stylu", "nazwa", "hashtagi"):
+    for pole in ("instagram", "opis_stylu", "nazwa", "hashtagi", "wlosy"):
         if pole in dane:
             zmiany[pole] = str(dane[pole]).strip()
+    if "wzrost_cm" in dane:
+        # wzrost persony do rolek z promptu: "158-160" albo "170" (cm); puste = brak
+        wzrost = str(dane["wzrost_cm"] or "").strip().replace(" ", "").replace("cm", "").replace("–", "-")
+        if wzrost and not scenariusz._wzrost(wzrost):
+            return _blad("Wzrost wpisz w cm, np. 158-160 albo 170.")
+        zmiany["wzrost_cm"] = wzrost
     if "cechy" in dane:
         if isinstance(dane["cechy"], list):
             zmiany["cechy"] = [str(c).strip() for c in dane["cechy"] if str(c).strip()]
@@ -527,7 +534,14 @@ def _pomysl_dla_panelu(p):
     p["lipsync_url"] = _url_pliku(p.get("lipsync_plik"))
     p["stroj_url"] = _url_pliku(p.get("stroj"))
     p["audio_nazwa"] = os.path.basename(p["audio"]) if p.get("audio") else None
-    p["wariant"] = "B" if p.get("stroj") else ("A" if p.get("zrodlo") else "tekst")
+    p["wariant"] = "prompt" if fabryka.z_promptu(p) else ("B" if p.get("stroj") else ("A" if p.get("zrodlo") else "tekst"))
+    if fabryka.z_promptu(p):
+        zp = p.get("z_promptu") or {}
+        info = scenariusz.MODELE.get(zp.get("model") or "", {})
+        p["z_promptu_opis"] = " · ".join(x for x in (zp.get("miejsce_nazwa"), (info.get("nazwa") or zp.get("model") or "").split(" –")[0],
+                                                       f"{zp.get('dlugosc')} s" if zp.get("dlugosc") else "", zp.get("rozdzielczosc"),
+                                                       "inne włosy" if zp.get("wlosy_zmienione") else "") if x)
+        p.pop("info_zrodla", None)
     # rozdzielczosc tej rolki (zasada: <= 8 s -> 1080p, dluzsze -> 720p) - zapisana przy generacji albo wyliczona z dlugosci klipu
     if not p.get("resolution") and fabryka.czas_klipu(p):
         p["resolution"] = fabryka.rozdzielczosc_dla_czasu(fabryka.czas_klipu(p))
@@ -595,7 +609,7 @@ def api_ponow_pomysl(pid):
         if p.get("status") == "w_toku":
             return _blad(GENERUJE_SIE, 409)
         zapas = baza.ustawienia_modelki(aktywna).get("zapas_nsfw") or []
-        krok = 1 if (p.get("powod") in fabryka.POWODY_ZAPASU and zapas
+        krok = 1 if (p.get("powod") in fabryka.POWODY_ZAPASU and zapas and not fabryka.z_promptu(p)
                      and (not p.get("stroj") or fabryka.zapas_dla_stroju(zapas))) else None
         pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="nowy", notatki="", krok_startowy=krok)
     except ValueError as e:
@@ -645,6 +659,114 @@ def api_usun_pomysl(pid):
     return _ok()
 
 
+# ---------------- rolka z promptu (zakladka "Z promptu", scenariusz.py) ----------------
+
+OPCJE_Z_PROMPTU = ("pomysl_id", "tekst", "miejsce", "model", "dlugosc", "rozdzielczosc", "wlosy", "stroj", "stroj_tekst", "reakcja",
+                   "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone")
+
+
+def _slug_z_promptu(dane):
+    """Persona z zapytania (pole/parametr slug) albo aktywna. LookupError = nie ma takiej persony (404)."""
+    slug = (dane.get("slug") or "").strip() or _wymaga_modelki()
+    if slug not in baza.lista_modelek():
+        raise LookupError(f"Nie ma persony '{slug}'.")
+    return slug
+
+
+def _opcje_z_promptu(dane):
+    opcje = {k: dane[k] for k in OPCJE_Z_PROMPTU if k in dane and dane[k] is not None}
+    for k in ("wlosy", "ustalone"):
+        if k in opcje and not isinstance(opcje[k], dict):
+            raise ValueError(f"{k} musi byc slownikiem.")
+    if "dlugosc" in opcje:
+        try:
+            opcje["dlugosc"] = int(opcje["dlugosc"])
+        except (TypeError, ValueError):
+            raise ValueError("Dlugosc musi byc liczba sekund.")
+    return opcje
+
+
+@app.route("/api/z-promptu")
+def api_z_promptu_katalog():
+    """Katalog do formularza: gotowe pomysly, miejsca, wlosy, stroje, reakcje, komentarze, kamery, modele, domyslne wybory."""
+    try:
+        slug = _slug_z_promptu(dict(request.args))
+    except LookupError as e:
+        return _blad(e, 404)
+    except ValueError as e:
+        return _blad(e)
+    kat = scenariusz.katalog(slug)
+    kat["domyslne"] = dict(baza.USTAWIENIA_DOMYSLNE["z_promptu"], **(baza.ustawienia_modelki(slug).get("z_promptu") or {}))
+    return _ok(**kat)
+
+
+@app.route("/api/z-promptu/losuj", methods=["POST"])
+def api_z_promptu_losuj():
+    """Losowy gotowy pomysl (bez powtorek z 14 dni; 'bez' = id, ktorego nie chcemy znowu)."""
+    dane = request.json or {}
+    try:
+        slug = _slug_z_promptu(dane)
+    except LookupError as e:
+        return _blad(e, 404)
+    except ValueError as e:
+        return _blad(e)
+    uzyte = scenariusz.uzyte_pomysly(slug) + [dane.get("bez") or ""]
+    sezon = dane.get("sezon") if dane.get("sezon") in scenariusz.SEZONY else None
+    p = scenariusz.losuj_pomysl(slug, sezon=sezon, uzyte=uzyte)
+    return _ok(pomysl={"id": p["id"], "pl": p["pl"], "miejsce": p["miejsce"]})
+
+
+@app.route("/api/z-promptu/wycena", methods=["POST"])
+def api_z_promptu_wycena():
+    """Prompt + DARMOWA wycena (`generate cost`, nic nie tworzy). {"bez_ceny": true} = tylko prompt (od razu)."""
+    dane = request.json or {}
+    try:
+        slug = _slug_z_promptu(dane)
+        w = fabryka.wycena_z_promptu(slug, _opcje_z_promptu(dane), z_cena=not dane.get("bez_ceny"))
+    except LookupError as e:
+        return _blad(e, 404)
+    except ValueError as e:
+        return _blad(e)
+    return _ok(slug=slug, **w)
+
+
+@app.route("/api/z-promptu", methods=["POST"])
+def api_z_promptu_zrob():
+    """'Zrob rolke': pomysl typu 'prompt' z zamrozonym promptem + zadanie generuj tylko dla niego. Wymaga "kr" (cena z wyceny,
+    ktora user widzial) - fabryka liczy cene jeszcze raz tuz przed wyslaniem i NIE wysyla, gdy wyszlaby wyzsza.
+    409, gdy cos juz trwa (wtedy nic nie tworzymy)."""
+    dane = request.json or {}
+    try:
+        slug = _slug_z_promptu(dane)
+        opcje = _opcje_z_promptu(dane)
+        kr = int(dane["kr"]) if dane.get("kr") not in (None, "") else None
+    except LookupError as e:
+        return _blad(e, 404)
+    except (ValueError, TypeError) as e:
+        return _blad(e)
+    if kr is None or kr <= 0:
+        return _blad("Najpierw sprawdz cene (przycisk 'Sprawdz cene') - bez wyceny nic nie wysylam.")
+    if konsola.stan.get("trwa"):
+        return _blad(f"Cos juz trwa ({konsola.stan.get('typ') or 'inne zadanie'}) - poczekaj, az skonczy, i kliknij jeszcze raz.", 409)
+    try:
+        pid = fabryka.dodaj_z_promptu(slug, opcje, prompt=dane.get("prompt"), kr=kr)
+    except ValueError as e:
+        return _blad(e)
+
+    def _zrob(log, stop):
+        def cena_ok(p, k, *_):
+            if k is not None and k > kr:
+                log(f"#{p['id']}: cena wzrosla z {kr} do {k} kr - NIE wysylam. Sprawdz cene jeszcze raz w 'Z promptu'.")
+                return False
+            return True
+        return fabryka.generuj(slug, ids=[pid], potwierdz=cena_ok, log=log, stop=stop)
+    try:
+        zadanie = konsola.uruchom("generuj", slug, _zrob)
+    except Zajete as e:
+        return jsonify({"ok": False, "id": pid, "blad": f"Cos juz trwa ({e}) - rolka #{pid} czeka w kolejce (Rolki -> Zrob te rolke)."}), 409
+    return _ok(id=pid, zadanie=zadanie)
+
+
 # ---------------- akcje w tle ----------------
 
 def _ids(dane):
@@ -661,9 +783,26 @@ def _funkcja_akcji(typ, slug, dane):
     if typ == "koszt":
         return lambda log, stop: fabryka.koszt(slug, ids=_ids(dane), limit=dane.get("limit"), log=log)
     if typ == "generuj":
-        return lambda log, stop: fabryka.generuj(slug, ids=_ids(dane), limit=dane.get("limit"), potwierdz=None,
-                                                 dry_run=bool(dane.get("dry_run")), bez_referencji=bool(dane.get("bez_referencji")),
-                                                 log=log, stop=stop)
+        # max_kr (opcjonalnie): cena, ktora user zatwierdzil w pytaniu "Robic?" - fabryka liczy cene jeszcze raz tuz przed
+        # wyslaniem i pomija rolke, gdy wyszlaby wyzsza (nie placi wiecej, niz user widzial)
+        max_kr = int(dane["max_kr"]) if str(dane.get("max_kr") or "").strip().isdigit() else None
+
+        def _generuj(log, stop):
+            sprawdzone = set()
+
+            def cena_ok(p, k, *_):
+                # tylko pierwsze pytanie o rolke = glowny dostawca (kolejne to kroki zapasu po NSFW, w innej walucie)
+                if p["id"] in sprawdzone:
+                    return True
+                sprawdzone.add(p["id"])
+                if max_kr is not None and k is not None and k > max_kr:
+                    log(f"#{p['id']}: cena wzrosla z {max_kr} do {k} - NIE wysylam, policz koszt jeszcze raz")
+                    return False
+                return True
+            return fabryka.generuj(slug, ids=_ids(dane), limit=dane.get("limit"), potwierdz=cena_ok if max_kr is not None else None,
+                                   dry_run=bool(dane.get("dry_run")), bez_referencji=bool(dane.get("bez_referencji")),
+                                   log=log, stop=stop)
+        return _generuj
     if typ == "pierz":
         return lambda log, stop: fabryka.pierz(slug, pid=int(dane["id"]) if dane.get("id") else None, plik=dane.get("plik"), log=log)
     if typ in ("lipsync", "tts"):

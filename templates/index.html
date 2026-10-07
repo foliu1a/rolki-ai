@@ -18,6 +18,7 @@
     <nav class="nav" aria-label="Główne menu">
       <a href="#start" data-strona="start"><span class="ikona" data-ikona="start"></span><span class="etykieta">Start</span></a>
       <a href="#rolki" data-strona="rolki"><span class="ikona" data-ikona="film"></span><span class="etykieta">Rolki</span><span class="odznaka" id="odznaka-rolki" title="rolki, które czekają" hidden></span><span class="odznaka zle" id="odznaka-rolki-bledy" title="rolki, które nie wyszły" hidden></span></a>
+      <a href="#z-promptu" data-strona="z-promptu"><span class="ikona" data-ikona="pioro"></span><span class="etykieta">Z promptu</span></a>
       <a href="#zdjecia" data-strona="zdjecia"><span class="ikona" data-ikona="zdjecia"></span><span class="etykieta">Zdjęcia</span></a>
       <a href="#lipsync" data-strona="lipsync" data-zaawansowane><span class="ikona" data-ikona="lipsync"></span><span class="etykieta">Lipsync</span></a>
       <a href="#ustawienia" data-strona="ustawienia"><span class="ikona" data-ikona="ustawienia"></span><span class="etykieta">Ustawienia</span></a>
@@ -246,6 +247,84 @@
           </details>
         </section>
 
+        <!-- ===================== Z PROMPTU (scenariusz.py, /api/z-promptu) ===================== -->
+        <section class="strona" id="strona-z-promptu" hidden>
+          <div class="naglowek-strony">
+            <div><h1>Rolka z promptu</h1><p>Bez filmiku: piszesz pomysł, a fabryka robi rolkę z Twoją personą – jak nagraną zwykłym telefonem w Polsce. Zanim cokolwiek wyda, pokaże cenę.</p></div>
+          </div>
+
+          <form class="karta zp" id="form-zp" autocomplete="off">
+            <div class="zp-siatka">
+              <div class="pole"><label for="zp-persona">Persona</label><select id="zp-persona"></select></div>
+              <div class="pole"><label for="zp-model">Model</label><select id="zp-model"></select></div>
+              <div class="pole"><label for="zp-dlugosc">Długość</label><select id="zp-dlugosc"></select></div>
+              <div class="pole"><label for="zp-rozdz">Jakość</label><select id="zp-rozdz"></select></div>
+            </div>
+            <small class="pole-info" id="zp-model-info"></small>
+
+            <div class="pole">
+              <label for="zp-pomysl">Pomysł – po polsku, jednym zdaniem</label>
+              <textarea id="zp-pomysl" rows="2" placeholder="np. stoi w kolejce w sklepiku pod blokiem, chłopaki się gapią"></textarea>
+              <div class="rzad zp-pomysl-rzad">
+                <button class="btn btn-maly" type="button" data-akcja="zp-losuj">Losuj pomysł</button>
+                <select id="zp-gotowe" aria-label="Gotowe pomysły"><option value="">…albo wybierz gotowy pomysł</option></select>
+              </div>
+            </div>
+
+            <div class="zp-siatka">
+              <div class="pole"><label for="zp-miejsce">Miejsce w Polsce</label><select id="zp-miejsce"></select></div>
+              <div class="pole"><label for="zp-stroj">Strój</label><select id="zp-stroj"></select>
+                <input type="text" id="zp-stroj-tekst" placeholder="np. czarna kurtka, szerokie dżinsy, glany" hidden></div>
+              <div class="pole"><label for="zp-reakcja">Reakcja ludzi</label><select id="zp-reakcja"></select></div>
+              <div class="pole"><label for="zp-komentarz">Komentarz zza kamery</label><select id="zp-komentarz"></select>
+                <input type="text" id="zp-komentarz-tekst" placeholder="np. Ale odwaga." maxlength="80" hidden></div>
+            </div>
+
+            <fieldset class="zp-wlosy">
+              <legend>Włosy</legend>
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-wlosy-kolor">Kolor</label><select id="zp-wlosy-kolor"></select></div>
+                <div class="pole"><label for="zp-wlosy-fryzura">Fryzura</label><select id="zp-wlosy-fryzura"></select></div>
+                <div class="pole"><label for="zp-wlosy-grzywka">Grzywka</label><select id="zp-wlosy-grzywka"></select></div>
+              </div>
+              <small class="pole-info" id="zp-wlosy-info">Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.</small>
+            </fieldset>
+
+            <details class="zp-wiecej">
+              <summary><span class="ikona" data-ikona="chevron-dol"></span>Więcej: pora roku, pora dnia, kto nagrywa</summary>
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-sezon">Pora roku</label><select id="zp-sezon"></select></div>
+                <div class="pole"><label for="zp-pora">Pora dnia</label><select id="zp-pora"></select></div>
+                <div class="pole"><label for="zp-kamera">Kto nagrywa</label><select id="zp-kamera"></select></div>
+              </div>
+            </details>
+
+            <div class="zp-cena" id="zp-cena" aria-live="polite">Kliknij „Sprawdź cenę” – to nic nie kosztuje.</div>
+            <ul class="zp-uwagi" id="zp-uwagi" hidden></ul>
+
+            <details class="zp-prompt" id="zp-prompt-wrap" hidden>
+              <summary><span class="ikona" data-ikona="chevron-dol"></span><span>Prompt dla AI (<span id="zp-znaki">0</span> znaków)</span></summary>
+              <textarea id="zp-prompt" class="mono" rows="14" readonly spellcheck="false"></textarea>
+              <small class="pole-info" data-zaawansowane>Tryb pełny: możesz go poprawić przed „Zrób rolkę” (cena się nie zmienia, numery zdjęć &lt;&lt;&lt;image_N&gt;&gt;&gt; zostaw).</small>
+            </details>
+
+            <div class="karta-stopka zp-przyciski">
+              <button class="btn" type="button" data-akcja="zp-pokaz" id="zp-btn-pokaz">Pokaż prompt</button>
+              <button class="btn" type="button" data-akcja="zp-losuj-szczegoly" data-zaawansowane title="Wylosuj od nowa komentarz, kamerę i inne losowe szczegóły">Inne szczegóły</button>
+              <button class="btn" type="button" data-akcja="zp-cena" id="zp-btn-cena">Sprawdź cenę</button>
+              <button class="btn btn-glowny btn-duzy" type="button" data-akcja="zp-zrob" id="zp-btn-zrob" disabled>Zrób rolkę</button>
+            </div>
+          </form>
+
+          <section class="karta" id="zp-lista-karta">
+            <div class="karta-naglowek">
+              <div><h2>Rolki z promptu</h2><p class="muted">Gotowe lądują w folderze „tu rolki zrobione” (po Media Tool) i w kolejce Rolki – jak każda rolka.</p></div>
+              <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="gotowe"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+            </div>
+            <div class="lista" id="zp-lista"></div>
+          </section>
+        </section>
+
         <!-- ===================== ZDJĘCIA ===================== -->
         <section class="strona" id="strona-zdjecia" hidden>
           <div class="naglowek-strony">
@@ -369,6 +448,8 @@
                   <div class="pole"><label for="p-instagram">Instagram</label><input type="text" id="p-instagram" name="instagram" placeholder="@uroczanoemi"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
                   <div class="pole szerokie"><label for="p-telegram">Konto Telegram tej persony</label><input type="text" id="p-telegram" name="telegram_czat" placeholder="@huy7128" autocomplete="off"><small class="pole-info">np. <span class="mono">@huy7128</span> — gotowe rolki tej persony polecą tam. To konto musi raz napisać <span class="mono">/start</span> do bota (Telegram nie pozwala botom pisać pierwszym). Puste = Twój główny czat.</small><small class="pole-info" id="p-telegram-stan"></small></div>
+                  <div class="pole"><label for="p-wzrost">Wzrost (cm)</label><input type="text" id="p-wzrost" name="wzrost_cm" placeholder="np. 158-160" inputmode="numeric"><small class="pole-info">Do rolek z promptu – żeby była dobrze wyskalowana obok ludzi.</small></div>
+                  <div class="pole szerokie" data-zaawansowane><label for="p-wlosy">Włosy ze zdjęć – opis dla AI (po angielsku)</label><input type="text" id="p-wlosy" name="wlosy" placeholder="np. long straight platinum blonde hair, center part"><small class="pole-info">Puste = z opisu persony w prompcie A. Rolki z promptu biorą stąd „jej własne włosy”.</small></div>
                   <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
                 </div>

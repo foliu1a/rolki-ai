@@ -357,7 +357,8 @@ def stan_modelki(slug):
         "ustawienia": ust,
         "statystyki": st,
         "bez_promptu": [p["id"] for p in nowe if not p.get("prompt_higgsfield")],
-        "do_generacji": [p["id"] for p in nowe if p.get("prompt_higgsfield")],
+        "do_generacji": [p["id"] for p in nowe if p.get("prompt_higgsfield") and not z_promptu(p)],
+        "z_promptu_czeka": [p["id"] for p in nowe if z_promptu(p)],    # rolki z promptu robi sie po id (zakladka / Rolki)
         "w_toku": [p["id"] for p in baza.pomysly_w_toku(slug)],
         "zapas_nsfw": [f"{k.get('dostawca')} {k.get('model')}" for k in (ust.get("zapas_nsfw") or []) if isinstance(k, dict)],
         "niezeskanowane": [os.path.basename(z) for z in nowe_zrodla(slug)],
@@ -708,8 +709,30 @@ def cmd_prompt(args):
 
 # ---------------- budowanie zlecenia ----------------
 
+DOSTAWCA_Z_PROMPTU = "higgsfield"     # rolki z promptu (scenariusz.py) ida zawsze przez CLI Higgsfield, niezaleznie od dostawcy persony
+
+
+def z_promptu(p):
+    """Rolka z promptu (zakladka 'Z promptu', scenariusz.py): bez filmiku, prompt i lista zdjec zamrozone w pomysle."""
+    return isinstance(p, dict) and p.get("typ") == "prompt"
+
+
+def _zlecenie_z_promptu(slug, p):
+    """Zlecenie rolki z promptu: model/tryb/dlugosc/rozdzielczosc/zdjecia z pomyslu (p['z_promptu']), nie z ustawien persony."""
+    zp = p.get("z_promptu") or {}
+    return {
+        "slug": slug, "pomysl": p.get("id"), "prompt": p.get("prompt_higgsfield") or "", "video": None, "video_czas": None,
+        "images": [o for o in (zp.get("obrazy") or []) if o], "duration": int(zp.get("dlugosc") or 10),
+        "aspect_ratio": "9:16", "resolution": zp.get("rozdzielczosc") or "720p", "model": zp.get("model") or "seedance_2_5",
+        "mode": zp.get("mode"), "generate_audio": zp.get("generate_audio"), "soul_id": "",
+        "parametry": dict(zp.get("parametry") or {}), "dostawca": DOSTAWCA_Z_PROMPTU, "yapper": {}, "wavespeed": {},
+    }
+
+
 def zlecenie(slug, p, ust=None):
     """Generyczne zlecenie dla dostawcy (dostawcy/__init__.py opisuje pola)."""
+    if z_promptu(p):
+        return _zlecenie_z_promptu(slug, p)
     ust = ust or baza.ustawienia_modelki(slug)
     ma_zrodlo = bool(p.get("zrodlo"))
     dur = ust.get("duration")
@@ -778,7 +801,8 @@ def cmd_wgraj(args):
 
 
 def kandydaci(slug, ids=None, limit=None, log=None):
-    """Pomysly do policzenia/generacji: 'nowy' z promptem (albo wskazane id - takze 'blad')."""
+    """Pomysly do policzenia/generacji: 'nowy' z promptem (albo wskazane id - takze 'blad'). Rolki z promptu (typ 'prompt')
+    tylko wskazane po id - zbiorcze 'Zrob rolki', CLI bez --id i autopilot ich nie ruszaja (kazda ma wlasna, potwierdzona cene)."""
     log = log or _log
     ust = baza.ustawienia_modelki(slug)
     wymaga_wideo = ust.get("mode") in ("video_edit", "video_extension") and not ust.get("mode_bez_zrodla")
@@ -789,7 +813,7 @@ def kandydaci(slug, ids=None, limit=None, log=None):
             # ValueError (nie SystemExit): panel i autopilot lapia to jak zwykly blad, CLI drukuje [BLAD]
             if p["status"] not in ("nowy", "blad"):
                 raise ValueError(f"#{p['id']} ma status {p['status']} - generuje tylko nowy/blad.")
-            if wymaga_wideo and not p.get("zrodlo"):
+            if wymaga_wideo and not p.get("zrodlo") and not z_promptu(p):
                 raise ValueError(f"#{p['id']} nie ma filmiku zrodlowego, a tryb {ust['mode']} go wymaga "
                                  f"(wrzuc plik do wrzutni i zrob skanuj, zmien mode albo ustaw mode_bez_zrodla w Persona -> Generowanie).")
             if not p.get("prompt_higgsfield"):
@@ -798,7 +822,7 @@ def kandydaci(slug, ids=None, limit=None, log=None):
         return lista
     lista, pominiete = [], []
     for p in baza.lista_pomyslow(slug, "nowy"):
-        if not p.get("prompt_higgsfield"):
+        if not p.get("prompt_higgsfield") or z_promptu(p):
             continue
         if wymaga_wideo and not p.get("zrodlo"):
             pominiete.append(p["id"])
@@ -844,18 +868,19 @@ def koszt(slug, ids=None, limit=None, log=None):
             wynik["dostawca"] = dk.NAZWA
             wynik["razem"] += k or 0
             continue
+        dp = dostawcy.dostawca(DOSTAWCA_Z_PROMPTU) if z_promptu(p) else d     # rolka z promptu: zawsze Higgsfield
         try:
             z = zlecenie(slug, p, ust)
-            k = d.koszt(z)
+            k = dp.koszt(z)
         except dostawcy.BladDostawcy as e:
             log(f"#{p['id']}: [BLAD] {e}")
-            wynik["pozycje"].append((p["id"], None, d.NAZWA))
+            wynik["pozycje"].append((p["id"], None, dp.NAZWA))
             continue
         wynik["razem"] += k or 0
-        wynik["pozycje"].append((p["id"], k, d.NAZWA))
+        wynik["pozycje"].append((p["id"], k, dp.NAZWA))
         baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
-        skad = d.opis_wyceny() if hasattr(d, "opis_wyceny") else ""
-        log(f"#{p['id']}: {dostawcy.kwota(k, d.NAZWA)} ({z['resolution']}{', ' + skad if skad else ''})   {p['opis']}")
+        skad = dp.opis_wyceny() if hasattr(dp, "opis_wyceny") else ""
+        log(f"#{p['id']}: {dostawcy.kwota(k, dp.NAZWA)} ({z['resolution']}{', ' + skad if skad else ''})   {p['opis']}")
     log(f"razem: {dostawcy.kwota(wynik['razem'], wynik['dostawca'])}")
     return wynik
 
@@ -1066,7 +1091,10 @@ def _blad_trwaly(e):
 
 
 def _krok_startowy(p, ust):
-    """Od ktorego kroku zaczac rolke: 0 = dostawca persony; 1.. = kroki zapas_nsfw (np. 'Ponow' po NSFW)."""
+    """Od ktorego kroku zaczac rolke: 0 = dostawca persony; 1.. = kroki zapas_nsfw (np. 'Ponow' po NSFW).
+    Rolki z promptu nie maja zapasu (prompt Seedance z <<<image_N>>> nie pasuje do Wan)."""
+    if z_promptu(p):
+        return 0
     try:
         k = int(p.get("krok_startowy") or 0)
     except (TypeError, ValueError):
@@ -1131,6 +1159,16 @@ def _wyslij(slug, p, d, z, k, krok, ust, log):
     raise dostawcy.BladDostawcy("wyslanie nie wyszlo")
 
 
+def _pomin_przy_szukaniu(p, d, marker):
+    """Joby, ktorych `znajdz` nie moze uznac za job tej proby: wczesniejsze proby pomyslu, a gdy nie ma wgranego filmiku
+    (rolka z promptu - szukamy po tresci promptu i czasie) - takze wszystkie joby znane fabryce (inny pomysl z tym samym
+    promptem nie podepnie cudzego joba)."""
+    pomin = [w.get("job_id") for w in (p.get("proby") or []) if w.get("job_id")]
+    if not (marker or {}).get("wideo_id"):
+        pomin += sorted(baza.znane_job_id(d.NAZWA))
+    return pomin
+
+
 def _szukaj_wyslanego(slug, p, d, z, model, klucz, marker, blad, log):
     """Higgsfield: `generate create` zwrocil blad, ale znacznik 'wysylam' juz byl - job MOGL powstac. Sprawdzamy liste
     (po 5 s i po kolejnych 15 s); znaleziony = TEN job. Nie ma go -> JobTrwa: NIE wysylamy drugi raz (lista bywa opozniona),
@@ -1141,7 +1179,7 @@ def _szukaj_wyslanego(slug, p, d, z, model, klucz, marker, blad, log):
         try:
             znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=z.get("prompt"),
                                   od=marker.get("wysylam_od") or marker.get("od"), klucz=klucz,
-                                  pomin=[w.get("job_id") for w in (p.get("proby") or [])])
+                                  pomin=_pomin_przy_szukaniu(p, d, marker))
         except dostawcy.BladDostawcy as e:
             log(f"#{pid}: nie moge sprawdzic listy jobow ({e})")
             break
@@ -1323,12 +1361,19 @@ def _przygotuj_zapas(slug, p, ust, krok, log, potwierdz=None, tylko_wycena=False
     return d, z, k
 
 
+def _nazwa_wyniku(p):
+    """Rdzen nazwy pliku rolki: nazwa filmiku zrodlowego, 'prompt_<miejsce>' (rolka z promptu) albo 'pomysl_<id>'."""
+    if z_promptu(p):
+        return _bezpieczna_nazwa("prompt_" + str((p.get("z_promptu") or {}).get("miejsce") or "wlasny"))
+    return _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{p['id']}"))[0])
+
+
 def _sukces(slug, p, d, w, kr, krok, ust, log, lipsync, wynik):
     """Job sie udal: pobranie -> wygenerowany -> Media Tool -> gotowe (+ lipsync recznego 'Zrob rolke')."""
     pid = p["id"]
     urls = w.get("urls") or []
     model = (p.get("w_toku") or {}).get("model") or ""
-    nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{pid}"))[0])
+    nazwa = _nazwa_wyniku(p)
     rozsz = os.path.splitext(urls[0].split("?")[0])[1] or ".mp4"
     if rozsz.lower() not in ROZSZERZENIA_WIDEO:
         rozsz = ".mp4"
@@ -1406,7 +1451,7 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
     """Cala rolka: krok 0 = dostawca persony (d0, wycena k0), po odrzuceniu NSFW/IP kolejne kroki zapas_nsfw (po jednej probie).
     Pomysl w_toku (marker) jest WZNAWIANY: odpytujemy jego job zamiast wysylac nowy. Aktualizuje `wynik` generuj()."""
     pid = p["id"]
-    kroki = list(ust.get("zapas_nsfw") or [])
+    kroki = [] if z_promptu(p) else list(ust.get("zapas_nsfw") or [])      # rolki z promptu: bez zapasu po NSFW
     marker = p.get("w_toku") if p.get("status") == "w_toku" else None
     if p.get("status") == "w_toku" and not marker:
         baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None)
@@ -1435,7 +1480,7 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
                 try:
                     znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=p.get("prompt_higgsfield"),
                                           od=od_wyslania, klucz=marker.get("klucz"),
-                                          pomin=[x.get("job_id") for x in (p.get("proby") or [])])
+                                          pomin=_pomin_przy_szukaniu(p, d, marker))
                 except dostawcy.BladDostawcy as e:
                     if wiek is not None and wiek > MAX_GODZIN_W_TOKU * 3600:
                         _niepewne_wyslanie(slug, p, d, marker, f"od {MAX_GODZIN_W_TOKU} h nie da sie sprawdzic listy jobow: {e}", log, wynik)
@@ -1550,7 +1595,8 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
             krok += 1
             continue
         if powod in POWODY_ZAPASU and krok == 0 and not kroki:
-            zapas_info = " | zapas po NSFW wylaczony (zapas_nsfw = [])"
+            zapas_info = (" | rolka z promptu nie idzie na zapas - zmien stroj, miejsce albo slowa pomyslu" if z_promptu(p)
+                          else " | zapas po NSFW wylaczony (zapas_nsfw = [])")
         _niepowodzenie(slug, baza.pomysl(slug, pid), d, w, kr_razem, powod or "inny", ust, log, wynik, zapas_info)
         return
     # wszystkie kroki zapasu pominiete albo wyczerpane
@@ -1608,7 +1654,8 @@ def generuj(slug, ids=None, limit=None, potwierdz=None, dry_run=False, bez_refer
         for uwaga in sprawdz_prompt(slug, ust):
             log(f"[UWAGA] {uwaga}")
         for p in kandydaci(slug, ids, limit, log):
-            log(f"#{p['id']}: " + d.podglad(zlecenie(slug, p, ust)))
+            dp = dostawcy.dostawca(DOSTAWCA_Z_PROMPTU) if z_promptu(p) else d
+            log(f"#{p['id']}: " + dp.podglad(zlecenie(slug, p, ust)))
         return wynik
     with baza.blokada_generacji(slug) as moge:
         if not moge:
@@ -1630,6 +1677,13 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
         if not wynik["wygenerowane"] and not wynik["w_toku"]:
             log("Nic do generacji (brak pomyslow 'nowy' z promptem).")
         return wynik
+    promptowe = [p for p in lista if z_promptu(p)]
+    if promptowe:
+        # rolki z promptu: zawsze Higgsfield, wlasny model/dlugosc/zdjecia z pomyslu, te same bezpieczniki i wznawianie
+        _generuj_z_promptu(slug, promptowe, ust, potwierdz, timeout, log, stop, max_rolek, lipsync, wynik)
+        lista = [p for p in lista if not z_promptu(p)]
+        if not lista:
+            return wynik
     if not baza.sciezki_referencji(slug) and not bez_referencji:
         log("Brak zdjec persony w referencje/ - bez tego model nie wie, kogo wstawic. "
             "Wrzuc zdjecia albo dodaj --bez-referencji, jesli tak ma byc.")
@@ -1727,17 +1781,208 @@ def _generuj(slug, ids, limit, potwierdz, bez_referencji, timeout, log, stop, ma
     return wynik
 
 
+def _generuj_z_promptu(slug, lista, ust, potwierdz, timeout, log, stop, max_rolek, lipsync, wynik):
+    """Rolki z promptu (typ 'prompt'): darmowa wycena `generate cost` TUZ przed wyslaniem (jak kazda rolka), bezpieczniki
+    Higgsfielda (min_kredyty, max_kredyty_na_rolke, dzienny limit z rezerwa rolek w toku), potwierdz() (panel: cena nie wyzsza
+    niz ta, ktora user zatwierdzil), potem _rolka (znacznik w_toku -> create bez --wait -> job_id -> ten sam job do konca)."""
+    d = dostawcy.dostawca(DOSTAWCA_Z_PROMPTU)
+    nazwa = d.NAZWA
+    try:
+        saldo = d.saldo()
+    except dostawcy.BladDostawcy as e:
+        _zdarzenie(log, slug, "blad", f"[BLAD] saldo {nazwa}: {e}")
+        wynik["stop"] = f"saldo: {e}"
+        return
+    if saldo is None:
+        saldo = 10 ** 9
+    min_kredyty, max_na_rolke = bezpiecznik(ust, nazwa)
+    limit_dnia = baza.limit_dzienny(nazwa)
+    log(f"rolki z promptu - saldo {nazwa}: {saldo} kr | dzis wydano {baza.wydano_dzis(nazwa)}/{limit_dnia} "
+        f"(+{baza.koszt_w_toku(nazwa)} w toku) | min_kredyty={min_kredyty} max/rolka={max_na_rolke}")
+    for p in lista:
+        _sprawdz_stop(stop)
+        if max_rolek is not None and wynik["wygenerowane"] + len(wynik["w_toku"]) >= max_rolek:
+            wynik["stop"] = f"limit rolek w tym przebiegu ({max_rolek})"
+            break
+        p = baza.pomysl(slug, p["id"])
+        if p.get("status") not in ("nowy", "blad"):
+            continue
+        brak = [os.path.basename(o) for o in ((p.get("z_promptu") or {}).get("obrazy") or []) if not os.path.isfile(o)]
+        if brak or not (p.get("z_promptu") or {}).get("obrazy"):
+            tekst = (f"brakuje zdjec: {', '.join(brak)}" if brak else "rolka nie ma zdjec persony") + " - zrob ja jeszcze raz w 'Z promptu'"
+            _zdarzenie(log, slug, "blad", f"#{p['id']}: {tekst}", pomysl=p["id"])
+            baza.aktualizuj_pomysl(slug, p["id"], status="blad", notatki=tekst, powod="inny")
+            wynik["bledy"].append(p["id"])
+            continue
+        z = zlecenie(slug, p, ust)
+        try:
+            k = d.koszt(z)
+        except dostawcy.BladDostawcy as e:
+            _zdarzenie(log, slug, "blad", f"#{p['id']}: koszt nieznany ({e}) - pomijam", pomysl=p["id"])
+            baza.aktualizuj_pomysl(slug, p["id"], status="blad", notatki=f"koszt: {e}")
+            wynik["bledy"].append(p["id"])
+            continue
+        if k is None:
+            k = max_na_rolke
+            log(f"#{p['id']}: Higgsfield nie podal kosztu, zakladam {k} kr")
+        baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
+        wydano = baza.wydano_z_rezerwa(nazwa)
+        try:
+            saldo = d.saldo() or saldo
+        except dostawcy.BladDostawcy:
+            pass
+        if k > max_na_rolke:
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr ({z['resolution']}, {z['duration']} s) > max/rolka {max_na_rolke} - "
+                       f"POMIJAM (krotsza rolka albo nizsza rozdzielczosc)", pomysl=p["id"])
+            wynik["pominiete"].append(p["id"])
+            continue
+        if saldo - k < min_kredyty:
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr zostawiloby {saldo - k} < min_kredyty {min_kredyty} - STOP",
+                       pomysl=p["id"])
+            wynik["stop"] = "min_kredyty"
+            break
+        if limit_dnia and wydano + k > limit_dnia:
+            _zdarzenie(log, slug, "uwaga", f"#{p['id']}: {k} kr przekroczyloby limit dzienny ({wydano}+{k} > {limit_dnia}) - "
+                       f"STOP na dzis", pomysl=p["id"])
+            wynik["stop"] = "limit dzienny"
+            break
+        if potwierdz is not None and not potwierdz(p, k, saldo - k, wydano + k, limit_dnia):
+            log(f"#{p['id']}: pominieto (cena {k} kr nie zostala potwierdzona)")
+            wynik["pominiete"].append(p["id"])
+            continue
+        _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=d, k0=k, potwierdz=potwierdz)
+    log(f"rolki z promptu: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa)}/{limit_dnia} kr"
+        + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
+
+
+# ---------------- rolka z promptu (zakladka "Z promptu", scenariusz.py) ----------------
+
+def _dane_z_promptu(sc):
+    """Wynik scenariusz.zbuduj -> pole 'z_promptu' pomyslu (to, z czego zlecenie() buduje generacje i wznowienie)."""
+    return {k: sc.get(k) for k in ("model", "mode", "dlugosc", "rozdzielczosc", "parametry", "generate_audio", "obrazy",
+                                   "pomysl_id", "miejsce", "miejsce_nazwa", "wlosy_zmienione", "stroj_plik", "komentarz",
+                                   "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje")}
+
+
+def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
+    """Buduje prompt rolki z promptu (scenariusz.zbuduj) i - z_cena=True - pyta Higgsfield o cene (`generate cost`, 0 kr,
+    NIC nie tworzy). Zwraca slownik dla panelu/CLI: prompt, znaki, obrazy (nazwy), rozdzielczosc, dlugosc, model, ustalone,
+    ostrzezenia + kr (wycena), saldo, dzis {wydano (z rezerwa w toku), limit}, min_kredyty, max_kredyty_na_rolke,
+    mozna (bezpieczniki przepuszczaja), powody (czemu nie). ValueError przy zlych opcjach."""
+    import scenariusz
+    sc = scenariusz.zbuduj(slug, opcje)
+    ust = baza.ustawienia_modelki(slug)
+    nazwa = DOSTAWCA_Z_PROMPTU
+    min_k, max_k = bezpiecznik(ust, nazwa)
+    wynik = {k: sc[k] for k in ("prompt", "znaki", "limit", "ostrzezenia", "ustalone", "model", "rozdzielczosc", "dlugosc",
+                                "tytul", "miejsce", "miejsce_nazwa", "pomysl_id", "wlosy_zmienione", "komentarz", "sezon",
+                                "pora", "kamera")}
+    wynik.update({"obrazy": [os.path.basename(o) for o in sc["obrazy"]], "kr": None, "saldo": None,
+                  "dzis": {"wydano": baza.wydano_z_rezerwa(nazwa), "limit": baza.limit_dzienny(nazwa)},
+                  "min_kredyty": min_k, "max_kredyty_na_rolke": max_k, "mozna": False, "powody": [], "dostawca": nazwa})
+    if not z_cena:
+        return wynik
+    d = dostawcy.dostawca(nazwa)
+    p = {"id": None, "typ": "prompt", "prompt_higgsfield": sc["prompt"], "z_promptu": _dane_z_promptu(sc)}
+    try:
+        k = d.koszt(zlecenie(slug, p, ust))
+    except dostawcy.BladDostawcy as e:
+        wynik["powody"].append(f"Higgsfield nie podal ceny: {e}")
+        return wynik
+    try:
+        saldo = d.saldo()
+    except dostawcy.BladDostawcy as e:
+        saldo = None
+        wynik["powody"].append(f"nie moge sprawdzic salda Higgsfield: {e}")
+    wynik["kr"], wynik["saldo"] = k, saldo
+    wydano, limit = wynik["dzis"]["wydano"], wynik["dzis"]["limit"]
+    if k is None:
+        wynik["powody"].append("Higgsfield nie podal ceny - sprobuj jeszcze raz.")
+    else:
+        if k > max_k:
+            wynik["powody"].append(f"{k} kr to wiecej niz bezpiecznik {max_k} kr na rolke - wybierz krotsza rolke albo 720p.")
+        if saldo is not None and saldo - k < min_k:
+            wynik["powody"].append(f"po tej rolce zostaloby {saldo - k} kr, a minimum to {min_k} kr.")
+        if limit and wydano + k > limit:
+            wynik["powody"].append(f"dzis wydano {wydano} z {limit} kr - ta rolka ({k} kr) przekroczylaby dzienny limit.")
+    wynik["mozna"] = not wynik["powody"]
+    if log:
+        log(f"z promptu: {sc['model']} {sc['dlugosc']} s {sc['rozdzielczosc']}, {len(sc['obrazy'])} zdjec, "
+            f"{sc['znaki']} znakow -> {k} kr" + ("" if wynik["mozna"] else f" ({'; '.join(wynik['powody'])})"))
+    return wynik
+
+
+def dodaj_z_promptu(slug, opcje, prompt=None, kr=None):
+    """Tworzy pomysl 'nowy' typu 'prompt' z ZAMROZONYM promptem i lista zdjec (bez wysylania). prompt = tekst po recznej
+    poprawce (sprawdzany: limit znakow, numery zdjec); kr = wycena, ktora user widzial (zapis w pomysle). Zwraca id."""
+    import scenariusz
+    sc = scenariusz.zbuduj(slug, opcje)
+    tekst = (prompt or "").strip() or sc["prompt"]
+    if tekst != sc["prompt"]:
+        bledy, _ = scenariusz.sprawdz(tekst, sc["model"], len(sc["obrazy"]))
+        if bledy:
+            raise ValueError(" ".join(bledy))
+    zp = _dane_z_promptu(sc)
+    zp["opcje"] = {k: v for k, v in (opcje or {}).items() if k != "ustalone"}
+    zp["wycena"] = kr
+    zp["prompt_reczny"] = tekst != sc["prompt"]
+    pid = baza.dodaj_pomysl(slug, sc["tytul"] or f"z promptu: {sc['miejsce_nazwa']}", tekst, stroj=sc.get("stroj_plik"),
+                            typ="prompt", z_promptu=zp, koszt=kr, resolution=sc["rozdzielczosc"], model=sc["model"])
+    _zdarzenie(None, slug, "info", f"#{pid}: rolka z promptu - {sc['miejsce_nazwa']}, {sc['model']} {sc['dlugosc']} s "
+               f"{sc['rozdzielczosc']}" + (f", wycena {kr} kr" if kr is not None else ""), pomysl=pid)
+    return pid
+
+
+def cmd_z_promptu(args):
+    """python fabryka.py --modelka noemi z-promptu ["pomysl po polsku"] [--gotowy galeria_fastfood] [--dlugosc 10] [--sucho]"""
+    slug = _slug(args.modelka)
+    opcje = {"tekst": args.tekst or "", "pomysl_id": args.gotowy or "", "miejsce": args.miejsce or "", "model": args.model,
+             "dlugosc": args.dlugosc, "rozdzielczosc": args.rozdzielczosc, "stroj": args.stroj, "komentarz": args.komentarz,
+             "reakcja": args.reakcja, "sezon": args.sezon, "pora": args.pora,
+             "wlosy": {"kolor": args.wlosy, "fryzura": args.fryzura, "grzywka": args.grzywka}}
+    if args.gotowy and not args.tekst:
+        import scenariusz
+        opcje["tekst"] = scenariusz.POMYSLY_PO_ID[args.gotowy]["pl"] if args.gotowy in scenariusz.POMYSLY_PO_ID else ""
+    w = wycena_z_promptu(slug, opcje, z_cena=True)
+    print(w["prompt"])
+    print(f"\n--- {w['znaki']} znakow, {len(w['obrazy'])} zdjec, {w['model']} {w['dlugosc']} s {w['rozdzielczosc']}, "
+          f"miejsce: {w['miejsce_nazwa']}")
+    for u in w["ostrzezenia"]:
+        print(f"[UWAGA] {u}")
+    print(f"cena: {w['kr']} kr | saldo {w['saldo']} | dzis {w['dzis']['wydano']}/{w['dzis']['limit']} | "
+          f"max/rolka {w['max_kredyty_na_rolke']} | min_kredyty {w['min_kredyty']}")
+    if not w["mozna"]:
+        print("NIE MOZNA: " + "; ".join(w["powody"]))
+        return 1
+    if args.sucho:
+        print("(--sucho: nic nie wyslane, 0 kr)")
+        return 0
+    if not args.tak:
+        odp = input(f"Zrobic te rolke za {w['kr']} kr? [t/N] ").strip().lower()
+        if odp not in ("t", "tak", "y"):
+            print("anulowano")
+            return 0
+    opcje["ustalone"] = w["ustalone"]
+    pid = dodaj_z_promptu(slug, opcje, kr=w["kr"])
+    cena = w["kr"]
+    wynik = generuj(slug, ids=[pid], potwierdz=lambda p, k, *a: k <= cena, timeout=args.timeout)
+    print(json.dumps(wynik, ensure_ascii=False))
+    return 0 if wynik.get("wygenerowane") or wynik.get("w_toku") else 1
+
+
 def podglad(slug, pid, log=None):
     """Tani podglad rolki (Seedance `draft`, ~21 kr zamiast 45-72): ten sam prompt i referencje, wynik w
     wyniki/NNN_nazwa.podglad.mp4, pomysl zostaje 'nowy' (pelna generacja dopiero, gdy user kliknie Zrob rolke).
     Zwraca sciezke pliku podgladu."""
     log = log or _log
     ust = baza.ustawienia_modelki(slug)
-    nazwa_dostawcy = ust.get("dostawca") or "higgsfield"
+    p = baza.pomysl(slug, pid)
+    nazwa_dostawcy = DOSTAWCA_Z_PROMPTU if z_promptu(p) else (ust.get("dostawca") or "higgsfield")
     if nazwa_dostawcy != "higgsfield":
         raise ValueError("Tani podglad dziala tylko dla Higgsfield (Seedance draft).")
+    if z_promptu(p) and (p.get("z_promptu") or {}).get("model") != "seedance_2_5":
+        raise ValueError("Tani podglad (draft) jest tylko dla Seedance 2.5.")
     d = dostawcy.dostawca(nazwa_dostawcy)
-    p = baza.pomysl(slug, pid)
     if not p.get("prompt_higgsfield"):
         raise ValueError(f"#{pid} nie ma promptu.")
     z = zlecenie(slug, p, ust)
@@ -1760,7 +2005,7 @@ def podglad(slug, pid, log=None):
     baza.dopisz_wydatek(zuzyte, nazwa_dostawcy, job_id=job.get("job_id"))
     if not urls:
         raise RuntimeError(job.get("blad") or f"brak URL podgladu (status {job.get('status')})")
-    nazwa = _bezpieczna_nazwa(os.path.splitext(os.path.basename(p.get("zrodlo") or f"pomysl_{pid}"))[0])
+    nazwa = _nazwa_wyniku(p)
     cel = os.path.join(baza.folder_wynikow(slug), f"{pid:03d}_{nazwa}.podglad.mp4")
     d.pobierz(urls[0], cel)
     baza.aktualizuj_pomysl(slug, pid, podglad_plik=cel, podglad_koszt=zuzyte)
@@ -2047,6 +2292,18 @@ def main(argv=None):
     s.add_argument("--bez-referencji", action="store_true")
     s.add_argument("--timeout", default="30m")
     s.set_defaults(f=cmd_generuj)
+    s = sub.add_parser("z-promptu", help="rolka z promptu: pomysl po polsku -> prompt Seedance + wycena (--sucho = 0 kr) -> generacja")
+    s.add_argument("tekst", nargs="?", help="pomysl po polsku (puste = --gotowy albo losowy)")
+    s.add_argument("--gotowy", help="id gotowego pomyslu (scenariusz.POMYSLY), np. galeria_fastfood")
+    s.add_argument("--miejsce", help="id miejsca (scenariusz.MIEJSCA) albo 'losowe'")
+    s.add_argument("--model", default="seedance_2_5"); s.add_argument("--dlugosc", type=int, default=10)
+    s.add_argument("--rozdzielczosc", default="auto"); s.add_argument("--stroj", default="zdjecia")
+    s.add_argument("--komentarz", default="losowy"); s.add_argument("--reakcja", default="losowa")
+    s.add_argument("--sezon", default="auto"); s.add_argument("--pora", default="auto")
+    s.add_argument("--wlosy", default="wlasne"); s.add_argument("--fryzura", default="wlasna"); s.add_argument("--grzywka", default="wlasna")
+    s.add_argument("--sucho", action="store_true", help="tylko prompt i darmowa wycena")
+    s.add_argument("--tak", "-y", action="store_true", help="bez pytania o cene"); s.add_argument("--timeout", default="30m")
+    s.set_defaults(f=cmd_z_promptu)
     s = sub.add_parser("wznow", help="dokoncz rolki w toku (job wyslany przed restartem/timeoutem) - odpytuje ten sam job, nic nie wysyla")
     s.add_argument("--timeout", default="30m"); s.set_defaults(f=cmd_wznow)
     s = sub.add_parser("ocen", help="Virality Predictor na wyniku (kosztuje kredyty)"); s.add_argument("id", type=int); s.set_defaults(f=cmd_ocen)

@@ -56,6 +56,8 @@ USTAWIENIA_DOMYSLNE = {
     "zapas_nsfw": [],               # zapas po odrzuceniu NSFW/IP: kroki po kolei, np. [{"dostawca": "yapper", "model": "wan-3.0-prime"},
                                     # {"dostawca": "wavespeed", "model": "alibaba/wan-3.0/reference-to-video"}]; [] = wylaczone.
                                     # Kazdy krok wymaga dziennego limitu swojego dostawcy (yapper / wavespeed).
+    "z_promptu": {"model": "seedance_2_5", "dlugosc": 10, "stroj": "zdjecia", "komentarz": "losowy",   # zakladka "Z promptu":
+                  "reakcja": "losowa"},     # domyslne wybory formularza (scenariusz.py). Zawsze Higgsfield, cosplay tylko recznie.
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
@@ -824,18 +826,19 @@ def pomysl_po_zrodle(slug, zrodlo):
     return None
 
 
-def dodaj_pomysl(slug, opis, prompt_higgsfield="", zrodlo=None, klatki=None, info_zrodla=None, stroj=None):
+def dodaj_pomysl(slug, opis, prompt_higgsfield="", zrodlo=None, klatki=None, info_zrodla=None, stroj=None, **pola):
     """Nowy pomysl. `zrodlo` = filmik wejsciowy do Seedance Edit, `klatki` = folder z podgladem,
-    `stroj` = zdjecie stroju (wariant B) albo None (strój z filmu)."""
+    `stroj` = zdjecie stroju (wariant B) albo None (strój z filmu). `pola` = dodatkowe pola (np. rolka z promptu:
+    typ="prompt", z_promptu={...}, koszt, resolution, model)."""
     plik = _plik_pomyslow(slug)
     with _rmw(plik):
-        return _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj)
+        return _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj, pola)
 
 
-def _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj):
+def _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, stroj, pola=None):
     pomysly = _wczytaj_json(plik, [])
     nowy_id = (max((p["id"] for p in pomysly), default=0)) + 1
-    pomysly.append({
+    nowy = {
         "id": nowy_id,
         "opis": opis,
         "prompt_higgsfield": prompt_higgsfield,
@@ -855,7 +858,9 @@ def _dodaj_pomysl(plik, opis, prompt_higgsfield, zrodlo, klatki, info_zrodla, st
         "notatki": "",
         "utworzono": _teraz(),
         "zaktualizowano": _teraz(),
-    })
+    }
+    nowy.update({k: v for k, v in (pola or {}).items() if k not in ("id", "status", "utworzono")})
+    pomysly.append(nowy)
     _zapisz_json(plik, pomysly)
     return nowy_id
 

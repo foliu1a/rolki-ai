@@ -920,3 +920,30 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
   .marka-nazwa { display: none; }
   .nsfw-slowa-wiersz b { min-width: 0; width: 100%; }
 }
+
+/* ---------- Z promptu (rolka bez filmiku) ---------- */
+.zp-siatka { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 16px; }
+.zp-siatka .pole input[type="text"] { margin-top: 6px; }
+.zp-pomysl-rzad { margin-top: 2px; }
+.zp-pomysl-rzad select { flex: 1; min-width: 200px; }
+.zp-wlosy { border: 1px solid var(--linia-2); border-radius: var(--promien-m); padding: 12px 16px 14px; margin: 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 10px; }
+.zp-wlosy legend { padding: 0 6px; font-size: 14px; font-weight: 600; color: var(--tekst); }
+.zp-wiecej > summary, .zp-prompt > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px;
+  color: var(--akcent-jasny); font-size: 15px; min-height: 36px; }
+.zp-wiecej > summary::-webkit-details-marker, .zp-prompt > summary::-webkit-details-marker { display: none; }
+.zp-wiecej > summary svg, .zp-prompt > summary svg { width: 18px; height: 18px; transition: transform .2s; }
+.zp-wiecej[open] > summary svg, .zp-prompt[open] > summary svg { transform: rotate(180deg); }
+.zp-wiecej[open] > .zp-siatka { margin-top: 10px; }
+.zp-prompt textarea { width: 100%; min-height: 260px; margin-top: 8px; }
+.zp-cena { background: var(--karta-2); border: 1px solid var(--linia-2); border-left: 3px solid var(--linia-3);
+  border-radius: var(--promien-m); padding: 12px 14px; font-size: 15px; line-height: 1.5; }
+.zp-cena .kropka { vertical-align: middle; margin-right: 6px; }
+.zp-cena.ok { border-left-color: var(--ok); }
+.zp-cena.zle { border-left-color: var(--zle); }
+.zp-uwagi { margin: 0; padding: 10px 14px 10px 30px; background: var(--uwaga-tlo); border-radius: var(--promien-m); font-size: 14px;
+  color: var(--tekst); display: flex; flex-direction: column; gap: 4px; }
+.zp-przyciski { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .zp-przyciski .btn { flex: 1 1 100%; }
+}

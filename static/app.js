@@ -17,7 +17,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const STRONY = ['start', 'rolki', 'zdjecia', 'lipsync', 'ustawienia', 'historia', 'pomoc'];
+const STRONY = ['start', 'rolki', 'z-promptu', 'zdjecia', 'lipsync', 'ustawienia', 'historia', 'pomoc'];
 const STARE_STRONY = { pulpit: 'start', kolejka: 'rolki', persona: 'ustawienia/persona', konta: 'ustawienia/konta', teksty: 'ustawienia/teksty', dziennik: 'historia' };
 const STATUSY = ['nowy', 'w_toku', 'wygenerowany', 'postprodukcja', 'gotowe', 'blad'];
 const FILTRY_ROLEK = [
@@ -29,7 +29,7 @@ const FILTRY_ROLEK = [
 ];
 const STATUS_NA_FILTR = { nowy: 'nowy', w_toku: 'w_trakcie', wygenerowany: 'w_trakcie', postprodukcja: 'w_trakcie', gotowe: 'gotowe', blad: 'blad' };
 const AKCEPT = { zrodlo: 'video/*,.mp4,.mov,.m4v,.webm', referencja: 'image/*', stroj: 'image/*', audio: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg' };
-const STRONY_PO_ZADANIU = ['start', 'rolki', 'zdjecia', 'lipsync', 'historia', 'ustawienia'];
+const STRONY_PO_ZADANIU = ['start', 'rolki', 'z-promptu', 'zdjecia', 'lipsync', 'historia', 'ustawienia'];
 const MODELE_SYNC_ZAPAS = ['lipsync-2', 'lipsync-2-pro', 'sync-3'];
 const KLUCZ_TRYBU = 'rolki.tryb';
 const KLUCZ_STATY = 'rolki.staty.';   // + 'start' | 'historia' -> '1' (rozwinięte) / '0' (zwinięte)
@@ -172,6 +172,7 @@ const IKONY = {
   filtr: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
   stroj: '<path d="M9 4 6 6 3 11l3 1.5V20h12v-7.5L21 11l-3-5-3-2a3 3 0 0 1-6 0z"/>',
   metka: '<path d="M3 12 12 3h8v8l-9 9z"/><circle cx="16" cy="8" r="1.5"/>',
+  pioro: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>',
 };
 function ikona(nazwa) {
   const p = IKONY[nazwa];
@@ -524,7 +525,7 @@ function otworzSekcje(id) {
 
 function ladujStrone(nazwa) {
   const mapa = {
-    start: () => ladujStart(false), rolki: () => ladujRolki(false), zdjecia: ladujZdjecia, lipsync: ladujLipsync,
+    start: () => ladujStart(false), rolki: () => ladujRolki(false), 'z-promptu': ladujZPromptu, zdjecia: ladujZdjecia, lipsync: ladujLipsync,
     ustawienia: ladujUstawienia, historia: ladujHistoria, pomoc: renderPomoc,
   };
   const f = mapa[nazwa];
@@ -563,7 +564,7 @@ async function odswiez(wymusSaldo = false) {
     if (jest) {
       $('#ustawienia-tytul').textContent = 'Ustawienia: ' + (nazwaPersony(state.aktywna) || state.stan.modelka || '');
       if (state.strona === 'start') ladujStart(true).catch(() => {});
-      else if (state.strona === 'rolki') ladujRolki(true).catch(() => {});
+      else if (state.strona === 'rolki' || state.strona === 'z-promptu') ladujRolki(true).catch(() => {});
       else if (state.strona === 'ustawienia') renderJakosc();
     }
     if (state.zadanie && state.zadanie.trwa) startKonsoli();
@@ -1075,6 +1076,7 @@ function renderKrok2() {
 }
 
 function tytulRolki(p) {
+  if (p.wariant === 'prompt') return p.opis || `rolka z promptu #${p.id}`;
   const n = nazwaPliku(p.plik_wynikowy || p.zrodlo || '');
   return (n ? bezRozszerzenia(n).replace(/\.raw$/, '') : '') || p.opis || `rolka #${p.id}`;
 }
@@ -1607,6 +1609,7 @@ async function ladujRolki(cicho) {
 }
 
 function renderRolki() {
+  renderZpLista();
   const u = (state.stan && state.stan.ustawienia) || {};
   state.rolkiJakosc = podpisRolek();
   renderHamulecRolek();
@@ -1684,13 +1687,14 @@ function kartaRolki(p) {
   const nazwa = tytulRolki(p);
   const u = (state.stan && state.stan.ustawienia) || {};
   const dostPersony = u.dostawca || 'higgsfield';
-  const higgsfield = dostPersony === 'higgsfield';
+  const zPromptu = p.wariant === 'prompt';
+  const higgsfield = dostPersony === 'higgsfield' || zPromptu;   // rolki z promptu robi zawsze Higgsfield
   // szacunek „ok. N” z /api/stan.jakosc umiemy dla Higgsfield (kredyty) i WaveSpeed (dolary) – yapper ma inną skalę
   const szacuje = higgsfield || dostPersony === 'wavespeed';
   // kto liczył koszt rolki: zrobiona/nieudana – jej dostawca, czekająca – dostawca persony
-  const jednostkaKosztu = jednostkaDostawcy(status !== 'nowy' && p.dostawca ? p.dostawca : dostPersony);
+  const jednostkaKosztu = zPromptu ? 'kr' : jednostkaDostawcy(status !== 'nowy' && p.dostawca ? p.dostawca : dostPersony);
   const fakty = [];
-  fakty.push(p.wariant === 'tekst' ? 'z tekstu' : (p.wariant === 'B' ? 'strój ze zdjęcia' : 'strój z filmu'));
+  fakty.push(zPromptu ? `${ikona('pioro')}z promptu` : (p.wariant === 'tekst' ? 'z tekstu' : (p.wariant === 'B' ? 'strój ze zdjęcia' : 'strój z filmu')));
   const nieaktualny = status === 'nowy' && szacuje && kosztNieaktualny(p);
   if (p.koszt !== null && p.koszt !== undefined && !nieaktualny) fakty.push(esc(kwota(p.koszt, jednostkaKosztu)));
   else if (status === 'nowy' && szacuje) {
@@ -1799,6 +1803,7 @@ function kartaRolki(p) {
       <div class="rolka-gora"><h3 class="rolka-nazwa">${esc(nazwa)}</h3><span class="status ${kolorStatusu(status)}"><span class="kropka ${kolorStatusu(status)}"></span>${esc(slowoStatusu(status))}</span></div>
       ${meta.length ? `<div class="rolka-meta">${meta.join(' · ')}</div>` : ''}
       ${p.opis && p.opis !== nazwa && p.wariant === 'tekst' ? `<div class="rolka-meta">${esc(p.opis)}</div>` : ''}
+      ${zPromptu && p.z_promptu_opis ? `<div class="rolka-meta">${esc(p.z_promptu_opis)}</div>` : ''}
       <div class="rolka-fakty">${fakty.map(f => `<span class="fakt">${f}</span>`).join('')}</div>
       ${powod}
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
@@ -1850,7 +1855,7 @@ async function generujPomysl(id) {
   if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
   let koszt = p && p.koszt !== null && p.koszt !== undefined ? Number(p.koszt) : null;
   let zapas = null;
-  if (koszt === null || kosztNieaktualny(p) || (p && p.krok_startowy)) {
+  if (koszt === null || kosztNieaktualny(p) || (p && p.krok_startowy) || (p && p.wariant === 'prompt')) {
     // brak kosztu albo koszt sprzed zmiany zestawu „Jakość i koszt” – liczymy na nowo (tanie, ~12 s), żeby pytać o prawdziwą kwotę
     const z = await akcjaCzekaj({ typ: 'koszt', ids: [id] }, 'liczę koszt', true);
     if (!z) return;
@@ -1862,9 +1867,21 @@ async function generujPomysl(id) {
   const tresc = zapas
     ? `<p>Zapas po NSFW: rolka pójdzie na <b>${esc(nazwaZapasu)}</b>${koszt !== null ? ` za ok. <b>${esc(zapas === 'wavespeed' ? usd(koszt) : liczba(koszt) + ' kredytów yapper')}</b>` : ''} – to inne pieniądze niż kredyty Higgsfield. Pilnuje tego dzienny limit ${zapas === 'wavespeed' ? 'WaveSpeed' : 'yappera'}.</p><p class="dialog-uwaga">To wyda ${zapas === 'wavespeed' ? 'dolary z konta WaveSpeed' : 'kredyty yapper.so'}.</p>`
     : trescKosztu(koszt, 1, koszt === null ? 0 : 0);
-  const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc, ok: 'Zrób' });
+  const zPromptu = p && p.wariant === 'prompt';
+  const w = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc: zPromptu ? trescKosztuZPromptu(koszt) : tresc, ok: 'Zrób' });
   if (!w) return;
-  await akcja({ typ: 'generuj', ids: [id] }, 'robię rolkę');
+  // max_kr: backend liczy cenę jeszcze raz tuż przed wysłaniem i nie wyśle, gdy wyjdzie wyższa niż ta z pytania
+  await akcja(Object.assign({ typ: 'generuj', ids: [id] }, koszt !== null && (!zapas || zPromptu) ? { max_kr: koszt } : {}), 'robię rolkę');
+}
+
+// Pytanie „Robić?” dla rolki z promptu z kolejki – zawsze Higgsfield (kredyty), niezależnie od dostawcy persony.
+function trescKosztuZPromptu(koszt) {
+  const saldo = (state.saldo.higgsfield || {}).kredyty;
+  let html = koszt !== null && koszt !== undefined
+    ? `<p>Rolka z promptu (Higgsfield): około <b>${esc(kredytow(koszt))}</b>.` + (saldo !== null && saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(saldo - koszt))} kr</b>.` : '') + '</p>'
+    : '<p><b>Nie udało się policzyć kosztu.</b> Fabryka policzy go tuż przed zrobieniem i zatrzyma się, gdyby przekroczył bezpiecznik.</p>';
+  html += '<p class="dialog-uwaga">To wyda kredyty Higgsfield.</p>';
+  return html;
 }
 
 // Tani podgląd: Seedance draft (~21 kr) tym samym promptem – rolka dalej „czeka”, a Ty widzisz, czy prompt działa.
@@ -1950,6 +1967,206 @@ async function dodajPomyslTekstowy(f) {
   f.reset();
   await ladujRolki(false);
   odswiez();
+}
+
+// ---------- Z promptu (rolka bez filmiku: pomysł -> prompt -> cena -> rolka) ----------
+// Formularz pyta /api/z-promptu/wycena (prompt + DARMOWA cena z Higgsfield). Losowe szczegóły (miejsce, komentarz, kamera…) wracają
+// jako `ustalone` i lecą z powrotem przy „Sprawdź cenę” / „Zrób rolkę” – ten sam prompt, który user widział. Każda zmiana w
+// formularzu kasuje wycenę (przycisk „Zrób rolkę” jest aktywny tylko po świeżej wycenie, z której cena idzie do backendu).
+state.zp = { katalog: null, slug: null, pomyslId: null, ustalone: null, wycena: null, edytowany: false, liczy: false };
+
+async function ladujZPromptu() {
+  const slug = state.aktywna;
+  if (!state.zp.katalog || state.zp.slug !== slug) {
+    state.zp.katalog = await api('/api/z-promptu?slug=' + encodeURIComponent(slug || ''));
+    state.zp.slug = slug;
+    state.zp.pomyslId = null;
+    renderZpFormularz();
+    zpZmiana(true);
+  } else {
+    renderZpPersony();
+  }
+  await ladujRolki(false);
+}
+
+function opcjeHtml(lista, wybrana) {
+  return lista.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(wybrana) ? ' selected' : ''}>${esc(t)}</option>`).join('');
+}
+
+function renderZpPersony() {
+  $('#zp-persona').innerHTML = state.modelki.map(m => `<option value="${esc(m.slug)}"${m.slug === state.aktywna ? ' selected' : ''}>${esc(m.nazwa || m.slug)}</option>`).join('');
+}
+
+function renderZpModel() {
+  const k = state.zp.katalog;
+  const m = (k.modele || []).find(x => x.id === $('#zp-model').value) || (k.modele || [])[0];
+  if (!m) return;
+  const dl = $('#zp-dlugosc').value || String((k.domyslne || {}).dlugosc || k.dlugosc_domyslna);
+  $('#zp-dlugosc').innerHTML = opcjeHtml(m.dlugosci.map(s => [s, `${s} s`]), m.dlugosci.map(String).includes(String(dl)) ? dl : m.dlugosci[m.dlugosci.length > 1 ? 1 : 0]);
+  const r = $('#zp-rozdz').value || 'auto';
+  $('#zp-rozdz').innerHTML = opcjeHtml([['auto', `Automatycznie (≤${k.prog_1080p_s} s → 1080p, dłuższe → 720p)`]].concat(m.rozdzielczosci.map(x => [x, x])), m.rozdzielczosci.includes(r) ? r : 'auto');
+  $('#zp-model-info').textContent = m.opis || '';
+}
+
+function renderZpFormularz() {
+  const k = state.zp.katalog;
+  const dom = k.domyslne || {};
+  const per = k.persona || {};
+  renderZpPersony();
+  $('#zp-pomysl').value = ''; $('#zp-stroj-tekst').value = ''; $('#zp-komentarz-tekst').value = '';   // nowa persona = czysty formularz
+  $('#zp-prompt').value = '';
+  $('#zp-model').innerHTML = opcjeHtml((k.modele || []).map(m => [m.id, m.nazwa]), dom.model || k.model_domyslny);
+  $('#zp-dlugosc').innerHTML = ''; $('#zp-rozdz').innerHTML = '';
+  renderZpModel();
+  $('#zp-gotowe').innerHTML = '<option value="">…albo wybierz gotowy pomysł</option>' + (k.pomysly || []).map(p => `<option value="${esc(p.id)}">${esc(p.pl)}</option>`).join('');
+  const grupy = (k.kategorie || []).map(kat => `<optgroup label="${esc(kat)}">${(k.miejsca || []).filter(m => m.kat === kat).map(m => `<option value="${esc(m.id)}">${esc(m.nazwa)}</option>`).join('')}</optgroup>`).join('');
+  $('#zp-miejsce').innerHTML = `<option value="">Dobierz do pomysłu</option><option value="losowe">Losowe miejsce</option>${grupy}`;
+  const stroje = (k.stroje || []).filter(([v]) => v !== 'wlasny');
+  const pliki = (per.stroje || []).map(n => [`plik:${n}`, `Ze zdjęcia: ${n}`]);
+  $('#zp-stroj').innerHTML = opcjeHtml(stroje.concat(pliki, [['wlasny', 'Własny opis']]), dom.stroj || 'zdjecia');
+  $('#zp-reakcja').innerHTML = opcjeHtml(k.reakcje || [], dom.reakcja || 'losowa');
+  $('#zp-komentarz').innerHTML = opcjeHtml([['losowy', 'Losowy (krótki, po polsku)'], ['bez', 'Bez komentarza']].concat((k.komentarze || []).map(t => [t, `„${t}”`]), [['wlasny', 'Własny…']]), dom.komentarz || 'losowy');
+  $('#zp-wlosy-kolor').innerHTML = opcjeHtml(k.wlosy.kolory, 'wlasne');
+  $('#zp-wlosy-fryzura').innerHTML = opcjeHtml(k.wlosy.fryzury, 'wlasna');
+  $('#zp-wlosy-grzywka').innerHTML = opcjeHtml(k.wlosy.grzywki, 'wlasna');
+  const sezonTeraz = (k.sezony || []).find(([v]) => v === k.sezon_teraz);
+  $('#zp-sezon').innerHTML = opcjeHtml([['auto', `Jak teraz (${sezonTeraz ? sezonTeraz[1].toLowerCase() : 'wg daty'})`]].concat(k.sezony || []), 'auto');
+  $('#zp-pora').innerHTML = opcjeHtml([['auto', 'Dobierz do miejsca']].concat(k.pory || []), 'auto');
+  $('#zp-kamera').innerHTML = opcjeHtml([['auto', 'Dobierz do miejsca']].concat(k.kamery || []), 'auto');
+  let info = 'Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.';
+  if (!per.wzrost_cm) info += ` Wpisz wzrost (Ustawienia → Persona) – rolka będzie lepiej wyskalowana obok ludzi.`;
+  $('#zp-wlosy-info').textContent = info;
+  $('#zp-stroj-tekst').hidden = $('#zp-stroj').value !== 'wlasny';
+  $('#zp-komentarz-tekst').hidden = $('#zp-komentarz').value !== 'wlasny';
+  wstawIkony($('#strona-z-promptu'));
+}
+
+function zbierzZp() {
+  const o = {
+    slug: state.aktywna, tekst: $('#zp-pomysl').value.trim(), pomysl_id: state.zp.pomyslId || '',
+    miejsce: $('#zp-miejsce').value, model: $('#zp-model').value, dlugosc: Number($('#zp-dlugosc').value),
+    rozdzielczosc: $('#zp-rozdz').value || 'auto', stroj: $('#zp-stroj').value, stroj_tekst: $('#zp-stroj-tekst').value.trim(),
+    reakcja: $('#zp-reakcja').value, komentarz: $('#zp-komentarz').value, komentarz_tekst: $('#zp-komentarz-tekst').value.trim(),
+    wlosy: { kolor: $('#zp-wlosy-kolor').value, fryzura: $('#zp-wlosy-fryzura').value, grzywka: $('#zp-wlosy-grzywka').value },
+    sezon: $('#zp-sezon').value, pora: $('#zp-pora').value, kamera: $('#zp-kamera').value,
+  };
+  if (state.zp.ustalone) o.ustalone = state.zp.ustalone;
+  return o;
+}
+
+// Coś zmieniono w formularzu -> stara wycena i ustalone losowe szczegóły są nieaktualne.
+function zpZmiana(cicho = false) {
+  state.zp.ustalone = null; state.zp.wycena = null; state.zp.edytowany = false;
+  $('#zp-prompt-wrap').hidden = true;
+  $('#zp-uwagi').hidden = true;
+  if (cicho) $('#zp-cena').textContent = 'Kliknij „Sprawdź cenę” – to nic nie kosztuje.';
+  else $('#zp-cena').innerHTML = 'Zmieniłeś coś – kliknij <b>Sprawdź cenę</b> (nic nie kosztuje).';
+  $('#zp-cena').className = 'zp-cena';
+  renderZpPrzyciski();
+}
+
+function renderZpPrzyciski() {
+  const w = state.zp.wycena;
+  const btn = $('#zp-btn-zrob');
+  btn.disabled = !(w && w.mozna && w.kr) || state.zp.liczy;
+  btn.textContent = w && w.kr ? `Zrób rolkę (${liczba(w.kr)} kr)` : 'Zrób rolkę';
+  $('#zp-btn-cena').disabled = state.zp.liczy;
+  $('#zp-btn-pokaz').disabled = state.zp.liczy;
+}
+
+function renderZpWynik(w, zCena) {
+  if (w.ustalone) state.zp.ustalone = w.ustalone;
+  $('#zp-prompt').value = w.prompt || '';
+  $('#zp-prompt').readOnly = !state.pelny;
+  $('#zp-znaki').textContent = liczba(w.znaki || 0);
+  $('#zp-prompt-wrap').hidden = false;
+  const uwagi = (w.ostrzezenia || []).concat(zCena ? (w.powody || []).map(p => `Nie da się teraz: ${p}`) : []);
+  $('#zp-uwagi').innerHTML = uwagi.map(u => `<li>${esc(u)}</li>`).join('');
+  $('#zp-uwagi').hidden = !uwagi.length;
+  const opis = `${esc(w.miejsce_nazwa || '')} · ${esc(String(w.dlugosc))} s · ${esc(w.rozdzielczosc || '')} · ${esc(String((w.obrazy || []).length))} zdjęć persony`;
+  if (!zCena) {
+    $('#zp-cena').innerHTML = `${opis}<br><span class="muted">Ceny jeszcze nie sprawdziłem – kliknij „Sprawdź cenę”.</span>`;
+    $('#zp-cena').className = 'zp-cena';
+    return;
+  }
+  state.zp.wycena = w;
+  const d = w.dzis || {};
+  const saldo = w.saldo !== null && w.saldo !== undefined ? ` Saldo: <b>${esc(liczba(w.saldo))} kr</b>.` : '';
+  const limit = d.limit ? ` Dziś wydane: ${esc(liczba(d.wydano || 0))} / ${esc(liczba(d.limit))} kr.` : '';
+  $('#zp-cena').innerHTML = w.kr
+    ? `Koszt: <b>${esc(liczba(w.kr))} kr</b> (sprawdzone w Higgsfield, nic nie zeszło).${limit}${saldo}<br><span class="muted">${opis}</span>`
+    : `Nie udało się sprawdzić ceny.<br><span class="muted">${opis}</span>`;
+  $('#zp-cena').className = 'zp-cena ' + (w.mozna ? 'ok' : 'zle');
+}
+
+async function zpPytaj(zCena) {
+  if (state.zp.liczy) return;
+  const o = zbierzZp();
+  if (!o.tekst && !o.pomysl_id && !o.miejsce) { toast('Wpisz pomysł, kliknij „Losuj pomysł” albo wybierz miejsce.', 'uwaga'); return; }
+  state.zp.liczy = true; renderZpPrzyciski();
+  if (zCena) { $('#zp-cena').innerHTML = '<span class="kropka kredyty pulsuje"></span> Liczę cenę w Higgsfield… (ok. 15 s, nic nie kosztuje)'; $('#zp-cena').className = 'zp-cena'; }
+  try {
+    const w = await api('/api/z-promptu/wycena', 'POST', Object.assign(o, { bez_ceny: !zCena }));
+    renderZpWynik(w, zCena);
+    if (!zCena) $('#zp-prompt-wrap').open = true;
+  } catch (e) {
+    $('#zp-cena').textContent = prostyBlad(e);
+    $('#zp-cena').className = 'zp-cena zle';
+    bladToast(e);
+  } finally {
+    state.zp.liczy = false; renderZpPrzyciski();
+  }
+}
+
+async function zpLosuj() {
+  const d = await api('/api/z-promptu/losuj', 'POST', { slug: state.aktywna, bez: state.zp.pomyslId || '', sezon: $('#zp-sezon').value });
+  const p = d.pomysl || {};
+  $('#zp-pomysl').value = p.pl || '';
+  $('#zp-gotowe').value = p.id || '';
+  $('#zp-miejsce').value = '';
+  zpZmiana();
+  state.zp.pomyslId = p.id || null;
+}
+
+async function zpZrob() {
+  const w = state.zp.wycena;
+  if (!w || !w.kr || !w.mozna) { toast('Najpierw kliknij „Sprawdź cenę”.', 'uwaga'); return; }
+  if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
+  const d = w.dzis || {};
+  const tresc = `<p>Rolka z promptu: <b>${esc(w.tytul || w.miejsce_nazwa || '')}</b></p>`
+    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b> (Higgsfield, ${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}).`
+    + (w.saldo !== null && w.saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(w.saldo - w.kr))} kr</b>.` : '') + '</p>'
+    + (d.limit ? `<p>Dziś wydano ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))} dozwolonych.</p>` : '')
+    + '<p class="dialog-uwaga">To wyda kredyty. Jeśli tuż przed wysłaniem cena wyjdzie wyższa – nic nie wyślę.</p>';
+  const ok = await potwierdz({ tytul: 'Zrobić tę rolkę?', tresc, ok: `Zrób (${liczba(w.kr)} kr)` });
+  if (!ok) return;
+  const o = zbierzZp();
+  o.ustalone = state.zp.ustalone;
+  o.kr = w.kr;
+  if (state.pelny && state.zp.edytowany) o.prompt = $('#zp-prompt').value;
+  try {
+    const r = await api('/api/z-promptu', 'POST', o);
+    state.konsola.start = null; state.konsola.trwalo = true;
+    state.zadanie = Object.assign({ trwa: true, typ: 'generuj' }, r.zadanie || {});
+    toast(`Robię rolkę #${r.id} – zobaczysz ją niżej i w Rolkach. Gotowa trafi do folderu „tu rolki zrobione”.`, 'info');
+    if (state.pelny) otworzKonsole(true);
+    startKonsoli(); renderKonsolaStan();
+    state.zp.wycena = null; renderZpPrzyciski();
+    $('#zp-cena').innerHTML = `Wysłane do zrobienia (rolka #${esc(String(r.id))}). Kolejna? Zmień coś i sprawdź cenę.`;
+    $('#zp-cena').className = 'zp-cena';
+    await ladujRolki(false);
+  } catch (e) {
+    bladToast(e);
+    await ladujRolki(false).catch(() => {});
+  }
+}
+
+function renderZpLista() {
+  const kont = $('#zp-lista');
+  if (!kont) return;
+  const lista = state.pomysly.filter(p => p.wariant === 'prompt').sort((a, b) => b.id - a.id).slice(0, 12);
+  kont.innerHTML = lista.length ? lista.map(kartaRolki).join('')
+    : '<div class="pusto cicho"><b>Jeszcze nie ma rolek z promptu</b><span>Wpisz pomysł albo kliknij „Losuj pomysł”, sprawdź cenę i zrób pierwszą.</span></div>';
 }
 
 // ---------- Zdjęcia ----------
@@ -2364,7 +2581,7 @@ async function ladujUstawienia() {
   const prof = state.profile[state.aktywna] || d.profil || {};
   wypelnijFormularz($('#form-profil'), {
     nazwa: prof.nazwa || nazwaPersony(state.aktywna) || '', instagram: prof.instagram || '', opis_stylu: prof.opis_stylu || '',
-    hashtagi: prof.hashtagi || '',
+    hashtagi: prof.hashtagi || '', wzrost_cm: prof.wzrost_cm || '', wlosy: prof.wlosy || '',
     cechy: Array.isArray(prof.cechy) ? prof.cechy.join(', ') : (prof.cechy || ''),
     telegram_czat: u.telegram_czat || '',   // ustawienie persony (nie profil) – zapis w zapiszProfil idzie do /api/ustawienia
   });
@@ -2568,7 +2785,7 @@ async function zapiszProfil(f) {
   const dane = zbierzFormularz(f);
   const znany = !!state.profile[state.aktywna];   // profil znamy tylko po zapisie w tej sesji (API nie ma GET profilu)
   const payload = { nazwa: dane.nazwa || '' };
-  for (const k of ['instagram', 'opis_stylu', 'cechy', 'hashtagi']) {
+  for (const k of ['instagram', 'opis_stylu', 'cechy', 'hashtagi', 'wzrost_cm', 'wlosy']) {
     const v = String(dane[k] === undefined || dane[k] === null ? '' : dane[k]).trim();
     if (v || znany) payload[k] = v;   // puste pole kasuje wartość tylko wtedy, gdy ją widzieliśmy – inaczej zostawiamy to, co zapisane
   }
@@ -3103,6 +3320,12 @@ document.addEventListener('click', async e => {
       case 'usun-pomysl': await usunPomysl(id); break;
       case 'przerwij-pomysl': await przerwijPomysl(id); break;
       case 'zapisz-prompt': await zapiszPrompt(id); break;
+      // z promptu
+      case 'zp-losuj': await zpLosuj(); break;
+      case 'zp-pokaz': if (state.zp.ustalone && !$('#zp-prompt-wrap').hidden) { const d = $('#zp-prompt-wrap'); d.open = !d.open; } else await zpPytaj(false); break;
+      case 'zp-losuj-szczegoly': zpZmiana(); await zpPytaj(false); break;
+      case 'zp-cena': await zpPytaj(true); break;
+      case 'zp-zrob': await zpZrob(); break;
       // zdjęcia, lipsync
       case 'fokus-zdjecia': { const inp = $('#zd-prompt'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } break; }
       case 'usun-zdjecie': await usunZdjecie(id); break;
@@ -3159,6 +3382,18 @@ document.addEventListener('change', e => {
   else if (el.id === 'ls-audio') { $('#ls-audio-sciezka-wrap').hidden = el.value !== '__inny'; if (el.value === '__inny') $('#ls-audio-sciezka').focus(); }
   else if (el.id === 'ls-dlg-audio') $('#ls-dlg-sciezka').hidden = !!el.value;
   else if (el.id === 'zd-stroj') renderStrojMini();
+  else if (el.id === 'zp-persona') zmienPersone(el.value).catch(err => { bladToast(err); renderZpPersony(); });
+  else if (el.id === 'zp-gotowe') {
+    const g = ((state.zp.katalog || {}).pomysly || []).find(x => x.id === el.value);
+    if (g) { $('#zp-pomysl').value = g.pl; $('#zp-miejsce').value = ''; }
+    zpZmiana(); state.zp.pomyslId = g ? g.id : null;
+  }
+  else if (el.closest && el.closest('#form-zp') && el.id !== 'zp-prompt') {
+    if (el.id === 'zp-model') renderZpModel();
+    if (el.id === 'zp-stroj') $('#zp-stroj-tekst').hidden = el.value !== 'wlasny';
+    if (el.id === 'zp-komentarz') $('#zp-komentarz-tekst').hidden = el.value !== 'wlasny';
+    zpZmiana();
+  }
   else if (el.id === 'p-telegram') renderStanKontaTelegram(el.value);
   else if (el.id === 'dz-typ') ladujHistoria().catch(bladToast);
   else if (el.id === 'dz-modelka') renderHistoria();
@@ -3168,6 +3403,11 @@ document.addEventListener('change', e => {
 document.addEventListener('input', e => {
   const el = e.target;
   if (el instanceof Element && (el.id === 'u-prompt-a' || el.id === 'u-prompt-b')) renderPromptyInfo();
+  if (el instanceof Element && el.id === 'zp-prompt') state.zp.edytowany = true;
+  else if (el instanceof Element && ['zp-pomysl', 'zp-stroj-tekst', 'zp-komentarz-tekst'].includes(el.id)) {
+    const id = state.zp.pomyslId;
+    zpZmiana(); state.zp.pomyslId = el.id === 'zp-pomysl' && !el.value.trim() ? null : id;
+  }
 });
 
 // strefy upload: klik / klawiatura / drag & drop

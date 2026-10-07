@@ -105,6 +105,42 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   sprawdza naraz filmik, referencje, stroj i prompt - user mial odrzucenia "mimo niewinnego filmiku" najpewniej przez zdjecia strojow
   (siatka/koronka/przeswity) i slowa typu mesh/sheer/lingerie w promptach.
 
+## Rolka z promptu (panel 2.9, 2026-10-07)
+
+- Zakladka **"Z promptu"** (osobno od rolek z filmikow): pomysl po polsku (wlasny, "Losuj pomysl" albo lista gotowych) ->
+  `scenariusz.zbuduj()` -> dlugi angielski prompt + zdjecia persony -> DARMOWA wycena (`generate cost`) -> "Zrob rolke (N kr)" ->
+  ten sam tor co kazda rolka (`fabryka._rolka`: znacznik w_toku, create bez --wait, job_id od razu, wznawianie) -> Media Tool ->
+  `wyniki_dir` (`NNN_prompt_<miejsce>.mp4`). Zawsze **Higgsfield CLI** (`fabryka.DOSTAWCA_Z_PROMPTU`), niezaleznie od dostawcy persony.
+- `scenariusz.py` (czyste funkcje): `MODELE` (seedance_2_5 `omni_reference` + `bitrate_mode high` + `generate_audio true`, tokeny
+  `<<<image_N>>>`; wan3_0_prime i gemini_omni_flash_1_1 `reference-to-video` (max 10 s, max 7 zdjec) - krotki szablon bez numerow),
+  `MIEJSCA` (41 prawdziwych polskich miejsc w 5 kategoriach: bloki/klatka/sklepik jak Zabka, dyskont, drogeria, galeria, bazar, poczta,
+  tramwaj, metro, dworzec, peron, Rynek w Krakowie, Plac Nowy, Plac Zamkowy, Krupowki, molo w Sopocie, plaza z parawanami...; sklepy
+  OPISANE wygladem, bez nazw marek - filtr IP), `POMYSLY` (34 gotowe), `WLOSY_KOLORY/FRYZURY/GRZYWKI` (domyslnie wlasne ze zdjec;
+  zestaw "miku" = turkusowe dlugie kucyki + grzywka; zmiana wlosow ma dopisek, ze twarz zostaje), `STROJE_*` (jak na zdjeciach
+  domyslnie, codzienne w stylu person wg pory roku, cosplay tylko na zyczenie, plik ze `stroje/` = ostatni obraz), `REAKCJE`,
+  `KOMENTARZE` (raz, w `{}` po "Dialogue language: Polish."), `KAMERY`, `SEZONY` (auto wg daty), blok "Phone look" (iPhone 1x,
+  drgania, auto ekspozycja, przepalone okna, szum, bez rozmycia tla i gradingu). Wolny tekst: rdzenie slow bez ogonkow ->
+  miejsce/czynnosci/reakcja (`pomysl_z_tekstu`), zdanie usera trafia do promptu doslownie.
+- Persona: tozsamosc = sekcja `# 2. ... IDENTITY` promptu A bez cech o wlosach (albo `prompty/tozsamosc.txt`, gdy user go
+  napisze), wlosy = `profil.wlosy` (Noemi: platyna - prompt A mowi o zlotych) albo cechy o wlosach, wzrost = `profil.wzrost_cm`
+  (Alicja 170-172, Bianka 168-170, Lilianna 160-162, Noemi 158-160 - decyzja usera) -> zdanie o skali wzgledem ludzi.
+- Losowe szczegoly wracaja jako `ustalone` (ziarno, miejsce, komentarz, stroj, pora, kamera) - panel odsyla je przy wycenie i
+  "Zrob rolke", wiec user placi za prompt, ktory widzial. Pomysl ma `typ: "prompt"`, ZAMROZONY `prompt_higgsfield` i `z_promptu`
+  {model, mode, dlugosc, rozdzielczosc, parametry, generate_audio, obrazy (sciezki), miejsce, ..., wycena, ustalone, opcje}.
+- Pieniadze: wycena przed (panel nie pozwoli "Zrob" bez swiezej wyceny; `POST /api/z-promptu` wymaga `kr`), przed wyslaniem
+  fabryka liczy cene JESZCZE RAZ i nie wysyla, gdy wyszlaby wyzsza (`potwierdz`), bezpieczniki Higgsfielda jak zawsze (min 200,
+  max/rolka 150 -> 15 s 1080p = 180 kr odpada, limit dnia z rezerwa w toku), blokada generacji persony. Po `wysylam` nigdy drugi
+  create: zgubione id -> `znajdz` po tresci promptu i czasie z pominieciem WSZYSTKICH jobow znanych fabryce
+  (`fabryka._pomin_przy_szukaniu`). Bez zapasu po NSFW (prompt Seedance nie pasuje do Wan). Rolki z promptu NIE wchodza do
+  zbiorczego "Zrob rolki"/`generuj` bez `--id`/autopilota (`kandydaci`, `stan.do_generacji`; czekajace: `stan.z_promptu_czeka`) -
+  tylko po id (zakladka albo karta w Rolkach). Akcja `generuj` przyjmuje `max_kr` (panel wysyla cene z pytania "Robic?").
+- CLI: `python fabryka.py --modelka noemi z-promptu ["pomysl"] [--gotowy galeria_fastfood] [--dlugosc 10] [--model ...]
+  [--wlosy miku] [--stroj codzienny] --sucho` (prompt + wycena, 0 kr); bez `--sucho` pyta i generuje.
+- Ceny `generate cost` (2026-10-07): Seedance 2.5 omni 8 s 720p 56 / 1080p 96, 10 s 720p 70 / 1080p 120, 15 s 720p 105 kr;
+  Wan 3.0 Prime 10 s 720p 30 kr; Gemini Omni Flash 1.1 10 s 720p 30 / 1080p 45 kr. Liczba zdjec nie zmienia ceny.
+- Testy: tests/test_scenariusz.py (prompt, wlosy, wzrost, katalog bez slow ryzykownych/marek, limity), tests/test_z_promptu.py
+  (wycena nic nie tworzy, bezpieczniki, pelna sciezka, wznowienie po promptcie, cena wyzsza = nic, NSFW bez zapasu, endpointy).
+
 ## Postprodukcja
 
 - Wideo: `mediatool.py` odpala worker Media Tool headless (`ELECTRON_RUN_AS_NODE=1 "Media Tool.exe" worker.cjs <json>`,
@@ -127,6 +163,8 @@ fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, gener
                     ostrzezenia o @Image vs liczba zdjec (nie blokuje). diagnoza() = ffmpeg/Higgsfield/Media Tool/Telegram/persony.
                     skanuj: zrodlo > 30 s -> klatki.potnij na kawalki (dziel_dlugie), _klatki_wyniku po generacji.
                     generuj(): wznow_w_toku -> kandydaci -> _rolka (krok 0 + zapas_nsfw) -> _wyslij / _czekaj / _rozlicz / _sukces.
+scenariusz.py       rolka z promptu: katalog polskich miejsc, gotowe pomysly, wlosy/stroje/reakcje/komentarze/kamery, zbuduj() ->
+                    prompt + zdjecia, sprawdz(), katalog() dla panelu (zero wysylania). Fabryka: wycena_z_promptu/dodaj_z_promptu.
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
                     -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
                     glowny; `czat_persony`) -> raport dnia po 20:00. BEZ lipsyncu.
@@ -162,6 +200,7 @@ app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle n
 templates/, static/ index.html + style.css + app.js (SPA, vanilla JS, bez CDN), widget.html (/widget - male okno)
 panel.py            (stary panel w konsoli - do skasowania, decyzja usera 2026-10-04)
 modelki/<slug>/
+  profil.json       nazwa, instagram, cechy, hashtagi, wzrost_cm ("158-160"), wlosy (EN, wlosy ze zdjec - rolki z promptu)
   ustawienia.json   patrz baza.USTAWIENIA_DOMYSLNE (komentarze = dokumentacja): dostawca (higgsfield|yapper|wavespeed), model/mode/aspect/resolution/duration,
                     mode_bez_zrodla, yapper{model,resolution,duration,prompt,min_kredyty,max_kredyty_na_rolke},
                     wavespeed{model,generate_audio,parametry,min_kredyty,max_kredyty_na_rolke - centy USD}, prompty A/B,

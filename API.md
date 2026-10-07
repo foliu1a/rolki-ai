@@ -38,7 +38,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
  "dzis": {"rolki": 3, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 135, "yapper": 0, "sync": 0}, "rolki_persony": 2},
  "foldery": {"wrzutnia": "C:\\Users\\yux\\Desktop\\ROLKI AI\\tu wrzucasz rolki\\Noemi", "gotowe": "...\\tu rolki zrobione\\Noemi", "zdjecia": "...\\tu zdjecia zrobione\\Noemi"},
  "pulpit": "C:\\Users\\yux\\Desktop\\ROLKI AI",
- "wersja": "2.1"}
+ "wersja": "2.9"}
 ```
 - Foldery na pulpicie (2.1): panel przy starcie (i `POST /api/modelki`) tworzy `Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>`,
   `...\tu rolki zrobione\<Persona>`, `...\tu zdjecia zrobione\<Persona>` i wpisuje je w `zrodla_dir` / `wyniki_dir` / `zdjecia_dir`
@@ -109,10 +109,40 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   (błąd po wysłaniu – job mógł powstać; liczy się jak zrobione, koszt zarezerwowany).
 - Profil persony ma pole `hashtagi` (tekst doklejany do każdego podpisu) – zapis przez `POST /api/profil`.
 
+## Rolka z promptu (2.9, zakładka „Z promptu”, scenariusz.py)
+Rolka bez filmiku: pomysł po polsku → prompt Seedance 2.5 (`omni_reference`, `<<<image_N>>>`) + zdjęcia persony → zawsze Higgsfield.
+Opcje (wszystkie opcjonalne, te same w każdym endpointcie): `slug` (persona, domyślnie aktywna; nieznana = 404), `pomysl_id`
+(gotowy pomysł), `tekst` (pomysł PL), `miejsce` (`""` = dobierz, `"losowe"`, id z katalogu), `model` (`seedance_2_5` |
+`wan3_0_prime` | `gemini_omni_flash_1_1`), `dlugosc` (8/10/15; Gemini max 10), `rozdzielczosc` (`"auto"` = ≤ 8 s → 1080p, dłuższe →
+720p, albo `480p|720p|1080p`), `wlosy` `{"kolor", "fryzura", "grzywka"}` (domyślnie `wlasne`/`wlasna`), `stroj` (`zdjecia` |
+`codzienny` | `cosplay` | `wlasny` + `stroj_tekst` | `plik:<nazwa ze stroje/>`), `reakcja`, `komentarz` (`losowy` | `bez` |
+`wlasny` + `komentarz_tekst` | tekst z listy), `sezon` / `pora` / `kamera` (`auto` albo klucz), `ustalone` (z poprzedniej
+odpowiedzi – te same losowe szczegóły = ten sam prompt).
+- `GET /api/z-promptu?slug=` → katalog: `modele [{id, nazwa, opis, dlugosci, rozdzielczosci, max_obrazow}]`, `pomysly [{id, pl,
+  miejsce}]`, `miejsca [{id, nazwa, kat}]`, `kategorie`, `wlosy {kolory, fryzury, grzywki}` (pary `[id, etykieta]`), `stroje`,
+  `reakcje`, `komentarze`, `kamery`, `sezony`, `sezon_teraz`, `pory`, `persona {slug, imie, wzrost_cm, wlosy, zdjec, stroje}`,
+  `domyslne` (ustawienie persony `z_promptu`).
+- `POST /api/z-promptu/losuj {slug?, bez?, sezon?}` → `{"pomysl": {id, pl, miejsce}}` (bez powtórek z 14 dni, plaża tylko latem).
+- `POST /api/z-promptu/wycena {...opcje, bez_ceny?}` → `{slug, prompt, znaki, limit, obrazy: ["01_x.png"], model, dlugosc,
+  rozdzielczosc, tytul, miejsce, miejsce_nazwa, pomysl_id, ustalone, ostrzezenia, kr, saldo, dzis {wydano, limit}, min_kredyty,
+  max_kredyty_na_rolke, mozna, powody, dostawca: "higgsfield"}` – **darmowe** (`generate cost`), nic nie tworzy; `bez_ceny` = sam
+  prompt (od razu, `kr: null`). Złe opcje (np. Gemini 15 s, zły plik stroju, persona bez zdjęć) = 400.
+- `POST /api/z-promptu {...opcje, ustalone, kr, prompt?}` → `{"id": 7, "zadanie": {...}}`: pomysł `typ: "prompt"` z zamrożonym
+  promptem + zadanie `generuj` tylko dla niego. `kr` (cena z wyceny) wymagane (400 bez niego); fabryka liczy cenę jeszcze raz tuż
+  przed wysłaniem i pomija rolkę, gdy wyszłaby wyższa. `prompt` = ręczna poprawka (tryb pełny; sprawdzane numery zdjęć i limit).
+  409, gdy coś już trwa (nic nie tworzy).
+- Pomysł z promptu w `/api/pomysly`: `typ: "prompt"`, `wariant: "prompt"`, `z_promptu {model, mode, dlugosc, rozdzielczosc,
+  obrazy, miejsce, miejsce_nazwa, wlosy_zmienione, wycena, ustalone, opcje, ...}`, `z_promptu_opis` („Galeria handlowa – … ·
+  Seedance 2.5 · 10 s · 720p”). Nie wchodzi do zbiorczego „Zrób rolki” (`stan.do_generacji`); czekające: `stan.z_promptu_czeka`.
+  „Zrób tę rolkę” w Rolkach działa (`koszt` + `generuj` po id). Bez zapasu po NSFW (`ponow` → `od_zapasu: false`).
+- Akcja `{"typ": "generuj", "ids": [...], "max_kr": 70}` – `max_kr` (opcjonalnie): rolka nie pójdzie, gdy świeża cena głównego
+  dostawcy wyjdzie wyższa (panel wysyła cenę z pytania „Robić?”).
+- Profil persony: `POST /api/profil {"wzrost_cm": "158-160", "wlosy": "long straight platinum blonde hair"}` (zły wzrost = 400).
+
 ## Modelki (persony)
 - `POST /api/modelki` `{"nazwa": "Noemi", "instagram": "@uroczanoemi"}` → `{"slug": "noemi"}` (ustawia jako aktywną)
 - `POST /api/modelki/aktywna` `{"slug": "noemi"}`
-- `POST /api/profil` `{"instagram": "", "opis_stylu": "", "nazwa": "", "cechy": "a, b"}` → `{"profil": {...}}`
+- `POST /api/profil` `{"instagram": "", "opis_stylu": "", "nazwa": "", "cechy": "a, b", "wzrost_cm": "158-160", "wlosy": ""}` → `{"profil": {...}}`
 
 ## Kolejka pomysłów (rolki)
 - `GET /api/pomysly` → `{"pomysly": [...], "statusy": ["nowy","w_toku","wygenerowany","postprodukcja","gotowe","blad"]}`
