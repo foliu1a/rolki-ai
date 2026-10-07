@@ -38,7 +38,8 @@ import scenariusz
 # nich proporcje / jakosc / rozdzielczosc - opcja, ktorej model nie ma, znika. Panel przy starcie odswieza je z CLI (darmowe
 # `model get`, odswiez_schematy); bez CLI zostaje ta kopia. Ceny `generate cost` 2026-10-07 (liczba zdjec nie zmienia ceny):
 #   seedream_v5_pro 1k/1.5k 1.25, 2k 2.5 | nano_banana_pro 1k 2, 2k 2, 4k 4 | gpt_image_2_5 high 1k 1.5, 2k 2.75, 4k 4.25
-#   (low 2k 0.5, medium 2k 1, xhigh 2k 4.5, max 2k 9) | dla porownania nano_banana_flash 2k 2 (tyle co Pro), gpt_image_2 high 2k 6.5.
+#   (low 2k 0.5, medium 2k 1, xhigh 2k 4.5, max 2k 9) | gpt_image_2 (od 2026-10-08) medium 1k/2k/4k 1/2/2.5, high 3.5/6.5/11
+#   | dla porownania nano_banana_flash 2k 2 (tyle co Pro).
 MODELE = {
     "seedream_v5_pro": {
         "nazwa": "Seedream 5.0 Pro",
@@ -63,6 +64,16 @@ MODELE = {
             {"name": "aspect_ratio", "enum": ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9", "27:16", "16:27",
                                               "9:8", "8:9", "4:5", "5:4"]},
             {"name": "quality", "enum": ["low", "medium", "high", "xhigh", "max"]},
+            {"name": "resolution", "enum": ["1k", "2k", "4k"]}],
+            "rules": []},
+    },
+    # na prosbe usera 2026-10-08 (tego uzywa w apce Higgsfield); drozszy od 2.5 (high 2k 6.5 kr), schemat z `model get` 2026-10-08
+    "gpt_image_2": {
+        "nazwa": "GPT Image 2",
+        "opis": "ten z apki Higgsfield",
+        "schemat": {"params": [
+            {"name": "aspect_ratio", "enum": ["auto", "1:1", "4:3", "3:4", "16:9", "21:9", "9:16", "3:2", "2:3", "4:5", "5:4"]},
+            {"name": "quality", "enum": ["low", "medium", "high"]},
             {"name": "resolution", "enum": ["1k", "2k", "4k"]}],
             "rules": []},
     },

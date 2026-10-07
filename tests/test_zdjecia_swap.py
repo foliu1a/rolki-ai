@@ -561,3 +561,12 @@ def test_panel_wznawia_zdjecia_przy_starcie(klient, persona, cli):
     _czekaj()
     z = baza.zdjecie(persona, zid)
     assert z["status"] == "gotowe" and os.path.basename(z["plik"]) == f"{zid:03d}_swap_foto.png" and cli.generacje == []
+
+
+def test_gpt_image_2_do_wyboru_z_jakoscia_obok_reszty():
+    """User 2026-10-08: dodaj GPT Image 2 (tego uzywa w apce Higgsfield) - jakosc low/medium/high, do 4K; domyslny bez zmian."""
+    ch = zs.chipy(zs.MODELE["gpt_image_2"]["schemat"])
+    assert ch["jakosc"] == ["low", "medium", "high"] and ch["rozdzielczosc"] == ["1k", "2k", "4k"]
+    assert ch["domyslne"] == {"jakosc": "high", "rozdzielczosc": "2k"}
+    assert set(zs.MODELE) >= {"seedream_v5_pro", "nano_banana_pro", "gpt_image_2_5", "gpt_image_2"}
+    assert zs.MODEL_DOMYSLNY == "seedream_v5_pro"
