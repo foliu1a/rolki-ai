@@ -358,7 +358,7 @@ MIEJSCA = {
         "swiatlo": "warm light from the wooden counter mixed with cool daylight from the skylights; the far glass facade is blown "
                    "out to white",
         "dzwieki": "echoing mall hall, footsteps on tiles, beeps of the ordering screens, a muffled announcement in Polish",
-        "akcje": ["she stands at an ordering screen with her handbag on her forearm and taps through the menu",
+        "akcje": ["she stands at an ordering screen with a small plain black bag on her forearm and taps through the menu",
                   "she waits for the receipt, takes it and glances at the order number",
                   "she steps back from the screen and looks around for the pickup counter"],
         "streszczenie": "{IMIE} orders food at a self-service screen of a fast-food counter while shoppers walk past and stare.",
@@ -521,7 +521,7 @@ MIEJSCA = {
         "detale": "suitcases on wheels, a security guard in a vest, a cleaning machine, information screens with train times",
         "swiatlo": "daylight from a glass roof mixed with cold white station lights",
         "dzwieki": "an echoing station announcement in Polish, suitcase wheels on tiles, footsteps, voices",
-        "akcje": ["she stands under the departure board looking up at it, her handbag on her shoulder",
+        "akcje": ["she stands under the departure board looking up at it, a small plain bag on her shoulder",
                   "she checks her ticket on her phone and looks at the board again",
                   "she turns and walks towards the escalator to the platforms"],
         "streszczenie": "{IMIE} checks the departure board in a busy station hall while travellers turn their heads.",
