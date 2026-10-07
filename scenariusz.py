@@ -362,8 +362,8 @@ MIEJSCA = {
                   "she waits for the receipt, takes it and glances at the order number",
                   "she steps back from the screen and looks around for the pickup counter"],
         "streszczenie": "{IMIE} orders food at a self-service screen of a fast-food counter while shoppers walk past and stare.",
-        "reakcje": "a woman in a black T-shirt standing right next to her covers her mouth to hide a smile; a man with shopping "
-                   "bags turns his head for a second while walking past",
+        "reakcje": "a woman in a dark jacket waiting right next to her covers her mouth with her hand, trying not to laugh; a man "
+                   "with shopping bags turns his head for a second while walking past",
         "kamera": "idzie_za", "pory": ("popoludnie",),
         "slowa": ("galeri", "food court", "fast food", "fast-food", "kiosk", "mcdonald", "maka", "kfc", "burger", "frytk"),
     },
