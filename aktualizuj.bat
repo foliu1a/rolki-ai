@@ -31,7 +31,7 @@ if errorlevel 1 (
 )
 echo.
 echo Sprawdzam biblioteki i testy (chwile to trwa)...
-python -m pip install -q flask pytest
+python -m pip install -q flask pytest pillow
 python -m pytest -q
 echo.
 echo Odswiezam skrot "Rolki AI" na pulpicie...

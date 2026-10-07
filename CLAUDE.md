@@ -392,7 +392,7 @@ Statyczne pliki panelu maja `?v=WERSJA` (app.WERSJA) - podbij przy zmianach w st
 
 ## Testy
 
-`python -m pytest` (raz: `python -m pip install pytest flask`). Testy w `tests/` dzialaja na katalogu tymczasowym,
+`python -m pytest` (raz: `python -m pip install pytest flask pillow` - Pillow: zdjecia 3.2, obrot wg EXIF i kopia bez metadanych). Testy w `tests/` dzialaja na katalogu tymczasowym,
 udawanym CLI Higgsfield (`tests/conftest.py`: `UdawaneCLI`) i udawanym HTTP (`tests/test_dostawcy.py`: `UdawanyHTTP`) -
 nie wydaja kredytow, nie ruszaja `modelki/`, `budzet.json`, kluczy ani Media Tool. Panel: `tests/test_app.py` (Flask test client).
 Nowa logika = nowy test. `UdawaneCLI` udaje tez serwer jobow (`generate create` bez --wait zapisuje job, `job()` = generate get,

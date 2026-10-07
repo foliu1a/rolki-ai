@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 echo [1/4] Biblioteki Pythona dla panelu...
-python -m pip install flask pytest
+python -m pip install flask pytest pillow
 echo.
 echo [2/4] CLI Higgsfield (wymaga Node.js / npm)...
 call npm install -g --allow-scripts=@higgsfield/cli @higgsfield/cli
