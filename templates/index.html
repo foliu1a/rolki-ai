@@ -356,32 +356,79 @@
           </section>
         </section>
 
-        <!-- ===================== ZDJĘCIA ===================== -->
+        <!-- ===================== ZDJĘCIA (3.2: podmiana postaci jak w Higgsfield, zdjecia_swap.py, /api/swap*) ===================== -->
         <section class="strona" id="strona-zdjecia" hidden>
           <div class="naglowek-strony">
-            <div><h1>Zdjęcia</h1><p>Zdjęcia persony zrobione przez AI na podstawie jej zdjęć z Ustawień.</p></div>
+            <div><h1>Zdjęcia</h1><p>Wstaw zdjęcie – <b id="sw-persona">persona</b> zajmie miejsce osoby na nim. Kadr, poza, tło i światło zostają, a twarz, włosy i sylwetka są jej. Personę zmieniasz u góry.</p></div>
           </div>
-          <div class="karta karta-info" id="zdjecia-brak-modelu" hidden>
-            <span class="ikona duza" data-ikona="zdjecia"></span>
-            <div><h2>Najpierw wybierz model zdjęć</h2><p>Model to „aparat” AI, który robi zdjęcia. Wybiera się go raz, w Ustawieniach.</p></div>
-            <a class="btn btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>
-          </div>
-          <form class="karta" id="form-zdjecia">
-            <div class="karta-naglowek"><div><h2>Zrób zdjęcie</h2><p id="zdjecia-opis-modelu">Każde zdjęcie kosztuje ok. 2 kredyty.</p></div></div>
-            <div class="rzad rzad-pola">
-              <div class="pole waskie"><label for="zd-ile">Ile zdjęć</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
-              <div class="pole rosnie"><label for="zd-prompt">Jakie (puste = kolejne z listy w Ustawieniach)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
+
+          <form class="karta sw" id="form-swap" autocomplete="off">
+            <div class="strefa duza sw-strefa" id="sw-strefa" data-upload="swap" tabindex="0" role="button" aria-label="Wstaw zdjęcie">
+              <span class="ikona" data-ikona="upload"></span>
+              <b>Upuść zdjęcie tutaj</b>
+              <span>albo kliknij, żeby wybrać plik · albo wklej <span class="mono">Ctrl+V</span></span>
             </div>
-            <div class="rzad rzad-pola">
-              <div class="stroj-wybor">
-                <div class="pole"><label for="zd-stroj">Strój (zdjęcia z folderu Stroje w Ustawieniach)</label><select id="zd-stroj" name="stroj"><option value="">Automatycznie</option></select></div>
-                <img class="stroj-mini" id="zd-stroj-mini" alt="" hidden>
+            <div class="strefa mala sw-wstawione" id="sw-wstawione" data-upload="swap" tabindex="0" role="button" aria-label="Wstaw inne zdjęcie" title="Kliknij albo upuść tu inne zdjęcie" hidden>
+              <img class="sw-mini" id="sw-mini" alt="Wstawione zdjęcie">
+              <div class="sw-wstawione-tresc">
+                <b id="sw-nazwa"></b>
+                <small id="sw-wymiary"></small>
               </div>
-              <small class="pole-info" id="zd-stroj-info"></small>
+              <button class="btn btn-maly" type="button" data-akcja="sw-zmien">Inne zdjęcie</button>
             </div>
-            <div class="karta-stopka"><span class="muted" id="zdjecia-dzis"></span><button class="btn btn-glowny btn-duzy" type="submit">Zrób zdjęcie</button></div>
+
+            <div class="sw-pasek" role="group" aria-label="Ustawienia zdjęcia">
+              <label class="sw-chip" title="Model AI"><span class="sw-chip-etykieta">Model</span><select id="sw-model" data-sw-pole="model"></select></label>
+              <label class="sw-chip" title="Proporcje zdjęcia"><span class="sw-chip-etykieta">Proporcje</span><select id="sw-proporcje" data-sw-pole="proporcje"></select></label>
+              <label class="sw-chip" id="sw-chip-jakosc" title="Jakość (tylko modele, które ją mają)"><span class="sw-chip-etykieta">Jakość</span><select id="sw-jakosc" data-sw-pole="jakosc"></select></label>
+              <label class="sw-chip" id="sw-chip-rozdz" title="Rozdzielczość"><span class="sw-chip-etykieta">Rozdzielczość</span><select id="sw-rozdz" data-sw-pole="rozdzielczosc"></select></label>
+              <div class="sw-chip sw-ile" role="group" aria-label="Ile zdjęć">
+                <button type="button" class="sw-ile-btn" data-akcja="sw-ile" data-krok="-1" aria-label="Mniej zdjęć">−</button>
+                <span id="sw-ile" aria-live="polite">1/4</span>
+                <button type="button" class="sw-ile-btn" data-akcja="sw-ile" data-krok="1" aria-label="Więcej zdjęć">+</button>
+              </div>
+              <label class="sw-chip sw-chip-stroj" title="Strój persony"><img class="sw-stroj-mini" id="sw-stroj-mini" alt="" hidden><span class="sw-chip-etykieta">Strój</span><select id="sw-stroj" data-sw-pole="stroj"></select></label>
+              <button class="btn btn-glowny sw-generuj" type="submit" id="sw-generuj" disabled>Generuj</button>
+            </div>
+            <div class="sw-info" id="sw-info" aria-live="polite">Wstaw zdjęcie – cenę pokażę od razu (sprawdzenie nic nie kosztuje).</div>
+            <ul class="zp-uwagi" id="sw-uwagi" hidden></ul>
+            <details class="zwijane cicho sw-dopisek">
+              <summary><span class="ikona" data-ikona="chevron-dol"></span>Dopisek (opcjonalnie)</summary>
+              <textarea id="sw-dopisek" rows="2" maxlength="300" placeholder="np. lekki uśmiech, patrzy w bok (najlepiej po angielsku)"></textarea>
+            </details>
           </form>
-          <div class="galeria" id="zdjecia-galeria"></div>
+
+          <section class="karta">
+            <div class="karta-naglowek">
+              <div><h2>Wyniki</h2><p class="muted" id="zdjecia-dzis"></p></div>
+              <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="zdjecia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+            </div>
+            <div class="galeria" id="zdjecia-galeria"></div>
+          </section>
+
+          <details class="karta zwijane" id="zdjecia-zaawansowane">
+            <summary><span class="ikona" data-ikona="chevron-dol"></span>Zaawansowane: zdjęcia z opisu (autopilot)</summary>
+            <p class="muted">Stary sposób: zdjęcie z samego opisu (bez wstawionego zdjęcia). Z tego korzysta autopilot – ustawienia są w <a href="#ustawienia/zdjecia">Ustawienia → Zdjęcia</a>.</p>
+            <div class="karta-info rzad" id="zdjecia-brak-modelu" hidden>
+              <span>Najpierw wybierz model zdjęć z opisu w Ustawieniach.</span>
+              <a class="btn btn-maly" href="#ustawienia/zdjecia">Wybierz model</a>
+            </div>
+            <form class="kolumna" id="form-zdjecia">
+              <p class="muted" id="zdjecia-opis-modelu">Każde zdjęcie kosztuje ok. 2 kredyty.</p>
+              <div class="rzad rzad-pola">
+                <div class="pole waskie"><label for="zd-ile">Ile zdjęć</label><input type="number" id="zd-ile" name="ile" min="1" max="20" value="1" required></div>
+                <div class="pole rosnie"><label for="zd-prompt">Jakie (puste = kolejne z listy w Ustawieniach)</label><input type="text" id="zd-prompt" name="prompt" placeholder="np. portret w kawiarni, naturalne światło"></div>
+              </div>
+              <div class="rzad rzad-pola">
+                <div class="stroj-wybor">
+                  <div class="pole"><label for="zd-stroj">Strój (zdjęcia z folderu Stroje w Ustawieniach)</label><select id="zd-stroj" name="stroj"><option value="">Automatycznie</option></select></div>
+                  <img class="stroj-mini" id="zd-stroj-mini" alt="" hidden>
+                </div>
+                <small class="pole-info" id="zd-stroj-info"></small>
+              </div>
+              <div class="karta-stopka"><button class="btn" type="submit">Zrób zdjęcie z opisu</button></div>
+            </form>
+          </details>
         </section>
 
         <!-- ===================== LIPSYNC ===================== -->
@@ -645,22 +692,26 @@
 
           <!-- Zdjęcia -->
           <details class="sekcja" id="sekcja-zdjecia">
-            <summary><span class="ikona" data-ikona="zdjecia"></span><span class="sekcja-tytul">Zdjęcia</span><span class="sekcja-opis">Jaki model robi zdjęcia persony i jakie zdjęcia ma robić.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <summary><span class="ikona" data-ikona="zdjecia"></span><span class="sekcja-tytul">Zdjęcia</span><span class="sekcja-opis">Podmiana postaci na zdjęciu jest na stronie Zdjęcia. Tu: zdjęcia z opisu dla autopilota.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
             <form class="sekcja-tresc" data-ustawienia novalidate id="form-zdjecia-ust">
-              <div class="pola-siatka">
-                <div class="pole szerokie"><label for="u-zdjecia-model">Model zdjęć („aparat” AI)</label>
-                  <select id="u-zdjecia-model" name="zdjecia_model" data-lista="modele?dostawca=higgsfield&amp;typ=image" data-pusta="— wyłączone —"></select>
-                  <input type="text" name="zdjecia_model" data-zapas placeholder="np. nano_banana_2 (puste = wyłączone)" hidden disabled>
-                  <small class="pole-info" data-lista-info></small>
-                  <small class="pole-info">Taniej: <span class="mono">nano_banana_flash</span>. Najładniej: <span class="mono">nano_banana_2</span>. Ile zdjęć dziennie robi autopilot – w <a href="#ustawienia/autopilot">Autopilot</a>.</small></div>
-                <div class="pole" data-zaawansowane><label for="u-zd-aspect">Proporcje</label><input type="text" id="u-zd-aspect" name="zdjecia_parametry.aspect_ratio" list="lista-proporcji" placeholder="np. 3:4"></div>
-                <div class="pole" data-zaawansowane><label for="u-zd-res">Rozdzielczość</label><input type="text" id="u-zd-res" name="zdjecia_parametry.resolution" placeholder="np. 1080p"></div>
-                <div class="pole" data-zaawansowane><label for="u-soul">Soul ID (modele *soul*)</label><input type="text" id="u-soul" name="soul_id" placeholder="puste = bez Soul"></div>
-              </div>
-              <div class="pole"><label for="u-zdjecia-prompty">Jakie zdjęcia robić (jedna linia = jedno zdjęcie, po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
-              <label class="check"><input type="checkbox" name="zdjecia_stroje"><span>Co drugie zdjęcie w stroju z folderu Stroje (po kolei)<small>zdjęcie stroju leci do modelu jako ostatni obraz; stroje dodajesz w <a href="#ustawienia/persona">Persona → Stroje</a>. Na stronie Zdjęcia możesz wybrać strój ręcznie.</small></span></label>
-              <div class="pole" data-zaawansowane><label for="u-zdjecia-prompt-stroj">Dopisek do promptu przy stroju</label><textarea id="u-zdjecia-prompt-stroj" name="zdjecia_prompt_stroj" class="mono" rows="2" placeholder="She is wearing exactly the outfit from the last reference image…"></textarea><small class="pole-info">Doklejany na końcu promptu zdjęcia, gdy dołączamy zdjęcie stroju.</small></div>
-              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              <div class="callout info"><span class="ikona" data-ikona="info"></span><span>Zdjęcia robisz na stronie <a href="#zdjecia">Zdjęcia</a>: wstaw zdjęcie, wybierz model, proporcje i jakość, kliknij <b>Generuj</b> – persona zajmie miejsce osoby ze zdjęcia. Nic tu nie musisz ustawiać.</span></div>
+              <details class="zwijane cicho" id="zdjecia-ust-zaawansowane">
+                <summary><span class="ikona" data-ikona="chevron-dol"></span>Zaawansowane: zdjęcia z opisu (autopilot)</summary>
+                <div class="pola-siatka">
+                  <div class="pole szerokie"><label for="u-zdjecia-model">Model zdjęć z opisu („aparat” AI)</label>
+                    <select id="u-zdjecia-model" name="zdjecia_model" data-lista="modele?dostawca=higgsfield&amp;typ=image" data-pusta="— wyłączone —"></select>
+                    <input type="text" name="zdjecia_model" data-zapas placeholder="np. nano_banana_2 (puste = wyłączone)" hidden disabled>
+                    <small class="pole-info" data-lista-info></small>
+                    <small class="pole-info">Taniej: <span class="mono">nano_banana_flash</span>. Najładniej: <span class="mono">nano_banana_2</span>. Ile zdjęć dziennie robi autopilot – w <a href="#ustawienia/autopilot">Autopilot</a>.</small></div>
+                  <div class="pole"><label for="u-zd-aspect">Proporcje</label><input type="text" id="u-zd-aspect" name="zdjecia_parametry.aspect_ratio" list="lista-proporcji" placeholder="np. 3:4"></div>
+                  <div class="pole"><label for="u-zd-res">Rozdzielczość</label><input type="text" id="u-zd-res" name="zdjecia_parametry.resolution" placeholder="np. 2k"></div>
+                  <div class="pole"><label for="u-soul">Soul ID (modele *soul*)</label><input type="text" id="u-soul" name="soul_id" placeholder="puste = bez Soul"></div>
+                </div>
+                <div class="pole"><label for="u-zdjecia-prompty">Jakie zdjęcia robić (jedna linia = jedno zdjęcie, po kolei)</label><textarea id="u-zdjecia-prompty" name="zdjecia_prompty_tekst" class="mono" rows="6" placeholder="portret w kawiarni, naturalne światło&#10;selfie na plaży o zachodzie"></textarea></div>
+                <label class="check"><input type="checkbox" name="zdjecia_stroje"><span>Co drugie zdjęcie w stroju z folderu Stroje (po kolei)<small>zdjęcie stroju leci do modelu jako ostatni obraz; stroje dodajesz w <a href="#ustawienia/persona">Persona → Stroje</a>.</small></span></label>
+                <div class="pole"><label for="u-zdjecia-prompt-stroj">Dopisek do promptu przy stroju</label><textarea id="u-zdjecia-prompt-stroj" name="zdjecia_prompt_stroj" class="mono" rows="2" placeholder="She is wearing exactly the outfit from the last reference image…"></textarea><small class="pole-info">Doklejany na końcu promptu zdjęcia, gdy dołączamy zdjęcie stroju.</small></div>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </details>
             </form>
           </details>
 
@@ -717,7 +768,7 @@
               <label class="check"><input type="checkbox" name="autopilot"><span>Autopilot obsługuje tę personę<small>sprawdza folder → robi rolki → pierze w Media Tool → robi zdjęcia → dobiera podpisy → wysyła na Telegram. Lipsyncu nie robi.</small></span></label>
               <div class="pola-siatka">
                 <div class="pole"><label for="u-max-rolek">Najwyżej … rolek dziennie</label><input type="number" id="u-max-rolek" name="autopilot_max_rolek_dziennie" min="0" data-domyslne="10"><small class="pole-info">Chroni kredyty. 0 = bez limitu ilościowego (pilnuje tylko dziennego limitu kredytów).</small></div>
-                <div class="pole"><label for="u-zdjecia-dziennie">Ile zdjęć dziennie robi autopilot</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">0 = zdjęcia tylko ręcznie (strona Zdjęcia). Model zdjęć wybierasz w <a href="#ustawienia/zdjecia">Zdjęcia</a>.</small></div>
+                <div class="pole"><label for="u-zdjecia-dziennie">Ile zdjęć dziennie robi autopilot</label><input type="number" id="u-zdjecia-dziennie" name="zdjecia_dziennie" min="0" data-domyslne="0"><small class="pole-info">Zdjęcia z opisu (model i opisy w <a href="#ustawienia/zdjecia">Zdjęcia → Zaawansowane</a>). 0 = autopilot ich nie robi. Podmiany postaci ze strony Zdjęcia robisz ręcznie – nie liczą się do tej puli.</small></div>
                 <div class="pole" data-zaawansowane><label for="u-co-minut">Sprawdzaj folder co … minut</label><input type="number" id="u-co-minut" name="autopilot_co_minut" min="1" data-domyslne="15"></div>
                 <div class="pole" data-zaawansowane><label for="u-stop-bledy">Zatrzymaj autopilot po … nieudanych rolkach z rzędu</label><input type="number" id="u-stop-bledy" name="autopilot_stop_po_bledach" min="0" max="100" data-domyslne="3"><small class="pole-info">0 = nigdy. Po zatrzymaniu na Starcie pojawi się czerwony pasek z przyciskiem „Wznów”.</small></div>
               </div>
@@ -866,7 +917,7 @@
               <ul>
                 <li><b>Rolka 6–10 s</b> (Seedance 2.5): jakość 480p ≈ <b>30 kredytów</b>, 720p ≈ <b>45–70</b>, 1080p ≈ <b>72–120</b>. Dłuższy filmik = drożej.</li>
                 <li><b>Tani podgląd</b> rolki ≈ <b>21 kredytów</b> (gorsza jakość, ale widać, czy prompt działa).</li>
-                <li><b>Zdjęcie</b> persony ≈ <b>2 kredyty</b>.</li>
+                <li><b>Zdjęcie</b> persony (podmiana postaci, 2K) ≈ <b>2–3 kredyty</b>: Seedream 5.0 Pro 2,5 · Nano Banana Pro 2 · GPT Image 2.5 (wysoka) 2,75. Dokładną cenę widać na przycisku „Generuj”.</li>
                 <li><b>Lipsync</b> (dopasowanie ust do głosu) to osobna usługa sync.so: ≈ <b>0,05 $ za sekundę</b> filmu.</li>
               </ul>
               <p>Program zawsze <b>zapyta, zanim wyda kredyty</b>, i pilnuje bezpiecznika (Ustawienia → Limity, tryb pełny): nie wyda więcej niż dzienny limit i zostawi na koncie minimum.</p>
@@ -880,7 +931,7 @@
                 <li><b>720p zamiast 1080p.</b> Na telefonie różnicy prawie nie widać, a 1080p kosztuje ok. 60 % więcej.</li>
                 <li><b>Bezpieczne stroje i słowa.</b> Odrzucona rolka to kredyty z powrotem, ale stracony czas i powtórki. Unikaj siatki, prześwitów i słów typu „mesh”, „sheer” – lista w <a href="#pomoc/nsfw">„Filtr NSFW”</a>.</li>
                 <li><b>Tani podgląd tylko, gdy nie wiesz, czy prompt działa.</b> Podgląd (~21 kr) ma sens przy nowym prompcie albo nowych zdjęciach persony, nie przy każdej rolce.</li>
-                <li><b>Do zdjęć tańszy model.</b> W <a href="#ustawienia/zdjecia">Ustawienia → Zdjęcia</a> wybierz <span class="mono">nano_banana_flash</span> zamiast <span class="mono">nano_banana_2</span>.</li>
+                <li><b>Tańsze zdjęcia.</b> Na stronie <a href="#zdjecia">Zdjęcia</a> wybierz niższą rozdzielczość (Seedream 1K = 1,25 kr) albo GPT Image 2.5 w jakości Średniej (2K = 1 kr). Każde zdjęcie z „Ile” to osobna opłata.</li>
                 <li><b>Limit rolek dziennie</b> w <a href="#ustawienia/autopilot">Ustawienia → Autopilot</a> – autopilot nie zrobi więcej, niż pozwolisz.</li>
               </ul>
               <p class="muted">Na Starcie w kafelku „Dziś” widzisz, ile kredytów już poszło i ile rolek jeszcze dziś wejdzie.</p>

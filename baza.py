@@ -742,6 +742,13 @@ def folder_zdjec(slug):
     return folder
 
 
+def folder_swap_zrodel(slug):
+    """Zdjecia wstawione na stronie Zdjecia do podmiany postaci (swap, 3.2): kopie bez EXIF, obrocone wg EXIF."""
+    folder = os.path.join(folder_modelki(slug), "swap_zrodla")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
 def folder_audio(slug):
     """Pliki glosu do lipsyncu (mp3/wav) - user wrzuca tu albo obok filmiku jako <nazwa>.audio.mp3."""
     folder = os.path.join(folder_modelki(slug), "audio")
@@ -1046,11 +1053,11 @@ def zapisz_probe(slug, pomysl_id, wpis):
 
 
 def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
-    """Kredyty zarezerwowane przez rolki w toku (job wyslany, jeszcze nie rozliczony) - wszystkie persony, jeden dostawca.
-    Bezpieczniki dzienne licza je razem z wydatkami, zeby kilka wolnych jobow naraz nie przebilo limitu."""
+    """Kredyty zarezerwowane przez rolki i zdjecia w toku (job wyslany, jeszcze nie rozliczony) - wszystkie persony, jeden
+    dostawca. Bezpieczniki dzienne licza je razem z wydatkami, zeby kilka wolnych jobow naraz nie przebilo limitu."""
     suma = 0
     for slug in lista_modelek():
-        for p in pomysly_w_toku(slug):
+        for p in pomysly_w_toku(slug) + zdjecia_w_toku(slug):
             m = p.get("w_toku") or {}
             if (m.get("dostawca") or DOSTAWCA_GLOWNY) == (dostawca or DOSTAWCA_GLOWNY) and not rozliczony(p.get("job_id"), dostawca):
                 try:
@@ -1071,7 +1078,7 @@ def znane_job_id(dostawca=None):
     wynik = set()
     for slug in lista_modelek():
         try:
-            pomysly = lista_pomyslow(slug)
+            pomysly = lista_pomyslow(slug) + lista_zdjec(slug)      # zdjecia (swap, 3.2) tez maja job_id i znacznik w_toku
         except (OSError, ValueError):
             continue
         for p in pomysly:
@@ -1178,15 +1185,57 @@ def lista_zdjec(slug):
     return _wczytaj_json(_plik_zdjec(slug), [])
 
 
-def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki="", stroj=None):
+def dodaj_zdjecie(slug, prompt, plik=None, job_id=None, koszt=None, status="gotowe", notatki="", stroj=None, **pola):
+    """Nowy wpis w zdjecia.json. `pola` = dodatkowe pola (swap 3.2: typ="swap", zrodlo, zrodlo_nazwa, model, parametry,
+    stroj_bib, opis...). Zwraca id."""
     plik_json = _plik_zdjec(slug)
     with _rmw(plik_json):
         zdjecia = _wczytaj_json(plik_json, [])
         nowy_id = (max((z["id"] for z in zdjecia), default=0)) + 1
-        zdjecia.append({"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
-                        "status": status, "notatki": notatki, "stroj": stroj, "utworzono": _teraz()})
+        wpis = {"id": nowy_id, "prompt": prompt, "plik": plik, "job_id": job_id, "koszt": koszt,
+                "status": status, "notatki": notatki, "stroj": stroj, "utworzono": _teraz()}
+        wpis.update({k: v for k, v in pola.items() if k not in ("id", "utworzono")})
+        zdjecia.append(wpis)
         _zapisz_json(plik_json, zdjecia)
     return nowy_id
+
+
+def zdjecie(slug, zid):
+    """Wpis zdjecia po id (ValueError, gdy nie ma)."""
+    for z in lista_zdjec(slug):
+        if z["id"] == zid:
+            return z
+    raise ValueError(f"Nie ma zdjecia #{zid}.")
+
+
+# Zdjecie w toku (swap 3.2) - jak rolka: status "w_toku" + slownik `w_toku` {dostawca, model, koszt (rezerwa w limicie dnia),
+# od, etap: "wysylanie" | "czeka", job_id, wysylam/wysylam_od (od tej chwili job MOGL powstac), obraz_id (swiezy upload
+# wstawionego zdjecia - po nim odnajdujemy job)}. Zapisany PRZED wyslaniem, job_id zaraz po - nigdy drugi create.
+
+def zdjecia_w_toku(slug):
+    return [z for z in lista_zdjec(slug) if z.get("status") == "w_toku"]
+
+
+def zacznij_zdjecie_w_toku(slug, zid, **marker):
+    """Status w_toku + znacznik (etap 'wysylanie', od = teraz). Zwraca zdjecie."""
+    marker.setdefault("etap", "wysylanie")
+    marker.setdefault("od", _teraz())
+    marker.setdefault("job_id", None)
+    ustaw_zdjecie(slug, zid, status="w_toku", w_toku=marker)
+    return zdjecie(slug, zid)
+
+
+def ustaw_zdjecie_w_toku(slug, zid, **pola):
+    """Dopisuje pola do znacznika w_toku zdjecia (np. obraz_id/wysylam przed wyslaniem, job_id zaraz po). Zwraca zdjecie."""
+    with _rmw(_plik_zdjec(slug)):
+        z = zdjecie(slug, zid)
+        marker = dict(z.get("w_toku") or {})
+        marker.update(pola)
+        zmiany = {"w_toku": marker}
+        if pola.get("job_id"):
+            zmiany["job_id"] = pola["job_id"]
+        ustaw_zdjecie(slug, zid, **zmiany)
+    return zdjecie(slug, zid)
 
 
 def ustaw_zdjecie(slug, zid, **pola):
@@ -1210,12 +1259,14 @@ def usun_zdjecie(slug, zid):
         _zapisz_json(plik_json, nowe)
 
 
-def zdjecia_z_dnia(slug, dzien=None, z_niepewnymi=False):
+def zdjecia_z_dnia(slug, dzien=None, z_niepewnymi=False, bez_swap=False):
     """Gotowe zdjecia z dnia; z_niepewnymi=True dolicza 'niepewne' (job mogl powstac mimo bledu - autopilot nie robi wtedy
-    kolejnego, zeby nie zaplacic drugi raz)."""
+    kolejnego, zeby nie zaplacic drugi raz). bez_swap=True: bez recznych podmian postaci (swap) - autopilot liczy tylko
+    swoje zdjecia z opisu (zdjecia_dziennie)."""
     dzien = dzien or _dzis()
     statusy = ("gotowe", "niepewne") if z_niepewnymi else ("gotowe",)
-    return [z for z in lista_zdjec(slug) if z["status"] in statusy and dzien_lokalny(z.get("utworzono")) == dzien]
+    return [z for z in lista_zdjec(slug) if z["status"] in statusy and dzien_lokalny(z.get("utworzono")) == dzien
+            and not (bez_swap and z.get("typ") == "swap")]
 
 
 def prompty_zdjec(slug):

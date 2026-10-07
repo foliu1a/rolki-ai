@@ -12,6 +12,7 @@ Najwazniejsze funkcje:
     kredyty()               -> int
     model(jst)              -> schema modelu (parametry, media, aspect_ratios, durations)
     koszt(jst, params, media)   -> int (kredyty, bez tworzenia joba)
+    koszt_dokladny(...)         -> jak koszt, ale z ulamkami (obrazy: 2.5 kr)
     generuj(jst, params, media, wait=True) -> job dict (z URL wyniku)
     wyniki_url(job)         -> [url, ...]  (najpewniejszy pierwszy, bez wejsc i miniatur)
     status_joba(job)        -> "completed" | "failed" | ...   job_udany(job) / job_nieudany(job) / blad_joba(job)
@@ -241,21 +242,32 @@ def koszt(jst, params=None, media=None):
     return _wyciagnij_koszt(dane)
 
 
-def _wyciagnij_koszt(dane):
+def koszt_dokladny(jst, params=None, media=None):
+    """Jak koszt(), ale bez obcinania do int: obrazy kosztuja ulamki kredytu (zmierzone 2026-10-07: Seedream 5.0 Pro 2K = 2.5,
+    GPT Image 2.5 high 2K = 2.75, GPT Image 2 high 2K = 6.5). Zwraca float/int albo None."""
+    dane = _uruchom(["generate", "cost", jst] + _flagi(params, media), timeout=TIMEOUT_UPLOAD)
+    return _wyciagnij_koszt(dane, dokladnie=True)
+
+
+def _wyciagnij_koszt(dane, dokladnie=False):
+    def liczba(v):
+        if not dokladnie:
+            return int(v)
+        return int(v) if float(v).is_integer() else float(v)
     if isinstance(dane, bool):
         return None
     if isinstance(dane, (int, float)):
-        return int(dane)
+        return liczba(dane)
     if isinstance(dane, dict):
         for k in ("credits", "cost", "estimated_credits", "estimated_cost", "price", "total"):
             if k in dane and isinstance(dane[k], (int, float)) and not isinstance(dane[k], bool):
-                return int(dane[k])
+                return liczba(dane[k])
         for v in dane.values():
-            w = _wyciagnij_koszt(v)
+            w = _wyciagnij_koszt(v, dokladnie)
             if w is not None:
                 return w
     if isinstance(dane, list) and dane:
-        return _wyciagnij_koszt(dane[0])
+        return _wyciagnij_koszt(dane[0], dokladnie)
     return None
 
 

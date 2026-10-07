@@ -438,7 +438,9 @@ def wyslij_zdjecia(slug, log=None):
     ile = 0
     for z in do_wyslania:
         try:
-            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}" + (" · strój" if z.get("stroj") else "") + f"\n{z.get('prompt') or ''}".rstrip(),
+            # podmiana postaci (swap): krotki opis zamiast dlugiego angielskiego promptu
+            opis = z.get("opis") if z.get("typ") == "swap" else z.get("prompt")
+            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}" + (" · strój" if z.get("stroj") else "") + f"\n{opis or ''}".rstrip(),
                               chat_id=cid)
             import zdjecia as _zdj
             _zdj._ustaw(slug, z["id"], telegram_wyslano=True)
@@ -480,6 +482,17 @@ def przebieg(slug, log=None, stop=None):
         except Exception as e:
             pods["bledy"].append(f"wznow: {e}")
             log(f"wznowienie nie wyszlo: {e}")
+    if baza.zdjecia_w_toku(slug):
+        # zdjecia z podmiana postaci (strona Zdjecia), ktorych job juz poszedl - dokonczyc (0 kr, ten sam job)
+        try:
+            import zdjecia_swap
+            w = zdjecia_swap.wznow_w_toku(slug, log=log, stop=stop)
+            pods["zdjecia"] += w["zrobione"]
+        except fabryka.Przerwano:
+            raise
+        except Exception as e:
+            pods["bledy"].append(f"wznow zdjec: {e}")
+            log(f"wznowienie zdjec nie wyszlo: {e}")
     max_dzis = int(ust.get("autopilot_max_rolek_dziennie") or 0)
     zrobione_dzis = len(baza.pomysly_z_dnia(slug)) + len(baza.pomysly_w_toku(slug))   # rolki w toku tez sie licza
     zostalo = (max_dzis - zrobione_dzis) if max_dzis else None
@@ -515,12 +528,13 @@ def przebieg(slug, log=None, stop=None):
     STAN["etap"] = "zdjecia"
     ile_zdjec = int(ust.get("zdjecia_dziennie") or 0)
     if ile_zdjec and ust.get("zdjecia_model") and not ap.get("pauza"):
-        brakuje = ile_zdjec - len(baza.zdjecia_z_dnia(slug, z_niepewnymi=True))   # 'niepewne' = job mogl powstac - nie dublujemy
+        # 'niepewne' = job mogl powstac - nie dublujemy; reczne podmiany postaci (swap) nie zjadaja dziennej puli autopilota
+        brakuje = ile_zdjec - len(baza.zdjecia_z_dnia(slug, z_niepewnymi=True, bez_swap=True))
         if brakuje > 0:
             try:
                 import zdjecia
                 w = zdjecia.generuj(slug, ile=brakuje, log=log, stop=stop)
-                pods["zdjecia"] = w["zrobione"]
+                pods["zdjecia"] += w["zrobione"]
             except fabryka.Przerwano:
                 raise
             except Exception as e:

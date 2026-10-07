@@ -8,6 +8,7 @@ Obieg:
   3. python fabryka.py koszt           -> ile kredytow zjedza pozycje z promptem
   4. python fabryka.py generuj         -> bezpiecznik budzetu, generacja, pobranie, Media Tool, lipsync (status: gotowe)
   5. python fabryka.py zdjecia         -> zdjecia persony (model obrazu z referencjami)
+     python fabryka.py zdjecie-swap x.jpg -> persona w miejsce osoby ze zdjecia (zdjecia_swap.py, --sucho = prompt + cena)
   6. python fabryka.py lipsync ...     -> wideo + glos -> sync.so
   7. python fabryka.py autopilot       -> wszystko powyzsze w petli (albo z panelu)
 
@@ -2285,12 +2286,16 @@ def cmd_ocen(args):
 
 
 def cmd_wznow(args):
-    """Dokoncz rolki w toku (wszystkie persony albo --modelka)."""
+    """Dokoncz rolki i zdjecia (podmiana postaci) w toku (wszystkie persony albo --modelka)."""
+    import zdjecia_swap
     slugi = [_slug(args.modelka)] if args.modelka else baza.lista_modelek()
     for slug in slugi:
         w = wznow_w_toku(slug, timeout=args.timeout)
         if w["wygenerowane"] or w["bledy"] or w["w_toku"]:
             print(f"{slug}: gotowe {w['wygenerowane']}, nie wyszlo {len(w['bledy'])}, dalej w toku {len(w['w_toku'])}")
+        z = zdjecia_swap.wznow_w_toku(slug)
+        if z["zrobione"] or z["bledy"] or z["w_toku"]:
+            print(f"{slug} zdjecia: gotowe {z['zrobione']}, nie wyszlo {len(z['bledy'])}, dalej w toku {len(z['w_toku'])}")
     return 0
 
 
@@ -2365,6 +2370,45 @@ def cmd_zdjecia(args):
     slug = _slug(args.modelka)
     w = zdjecia.generuj(slug, ile=args.ile, prompt=args.prompt, dry_run=args.dry_run, stroj=args.stroj)
     return 0 if not w.get("stop") else 1
+
+
+def cmd_zdjecie_swap(args):
+    """python fabryka.py --modelka noemi zdjecie-swap foto.jpg [--model seedream_v5_pro] [--proporcje jak_zdjecie|9:16]
+    [--jakosc high] [--rozdzielczosc 2k] [--ile 1] [--stroj ze_zdjecia|<id z biblioteki>] [--dopisek ".."] [--sucho] [--tak]
+    Podmiana postaci na zdjeciu (zdjecia_swap.py): --sucho = tylko prompt i cena z `generate cost` (0 kr, nic nie wysyla)."""
+    import zdjecia_swap
+    slug = _slug(args.modelka)
+    if not os.path.isfile(args.plik):
+        print(f"[BLAD] Nie ma pliku {args.plik}")
+        return 1
+    opcje = {"model": args.model, "proporcje": args.proporcje, "jakosc": args.jakosc, "rozdzielczosc": args.rozdzielczosc,
+             "ile": args.ile, "stroj": args.stroj, "dopisek": args.dopisek or ""}
+    sw = zdjecia_swap.zbuduj(slug, args.plik, opcje)
+    w = zdjecia_swap.wycena(slug, opcje, zrodlo=args.plik, swieza=True)
+    print(sw["prompt"])
+    ost = len(sw["obrazy"]) - 1 if sw["stroj_id"] else None
+    print(f"\n--- {sw['znaki']} znakow, {len(sw['obrazy'])} zdjec (1 = wstawione, 2-{sw['referencje'] + 1} = persona"
+          + (f", {ost + 1} = stroj {sw['stroj_nazwa']}" if ost else "") + f"), {sw['opis']}"
+          + (" (proporcje jak zdjecie)" if sw["proporcje_jak_zdjecie"] else ""))
+    for u in sw["ostrzezenia"]:
+        print(f"[UWAGA] {u}")
+    print(f"cena: {zdjecia_swap._kr(w['kr_sztuka'])} za zdjecie x {w['ile']} = {zdjecia_swap._kr(w['kr'])} (do limitu dnia: "
+          f"{w['kr_limit']} kr) | saldo {w['saldo']} | dzis {w['dzis']['wydano']}/{w['dzis']['limit']} | min_kredyty {w['min_kredyty']}")
+    if not w["mozna"]:
+        print("NIE MOZNA: " + "; ".join(w["powody"]))
+        return 1
+    if args.sucho:
+        print("(--sucho: nic nie wyslane, 0 kr)")
+        return 0
+    if not args.tak:
+        odp = input(f"Zrobic {w['ile']} zdj. za {zdjecia_swap._kr(w['kr'])}? [t/N] ").strip().lower()
+        if odp not in ("t", "tak", "y"):
+            print("anulowano")
+            return 0
+    zrodlo = zdjecia_swap.zapisz_zrodlo(slug, args.plik)
+    wynik = zdjecia_swap.generuj(slug, zrodlo, opcje, kr=w["kr_sztuka"], timeout=args.timeout)
+    print(json.dumps(wynik, ensure_ascii=False))
+    return 0 if wynik.get("zrobione") or wynik.get("w_toku") else 1
 
 
 def cmd_foldery(args):
@@ -2509,6 +2553,18 @@ def main(argv=None):
     s = sub.add_parser("wgraj", help="wgraj referencje/stroje raz (UUID w cache, szybsze koszt/generuj)"); s.add_argument("--od-nowa", action="store_true"); s.set_defaults(f=cmd_wgraj)
     s = sub.add_parser("pierz", help="Media Tool na wyniku pomyslu (albo --plik dowolny.mp4)"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--plik"); s.set_defaults(f=cmd_pierz)
     s = sub.add_parser("zdjecia", help="zdjecia persony (model obrazu z referencjami; --stroj auto|bez|plik = strój ze stroje/)"); s.add_argument("--ile", type=int, default=1); s.add_argument("--prompt"); s.add_argument("--stroj"); s.add_argument("--dry-run", action="store_true"); s.set_defaults(f=cmd_zdjecia)
+    s = sub.add_parser("zdjecie-swap", help="podmiana postaci na zdjeciu: persona w miejsce osoby ze zdjecia (--sucho = prompt + cena, 0 kr)")
+    s.add_argument("plik", help="zdjecie, na ktore wstawiamy persone")
+    s.add_argument("--model", default="seedream_v5_pro", help="seedream_v5_pro | nano_banana_pro | gpt_image_2_5")
+    s.add_argument("--proporcje", default="jak_zdjecie", help="jak_zdjecie (najblizsze do zdjecia) albo np. 9:16, 3:4, 4:5, 1:1")
+    s.add_argument("--jakosc", help="tylko GPT Image 2.5: low | medium | high (domyslnie) | xhigh | max")
+    s.add_argument("--rozdzielczosc", help="1k | 1.5k | 2k (domyslnie) | 4k - co ma model")
+    s.add_argument("--ile", type=int, default=1, help="1-4 zdjec (kazde osobne zlecenie)")
+    s.add_argument("--stroj", default="ze_zdjecia", help="ze_zdjecia (ubranie z wstawionego zdjecia) albo id stroju z biblioteki")
+    s.add_argument("--dopisek", help="opcjonalny dopisek do promptu")
+    s.add_argument("--sucho", action="store_true", help="tylko prompt i darmowa wycena")
+    s.add_argument("--tak", "-y", action="store_true", help="bez pytania o cene"); s.add_argument("--timeout", default="15m")
+    s.set_defaults(f=cmd_zdjecie_swap)
     s = sub.add_parser("lipsync", help="wideo + glos -> lipsync (sync.so) - tylko recznie, autopilot tego nie robi"); s.add_argument("id", type=int, nargs="?"); s.add_argument("--wideo"); s.add_argument("--audio"); s.add_argument("--styl", choices=("telefon", "czysty", "brak"), help="brzmienie glosu (domyslnie z ustawien: telefon)"); s.set_defaults(f=cmd_lipsync)
     s = sub.add_parser("autopilot", help="petla: telefon -> skanuj -> generuj -> pranie -> zdjecia -> podpisy (--raz = jeden przebieg; bez lipsyncu)"); s.add_argument("--raz", action="store_true"); s.set_defaults(f=cmd_autopilot)
     s = sub.add_parser("foldery", help="foldery na pulpicie: tu wrzucasz rolki / tu rolki zrobione / tu zdjecia zrobione (per persona)"); s.set_defaults(f=cmd_foldery)

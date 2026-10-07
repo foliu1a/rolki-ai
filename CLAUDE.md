@@ -237,6 +237,54 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - Testy: tests/test_stroje_sylwetka.py (wagi, rotacja, swap B, numer obrazu, endpoint stroju, sylwetka A/B/Z promptu/Wan, brak
   mowy z modelu, plec komentarzy, asystent z biblioteka) + glos_id w test_asystent_glos.py.
 
+## 3.2 (2026-10-08): Zdjecia = podmiana postaci jak w Higgsfield (`zdjecia_swap.py`)
+
+- Strona **Zdjecia**: duze pole "Upusc zdjecie / wybierz plik / Ctrl+V" -> `POST /api/swap/zdjecie` zapisuje KOPIE (obrocona wg EXIF,
+  bez metadanych - GPS z telefonu nie leci dalej, dluzszy bok <= 3072 px) w `modelki/<slug>/swap_zrodla/` -> mala miniatura -> pasek
+  chipow [Model] [Proporcje] [Jakosc] [Rozdzielczosc] [- N/4 +] [Stroj] + "Generuj · X kr". Persona = aktywna w panelu (zmiana persony
+  = to samo zdjecie wgrane dla nowej). Wyniki: miniatura wejscia w rogu wyniku, "Otworz folder". Stare zdjecia z opisu (autopilot) i
+  ich ustawienia (zdjecia_model, lista promptow, co drugie w stroju, dopisek, Soul ID, proporcje/rozdzielczosc) zostaja w kodzie, w
+  panelu pod zwinietym "Zaawansowane: zdjecia z opisu (autopilot)" (strona Zdjecia i Ustawienia -> Zdjecia).
+- Modele (`zdjecia_swap.MODELE`, schematy z `model get` 2026-10-07; panel przy starcie odswieza je darmowym `model get`):
+  `seedream_v5_pro` (DOMYSLNY - skill higgsfield-generate: "one-shot face from reference photos / face edit on a real photo", do 10
+  zdjec, 1k/1.5k/2k, bez jakosci, bez 4:5), `nano_banana_pro` (alias `nano_banana_2`, do 14 zdjec, 1k/2k/4k), `gpt_image_2_5`
+  (jakosc low/medium/high/xhigh/max, 1k/2k/4k). Chip znika, gdy model nie ma opcji (`chipy(schemat)`). Proporcje: "Jak zdjecie"
+  (domyslnie, najblizsze w logarytmie z obslugiwanych: 9:16 2:3 3:4 4:5 1:1 5:4 4:3 3:2 16:9 21:9) albo konkretne. Domyslnie 2K + high.
+  Odrzucone: `nano_banana_flash` (2K = 2 kr, tyle co Pro - nie jest tanszy), `gpt_image_2` (high 2K = 6,5 kr, starszy od 2.5).
+- Ceny `generate cost` (darmowe, 2026-10-07; liczba zdjec i prompt NIE zmieniaja ceny -> wycena BEZ mediow = zero uploadu, cache 1 h po
+  parametrach): Seedream 5.0 Pro 1k/1.5k 1,25 / 2k 2,5; Nano Banana Pro 1k 2 / 2k 2 / 4k 4; GPT Image 2.5 2k low 0,5 / medium 1 /
+  high 2,75 / xhigh 4,5 / max 9 (high 1k 1,5, 4k 4,25). Ceny obrazow sa ULAMKOWE: `hf.koszt_dokladny` (stare `hf.koszt` obcina do
+  int - dla rolek bez zmian); do limitu dnia, rezerwy i wydatku liczymy W GORE (`do_limitu`: 2,5 -> 3).
+- Obrazy w kolejnosci: 1 = wstawione zdjecie, 2..R+1 = WSZYSTKIE referencje persony (gdy model ma limit - pierwsze, ktore sie zmieszcza
+  + ostrzezenie), na koncu stroj z biblioteki (tylko ze zdjeciem). Prompt (`zbuduj`, angielski, ~3000 znakow): "Edit image 1 (the first
+  image) into a photo of <Imie> - a complete character replacement", ze zdjecia: kadr, kat, perspektywa, poza, rece, mimika, kierunek
+  wzroku, tlo, obiekty, swiatlo; NIC z wygladu osoby ze zdjecia (twarz, wlosy, skora, oczy, makijaz, tatuaze, znamiona, piercing,
+  sylwetka). Z persony: `scenariusz.tozsamosc(bez_wlosow)` (numery zdjec z promptu A przesuniete o 1: Lilianna "shown in image 5"),
+  wlosy `profil.wlosy`, wzrost `zdanie_wzrostu`, "Body shape (highest priority after her face): <profil.sylwetka>" + "Give her
+  exactly this figure even where the person in image 1 is slimmer or flatter" + kontrola na koncu. Stroj "ze zdjecia" = ubranie,
+  buty, dodatki z image 1; z biblioteki = `opis_en` + "image N (the last image) shows ONLY the outfit: ignore the hair, face, skin,
+  tattoos and body shape...". [Clean-up] usuwa napisy/znaki wodne/naklejki/UI, [Look] fotorealizm jak zdjecie z telefonu, bez
+  upiekszania ponad referencje. Opcjonalny "Dopisek" (zwiniety, max 300 znakow) -> "[Extra] ...". Opisy persony, stroju i dopisek
+  przechodza przez `bez_slow_ryzykownych` (zamiany np. breasts->bust, butt->bottom, sexy->striking; "lace-up" to nie "lace").
+- Pieniadze (jak rolki, `_wyslij` / `_czekaj` / `wznow_w_toku`): wpis w `zdjecia.json` (`typ: "swap"`, status `w_toku` + znacznik
+  {dostawca, model, koszt (rezerwa), od, etap, job_id}) PRZED wyslaniem; `dostawcy/higgsfield.zlec` wgrywa wszystko przed `wysylam`, a
+  wstawione zdjecie (`z["obraz_swiezy"]`) SWIEZYM uploadem -> `w_toku.obraz_id`; create bez --wait, job_id zapisany od razu; blad po
+  `wysylam` = `znajdz(obraz_id=...)` na `generate list --image` (media data.id), nie ma = czeka 60 min, potem blad "Sprawdz w apce";
+  NIGDY drugi create. Przed KAZDYM wyslaniem cena jeszcze raz (`swieza=True`) - wyzsza niz `kr` z panelu = nic nie idzie; min_kredyty,
+  limit dzienny Higgsfield z rezerwa (`koszt_w_toku` liczy tez zdjecia w toku - rolki widza rezerwe zdjec i odwrotnie),
+  `baza.blokada_generacji(slug)`, `fabryka._WYSYLANIE` (panel nie zamknie sie w trakcie). NSFW/IP: jasny komunikat, zero powtorek i
+  koniec serii N zdjec; niepewne wysylanie tez konczy serie. Ile 1-4, kazde osobne zlecenie. Wznawianie: start panelu (`wznow`),
+  autopilot (przebieg), `python fabryka.py wznow`, poczatek kazdego `generuj`. "Przestan czekac": `POST /api/zdjecia/<id>/przerwij`.
+- Wynik: `zdjecia_dir` (`Desktop\ROLKI AI\tu zdjecia zrobione\<Persona>\`) jako `NNN_swap_<nazwa zrodla>.<ext>` - bez obrobki (jak
+  zdjecia: Media Tool tylko dla wideo, zdjecia "pierze" osobna apka). Autopilot: swapy nie zjadaja `zdjecia_dziennie`
+  (`zdjecia_z_dnia(bez_swap=True)`), na Telegram leca z krotkim opisem zamiast promptu.
+- CLI: `python fabryka.py --modelka noemi zdjecie-swap foto.jpg [--model seedream_v5_pro|nano_banana_pro|gpt_image_2_5]
+  [--proporcje jak_zdjecie|9:16] [--jakosc high] [--rozdzielczosc 2k] [--ile 1] [--stroj ze_zdjecia|<id>] [--dopisek ".."] --sucho`
+  (prompt + cena, 0 kr, nic nie kopiuje); bez `--sucho` pyta i generuje.
+- Testy: tests/test_zdjecia_swap.py (proporcje + EXIF, chipy wg schematu, prompt, stroj, limit zdjec, slowa ryzykowne - takze dla
+  PRAWDZIWYCH person z modelki/ (tylko odczyt), job_id przed czekaniem, swiezy upload, blad po wysylam, wznowienie po obraz_id, NSFW,
+  bezpieczniki, blokada, wycena bez mediow z cache, CLI --sucho, endpointy).
+
 ## Postprodukcja
 
 - Wideo: `mediatool.py` odpala worker Media Tool headless (`ELECTRON_RUN_AS_NODE=1 "Media Tool.exe" worker.cjs <json>`,
@@ -252,7 +300,7 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 ## Pliki
 
 ```
-fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, generuj, pierz, zdjecia, lipsync, autopilot, ocen,
+fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, generuj, pierz, zdjecia, zdjecie-swap, lipsync, autopilot, ocen,
                     wznow, podpis, wgraj, ustaw, budzet, model, modele, glosy, konto). Funkcje skanuj()/koszt()/generuj()/
                     pierz()/podpis()/podglad() przyjmuja (slug, ..., log=, stop=) - wola je CLI, panel i autopilot.
                     podglad(slug, pid) = tani draft (~21 kr), pomysl zostaje 'nowy' (podglad_plik). sprawdz_prompt(slug) =
@@ -269,7 +317,9 @@ autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dz
                     Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
                     Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
                     (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
-zdjecia.py          zdjecia persony: zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt w kolko
+zdjecia.py          zdjecia persony z OPISU (autopilot): zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt
+zdjecia_swap.py     zdjecia 3.2: podmiana postaci na wstawionym zdjeciu (strona Zdjecia, CLI zdjecie-swap) - modele, chipy, prompt,
+                    wycena bez mediow, generacja z w_toku/job_id/wznawianiem jak rolki
 lipsync.py          zrob(slug, wideo, audio, styl=) -> przygotuj_glos (ffmpeg: styl telefon = pasmo mikrofonu + krotkie odbicia pokoju +
                     kompresja + szum + loudnorm -16 LUFS; czysty = loudnorm; brak = bez zmian; ogg z Telegrama -> mp3) -> sync.so
                     (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield -> wyniki/<n>_lipsync.raw.mp4 -> Media Tool
@@ -316,6 +366,7 @@ modelki/<slug>/
   referencje/       zdjecia persony, 01_, 02_... = kolejnosc @[Image N] w prompcie (-> --image)
   stroje/ audio/    stroje do wariantu B; glosy do lipsyncu (panel: upload)
   wyniki/ zdjecia/  surowe rolki NNN_nazwa.raw.mp4, NNN_podpis.txt; zdjecia NNN_data.png
+  swap_zrodla/      zdjecia wstawione na stronie Zdjecia (3.2): <czas>_<nazwa>.jpg - kopie bez EXIF
   pomysly.json      kolejka; statusy: nowy -> w_toku (job wyslany) -> wygenerowany -> postprodukcja -> gotowe (+ blad); pola dostawca,
                     model, resolution, w_toku (znacznik), proby, zapas, krok_startowy, audio, lipsync_plik, podpis, klatki_wyniku,
                     telegram_wyslano, powod (nsfw|ip|inny przy bledzie)
@@ -364,7 +415,9 @@ tests/test_wavespeed.py.
   min_result_url, thumbnail_url?}`; bez `--wait` liste UUID-ow (stringi). CLI widzi TYLKO result_url/min_result_url.
   Statusy: queued, pending, in_progress, completed, failed, nsfw, ip_detected, canceled. Job nieudany z --wait = exit 3.
   `completed` + `result_url: null` = exit 0 -> wrapper doczytuje `generate get` (hf.doczytaj_url).
-- `generate cost` -> `{"credits": N}`; `account status --json` -> `{credits, email, subscription_plan_type}`; `upload create` -> `{id,type,url}`;
+- `generate cost` -> `{"credits": N}` (obrazy: ULAMKI, np. 2.5 - `hf.koszt_dokladny`); `account status --json` -> `{credits, email,
+  subscription_plan_type}`; `upload create` -> `{id,type,url}`; `generate list --image` -> joby obrazow z `params.medias[{role: "image",
+  data: {id: <upload id>}}]` (tak swap odnajduje job po wstawionym zdjeciu);
   `model get <jst> --json` -> `{display_name, job_type, type, params[{name,type,default,required,enum}], rules}`.
 - Koszt video_edit (zmierzone 2026-10-01, 6 s zrodlo, 5 ref): 480p ? / 720p 45 kr / 1080p 72 kr; `--duration` nie zmienia
   ceny edycji (liczy sie dlugosc zrodla); `--draft true` = 21 kr (podglad). `generate cost` z UUID-ami ~12 s, ze sciezkami ~60 s.
@@ -374,7 +427,8 @@ tests/test_wavespeed.py.
   (repeatable), `--start-image`, `--end-image`, `--audio`; parametry `--aspect_ratio`, `--resolution 480p|720p|1080p`,
   `--duration 4-30`. Schema: `python fabryka.py model seedance_2_5` (wymaga logowania).
 - Modele obrazu (do zdjec): `nano_banana_2` (= Nano Banana Pro, image_references <=14), `nano_banana_flash`, `seedream_v4_5`,
-  `text2image_soul_v2` (`--soul-id` z `soul-id create --soul-2 --image x5-20`, wymaga planu Basic+), `gpt_image_2`.
+  `text2image_soul_v2` (`--soul-id` z `soul-id create --soul-2 --image x5-20`, wymaga planu Basic+), `gpt_image_2`; podmiana postaci
+  (3.2): `seedream_v5_pro`, `nano_banana_pro`, `gpt_image_2_5` - patrz sekcja 3.2.
   Lista: `python fabryka.py modele --typ image`. TTS: `text2speech_v2 --variant elevenlabs --voice_id --voice_type preset|element`
   (glosy: `python fabryka.py glosy`). Brak osobnego modelu lipsync w CLI (lipsync = `--audio` w omni_reference) - dlatego sync.so.
 - Issue cli#94: prompt z PUSTA LINIA bywa ucinany na pierwszym akapicie -> dostawcy/higgsfield.py skleja akapity

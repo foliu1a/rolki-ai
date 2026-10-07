@@ -22,6 +22,7 @@ import fabryka
 import asystent
 import scenariusz
 import sekrety
+import zdjecia_swap
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
@@ -33,7 +34,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.1"
+WERSJA = "3.2"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -1397,8 +1398,15 @@ def api_zdjecia():
     for z in baza.lista_zdjec(slug):
         z = dict(z)
         z["url"] = _url_pliku(z.get("plik"))
+        if z.get("typ") == "swap":
+            z["zrodlo_url"] = _url_pliku(z.get("zrodlo"))           # miniatura wstawionego zdjecia (wejscie -> wynik)
+            z["stroj_url"] = _url_pliku(z.get("stroj")) if z.get("stroj") else None
         lista.append(z)
     return _ok(zdjecia=lista)
+
+
+ZDJECIE_SIE_ROBI = ("To zdjecie wlasnie sie robi - fabryka dokonczy je sama (takze po restarcie panelu). Usuniecie teraz zgubiloby "
+                    "oplacony wynik - najpierw 'Przestan czekac' (gdy sprawdzisz w apce Higgsfield).")
 
 
 @app.route("/api/zdjecia/<int:zid>", methods=["DELETE"])
@@ -1406,12 +1414,131 @@ def api_usun_zdjecie(zid):
     try:
         slug = _wymaga_modelki()
         z = next((x for x in baza.lista_zdjec(slug) if x["id"] == zid), None)
+        if z and z.get("status") == "w_toku":
+            return _blad(ZDJECIE_SIE_ROBI, 409)
         if z and request.args.get("plik") == "1" and z.get("plik") and os.path.isfile(z["plik"]) and _plik_dozwolony(z["plik"]):
             os.remove(z["plik"])
         baza.usun_zdjecie(slug, zid)
     except ValueError as e:
         return _blad(e)
     return _ok()
+
+
+@app.route("/api/zdjecia/<int:zid>/przerwij", methods=["POST"])
+def api_przerwij_zdjecie(zid):
+    """'Przestan czekac' na zdjecie w toku (np. utknelo bez numeru joba). Wymaga {"potwierdzam": true} - kredyty mogly juz
+    zejsc. Zdjecie dostaje status 'blad' z prosba o sprawdzenie w apce. Nie w trakcie samego wysylania (409)."""
+    if not (request.json or {}).get("potwierdzam"):
+        return _blad("Potwierdz: kredyty za to zdjecie mogly juz zejsc - sprawdz najpierw w apce Higgsfield.")
+    try:
+        slug = _wymaga_modelki()
+        z = baza.zdjecie(slug, zid)
+        if z.get("status") != "w_toku":
+            return _blad("To zdjecie nie czeka na generacje.")
+        if fabryka.trwa_wysylanie():
+            return _blad("Zdjecie jest wlasnie wysylane - poczekaj chwile i sprobuj jeszcze raz.", 409)
+        marker = z.get("w_toku") or {}
+        job = marker.get("job_id") or z.get("job_id")
+        notatki = (f"Przerwane recznie (czekanie na {marker.get('model') or 'Higgsfield'}" + (f", job {job}" if job else ", bez numeru joba")
+                   + "). Sprawdz w apce Higgsfield (lista generacji), czy zdjecie nie powstalo - jesli tak, pobierz je stamtad.")
+        baza.ustaw_zdjecie(slug, zid, status="blad", w_toku=None, powod="inny", notatki=notatki)
+    except ValueError as e:
+        return _blad(e)
+    baza.dziennik_zapisz("uwaga", f"zdjecie #{zid}: {notatki}", modelka=slug, zdjecie=zid)
+    return _ok(zdjecie=baza.zdjecie(slug, zid))
+
+
+# ---------------- zdjecia: podmiana postaci (swap, 3.2, zdjecia_swap.py) ----------------
+
+def _zrodlo_swap(slug, nazwa):
+    """Nazwa wstawionego zdjecia (z /api/swap/zdjecie) -> sciezka w modelki/<slug>/swap_zrodla/ (tylko stamtad)."""
+    nazwa = os.path.basename(str(nazwa or "").strip())
+    sciezka = os.path.join(baza.folder_swap_zrodel(slug), nazwa)
+    if not nazwa or not os.path.isfile(sciezka):
+        raise ValueError("Wstaw zdjecie jeszcze raz (nie widze go na dysku).")
+    return sciezka
+
+
+OPCJE_SWAP = ("model", "proporcje", "jakosc", "rozdzielczosc", "ile", "stroj", "dopisek")
+
+
+def _opcje_swap(dane):
+    return {k: dane[k] for k in OPCJE_SWAP if k in dane and dane[k] is not None}
+
+
+@app.route("/api/swap")
+def api_swap_katalog():
+    """Strona Zdjecia: modele (chipy wg schematu modelu), stroje z biblioteki ze zdjeciem (ulubione na gorze), domyslne."""
+    try:
+        slug = _wymaga_modelki()
+    except ValueError as e:
+        return _blad(e)
+    kat = zdjecia_swap.katalog(slug)
+    kat["stroje"] = _biblioteka_dla_panelu(tylko_ze_zdjeciem=True)
+    kat["folder"] = baza.folder_zdjec(slug)
+    return _ok(**kat)
+
+
+@app.route("/api/swap/zdjecie", methods=["POST"])
+def api_swap_zdjecie():
+    """Wstawione zdjecie (multipart `plik`) -> kopia obrocona wg EXIF, bez metadanych w modelki/<slug>/swap_zrodla/. Nic nie
+    wysyla do Higgsfield. Zwraca {zrodlo (nazwa pliku), url, nazwa, szer, wys, proporcje {model: najblizsze}}."""
+    try:
+        slug = _wymaga_modelki()
+    except ValueError as e:
+        return _blad(e)
+    plik = request.files.get("plik") or next(iter(request.files.getlist("pliki")), None)
+    if not plik or not plik.filename:
+        return _blad("Wybierz zdjecie (png, jpg, webp).")
+    try:
+        sciezka = zdjecia_swap.zapisz_zrodlo(slug, plik.stream, plik.filename)
+    except ValueError as e:
+        return _blad(e)
+    wym = zdjecia_swap.wymiary(sciezka)
+    proporcje = {}
+    for m in zdjecia_swap.MODELE:
+        dost = zdjecia_swap.chipy(zdjecia_swap.schemat(m))["proporcje"]
+        proporcje[m] = zdjecia_swap.najblizsze_proporcje(wym[0], wym[1], dost) if wym else None
+    return _ok(zrodlo=os.path.basename(sciezka), url=_url_pliku(sciezka), nazwa=_nazwa_pliku(plik.filename),
+               szer=wym[0] if wym else None, wys=wym[1] if wym else None, proporcje=proporcje)
+
+
+@app.route("/api/swap/wycena", methods=["POST"])
+def api_swap_wycena():
+    """Cena N zdjec (darmowe `generate cost` bez mediow, cache po parametrach) + bezpieczniki. Nic nie tworzy, nic nie wgrywa."""
+    dane = request.json or {}
+    try:
+        slug = _wymaga_modelki()
+        zrodlo = _zrodlo_swap(slug, dane["zrodlo"]) if dane.get("zrodlo") else None
+        saldo = (_saldo_dostawcy("higgsfield") or {}).get("kredyty")
+        w = zdjecia_swap.wycena(slug, _opcje_swap(dane), zrodlo=zrodlo, saldo=saldo)
+    except ValueError as e:
+        return _blad(e)
+    return _ok(**w)
+
+
+@app.route("/api/swap", methods=["POST"])
+def api_swap_generuj():
+    """'Generuj': N zdjec z podmiana postaci jako zadanie w tle. Wymaga "kr" (cena 1 zdjecia z wyceny, ktora user widzial) -
+    przed kazdym wyslaniem fabryka liczy cene jeszcze raz i NIE wysyla, gdy wyszlaby wyzsza. 409, gdy cos juz trwa."""
+    dane = request.json or {}
+    try:
+        slug = _wymaga_modelki()
+        zrodlo = _zrodlo_swap(slug, dane.get("zrodlo"))
+        opcje = _opcje_swap(dane)
+        kr = float(dane["kr"]) if dane.get("kr") not in (None, "") else None
+        zdjecia_swap.zbuduj(slug, zrodlo, opcje)          # zle opcje / brak referencji -> 400 od razu, zanim cokolwiek ruszy
+    except (ValueError, TypeError) as e:
+        return _blad(e)
+    if kr is None or kr <= 0:
+        return _blad("Najpierw sprawdz cene - bez wyceny nic nie wysylam.")
+    if konsola.stan.get("trwa"):
+        return _blad(f"Cos juz trwa ({konsola.stan.get('typ') or 'inne zadanie'}) - poczekaj, az skonczy, i kliknij jeszcze raz.", 409)
+    try:
+        zadanie = konsola.uruchom("swap", slug, lambda log, stop: zdjecia_swap.generuj(slug, zrodlo, opcje, kr=kr, log=log, stop=stop))
+    except Zajete as e:
+        return _blad(f"Cos juz trwa ({e}) - poczekaj, az skonczy, i kliknij jeszcze raz.", 409)
+    return _ok(zadanie=zadanie)
 
 
 @app.route("/api/lipsync")
@@ -1612,16 +1739,25 @@ def api_zamknij():
 
 
 def wznow_przy_starcie():
-    """Start panelu: rolki w toku (job wyslany przed zamknieciem/aktualizacja) dokanczamy w tle - ten sam job, nic nowego
-    nie wysylamy. Zwraca opis zadania albo None (nic do wznowienia / konsola zajeta - wtedy zrobi to autopilot/generuj)."""
+    """Start panelu: rolki i zdjecia w toku (job wyslany przed zamknieciem/aktualizacja) dokanczamy w tle - ten sam job, nic
+    nowego nie wysylamy. Zwraca opis zadania albo None (nic do wznowienia / konsola zajeta - wtedy zrobi to autopilot/generuj)."""
     w_toku = {s: [p["id"] for p in baza.pomysly_w_toku(s)] for s in baza.lista_modelek()}
     w_toku = {s: ids for s, ids in w_toku.items() if ids}
-    if not w_toku:
+    zdjecia = {s: [z["id"] for z in baza.zdjecia_w_toku(s)] for s in baza.lista_modelek()}
+    zdjecia = {s: ids for s, ids in zdjecia.items() if ids}
+    if not w_toku and not zdjecia:
         return None
-    baza.dziennik_zapisz("info", "start panelu: dokanczam rolki w toku (bez wysylania drugi raz): "
-                         + ", ".join(f"{s} #{', #'.join(map(str, ids))}" for s, ids in w_toku.items()))
+    baza.dziennik_zapisz("info", "start panelu: dokanczam w toku (bez wysylania drugi raz): "
+                         + ", ".join([f"{s} #{', #'.join(map(str, ids))}" for s, ids in w_toku.items()]
+                                     + [f"{s} zdjecia #{', #'.join(map(str, ids))}" for s, ids in zdjecia.items()]))
+
+    def _wznow(log, stop):
+        wynik = fabryka.wznow_wszystkie(log=log, stop=stop) if w_toku else {}
+        if zdjecia:
+            wynik = {"rolki": wynik, "zdjecia": zdjecia_swap.wznow_wszystkie(log=log, stop=stop)}
+        return wynik
     try:
-        return konsola.uruchom("wznow", None, lambda log, stop: fabryka.wznow_wszystkie(log=log, stop=stop))
+        return konsola.uruchom("wznow", None, _wznow)
     except Zajete:
         return None
 
@@ -1676,6 +1812,8 @@ def main():
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     _foldery_na_pulpicie()
     threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
+    # chipy strony Zdjecia wg aktualnego schematu modeli (darmowe `model get`); bez CLI zostaje kopia z kodu
+    threading.Thread(target=zdjecia_swap.odswiez_schematy, daemon=True, name="schematy-swap").start()
     wznow_przy_starcie()
     if "--autopilot" in sys.argv:
         autopilot_start()

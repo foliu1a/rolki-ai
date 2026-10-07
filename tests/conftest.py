@@ -96,6 +96,7 @@ class UdawaneCLI:
         self.serwer = {}         # job_id -> koncowy job (to, co widzi `generate get` / `generate list`)
         self.odpytania = []      # job_id kazdego `generate get`
         self.uploady = []
+        self.wyceny = []         # (model, params, media) kazdego `generate cost` z ulamkami (koszt_dokladny)
 
     def kredyty(self):
         if self.blad_kredyty:
@@ -106,6 +107,11 @@ class UdawaneCLI:
         if self.blad_koszt:
             raise self.blad_koszt
         return self.cena
+
+    def koszt_dokladny(self, model, params=None, media=None):
+        """`generate cost` z ulamkami (zdjecia: 2.5 kr) - zapisuje zapytania, zeby testy widzialy, ze wycena nic nie wgrywa."""
+        self.wyceny.append((model, dict(params or {}), dict(media or {})))
+        return self.koszt(model, params, media)
 
     def generuj(self, model, params=None, media=None, wait=True, wait_timeout="30m"):
         from datetime import datetime, timezone
@@ -121,10 +127,12 @@ class UdawaneCLI:
             wynik = dict(wynik)
             wynik.setdefault("id", jid)
         wideo = (media or {}).get("video")
+        obrazy = (media or {}).get("image") or []
         wynik.setdefault("job_type", model)
         wynik.setdefault("created_at", datetime.now(timezone.utc).isoformat())
         wynik.setdefault("params", {"prompt": (params or {}).get("prompt"),
-                                    "medias": [{"role": "video", "data": {"id": wideo}}] if wideo else []})
+                                    "medias": ([{"role": "video", "data": {"id": wideo}}] if wideo else [])
+                                    + [{"role": "image", "data": {"id": o}} for o in obrazy]})
         self.serwer[wynik["id"]] = wynik
         if wait:
             return wynik
@@ -155,7 +163,7 @@ class UdawaneCLI:
 def cli(monkeypatch):
     """Udawane CLI + brak prawdziwego subprocess (gdyby cos jednak siegnelo do _uruchom)."""
     u = UdawaneCLI()
-    for nazwa in ("kredyty", "koszt", "generuj", "pobierz", "upload", "job", "joby"):
+    for nazwa in ("kredyty", "koszt", "koszt_dokladny", "generuj", "pobierz", "upload", "job", "joby"):
         monkeypatch.setattr(higgsfield_cli, nazwa, getattr(u, nazwa))
 
     def zakaz(*a, **k):

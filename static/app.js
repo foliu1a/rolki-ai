@@ -28,7 +28,7 @@ const FILTRY_ROLEK = [
   { id: 'blad', nazwa: 'nie wyszły', statusy: ['blad'] },
 ];
 const STATUS_NA_FILTR = { nowy: 'nowy', w_toku: 'w_trakcie', wygenerowany: 'w_trakcie', postprodukcja: 'w_trakcie', gotowe: 'gotowe', blad: 'blad' };
-const AKCEPT = { zrodlo: 'video/*,.mp4,.mov,.m4v,.webm', referencja: 'image/*', stroj: 'image/*', audio: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg' };
+const AKCEPT = { zrodlo: 'video/*,.mp4,.mov,.m4v,.webm', referencja: 'image/*', stroj: 'image/*', audio: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg', swap: 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp' };
 const STRONY_PO_ZADANIU = ['start', 'rolki', 'z-promptu', 'zdjecia', 'lipsync', 'historia', 'ustawienia'];
 const MODELE_SYNC_ZAPAS = ['lipsync-2', 'lipsync-2-pro', 'sync-3'];
 const KLUCZ_TRYBU = 'rolki.tryb';
@@ -186,7 +186,7 @@ function wstawIkony(root = document) {
 // Statusy rolek / zdjęć / lipsyncu – jedno proste słowo zamiast nazwy technicznej.
 const SLOWA_STATUSU = {
   rolka: { nowy: 'czeka', w_toku: 'generuje się', wygenerowany: 'zrobiona (jeszcze nie wyprana)', postprodukcja: 'w obróbce', gotowe: 'gotowa', blad: 'nie wyszło', pobieranie: 'pobieram' },
-  zdjecie: { nowy: 'czeka', wygenerowany: 'zrobione', postprodukcja: 'w obróbce', gotowe: 'gotowe', blad: 'nie wyszło' },
+  zdjecie: { nowy: 'czeka', w_toku: 'robi się', wygenerowany: 'zrobione', postprodukcja: 'w obróbce', gotowe: 'gotowe', blad: 'nie wyszło', niepewne: 'sprawdź w apce', pobieranie: 'pobieram' },
   lipsync: { nowy: 'w trakcie', wygenerowany: 'zrobiony', postprodukcja: 'w obróbce', gotowe: 'gotowy', blad: 'nie wyszło' },
 };
 function slowoStatusu(status, rodzaj = 'rolka') {
@@ -236,8 +236,8 @@ function prostyBlad(tekst) {
 }
 
 // Zadania w tle: nazwy i proste podsumowania wyników.
-const CO_ROBIE = { wznow: 'kończę rolki przerwane zamknięciem', skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
-const NAZWY_AKCJI = { wznow: 'Dokończenie przerwanych rolek', skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
+const CO_ROBIE = { wznow: 'kończę rolki i zdjęcia przerwane zamknięciem', skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia z opisu', swap: 'zdjęcia (podmiana postaci)', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
+const NAZWY_AKCJI = { wznow: 'Dokończenie przerwanych rolek i zdjęć', skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia z opisu', swap: 'Zdjęcia – podmiana postaci', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
 const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia' };
 
 function prostyWynik(typ, w) {
@@ -275,6 +275,15 @@ function prostyWynik(typ, w) {
       const z = Number(w.zrobione) || 0;
       return `${z} ${odmiana(z, 'zdjęcie', 'zdjęcia', 'zdjęć')}` + (w.stop ? `, ${prostyBlad(w.stop)}` : '');
     }
+    case 'swap': {
+      const z = Number(w.zrobione) || 0;
+      const cz = [`${z} ${odmiana(z, 'zdjęcie zrobione', 'zdjęcia zrobione', 'zdjęć zrobionych')}`];
+      if (n(w.odrzucone)) cz.push('odrzucone przez filtr treści (NSFW) – kredyty wróciły');
+      else if (n(w.bledy)) cz.push(`nie wyszło: ${n(w.bledy)}`);
+      if (n(w.w_toku)) cz.push(`jeszcze się robi: ${n(w.w_toku)} (dokończę sam)`);
+      if (w.stop && !/odrzucone/.test(w.stop)) cz.push(prostyBlad(w.stop));
+      return cz.join(', ');
+    }
     case 'podpis': return w.tekst ? `podpis: „${skroc(w.tekst, 80)}”` : 'bank podpisów jest pusty albo wszystko użyte';
     case 'podglad': return w.plik ? `podgląd gotowy: ${nazwaPliku(w.plik)} – zobacz go w Rolkach` : 'podgląd gotowy – zobacz go w Rolkach';
     case 'dograj_glos': return w.plik ? `komentarz dograny: ${nazwaPliku(w.plik)}` : 'komentarz dograny';
@@ -310,6 +319,7 @@ function postepZadania(z, linie) {
   return {
     skanuj: 'Sprawdzam nowe filmiki…', koszt: 'Liczę koszt…', pierz: 'Piorę rolkę w Media Tool…',
     lipsync: 'Dopasowuję usta do głosu… to może potrwać kilka minut', zdjecia: 'Robię zdjęcia…',
+    swap: 'Robię zdjęcia z podmianą postaci… zwykle 20–90 s każde',
     podpis: 'Dobieram podpis…', tts: 'Robię głos z tekstu…', telegram_wyslij: 'Wysyłam rolkę na telefon…',
     podglad: 'Robię tani podgląd… zwykle 1–2 min',
   }[typ] || 'Pracuję…';
@@ -319,6 +329,11 @@ function postepZadania(z, linie) {
 function prostyTekstWpisu(w) {
   const t = String((w && w.tekst) || '');
   let m;
+  // zdjęcia z podmianą postaci (zdjecia_swap.py): „zdjecie #N: …”
+  if ((m = t.match(/^zdjecie #(\d+): GOTOWE \((\d+) kr[^)]*\) -> (.+)$/))) return `Zdjęcie #${m[1]} gotowe (${kredytow(m[2])}): ${nazwaPliku(m[3])}`;
+  if ((m = t.match(/^zdjecie #(\d+): (\d+) kr \(/)) && w.typ === 'kredyty') return `Zdjęcie #${m[1]}: wydano ${kredytow(m[2])}`;
+  if ((m = t.match(/^zdjecie #(\d+): start \(/))) return `Zaczynam zdjęcie #${m[1]} (podmiana postaci)`;
+  if ((m = t.match(/^zdjecie #(\d+): (.*)$/))) return `Zdjęcie #${m[1]}: ${prostyBlad(m[2])}`;
   if ((m = t.match(/^#(\d+): GOTOWE -> (.+)$/))) return `Rolka #${m[1]} gotowa: ${nazwaPliku(m[2])}`;
   if ((m = t.match(/^#(\d+): WYGENEROWANE \((\d+) kr/))) return `Rolka #${m[1]} zrobiona (${kredytow(m[2])})`;
   if ((m = t.match(/^#(\d+): (?:NSFW -> zapas \S+: )?WYGENEROWANE \(\$(\d+)\.(\d\d)/))) return `Rolka #${m[1]} zrobiona ($${m[2]},${m[3]} WaveSpeed)`;
@@ -428,7 +443,7 @@ const state = {
   bledyOdswiezania: 0,   // kolejne nieudane odpytania /api/stan w tle – toast dopiero po kilku z rzędu (jednorazowy błąd nie alarmuje)
   otwartePrompty: new Set(), odtwarzane: new Set(), podglady: new Set(),   // podglady = rolki z otwartym filmem taniego podglądu
   // reszta stron
-  zdjecia: [], lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
+  zdjecia: [], zdjeciaJson: '', lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
   teksty: [], szablony: [], dziennik: [], historiaFiltr: 'wszystko',
   listy: {},             // cache list modeli/głosów: zapytanie -> {czas, pozycje, blad}
   konsola: { otwarta: false, logOd: 0, start: null, trwalo: false, timer: null, sprawdzanie: false, linie: [], oczekujacy: [] },
@@ -441,7 +456,7 @@ const state = {
 
 function wyczyscCachePersony() {
   state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear(); state.podglady.clear();
-  state.zdjecia = []; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
+  state.zdjecia = []; state.zdjeciaJson = ''; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
   state.stroje = []; state.nsfw = null;
   state.kosztJakosc = {}; state.rolkiJakosc = '';
   state.lancuch.wynik = null;
@@ -568,6 +583,7 @@ async function odswiez(wymusSaldo = false) {
       if (state.strona === 'start') ladujStart(true).catch(() => {});
       else if (state.strona === 'rolki' || state.strona === 'z-promptu') ladujRolki(true).catch(() => {});
       else if (state.strona === 'ustawienia') renderJakosc();
+      else if (state.strona === 'zdjecia' && state.zadanie && state.zadanie.trwa) ladujGalerieZdjec().catch(() => {});   // postęp zdjęć
     }
     if (state.zadanie && state.zadanie.trwa) startKonsoli();
     state.bledyOdswiezania = 0;
@@ -2390,20 +2406,257 @@ function renderZpLista() {
     : '<div class="pusto cicho"><b>Jeszcze nie ma rolek z promptu</b><span>Napisz krótko pomysł albo kliknij „Losuj”, a potem „Zrób rolkę”.</span></div>';
 }
 
-// ---------- Zdjęcia ----------
+// ---------- Zdjęcia (3.2): podmiana postaci jak w Higgsfield ----------
+// Wstawiasz zdjęcie (strefa, plik albo Ctrl+V) -> /api/swap/zdjecie zapisuje kopię (obróconą wg EXIF, bez metadanych) w folderze
+// persony -> pasek chipów (Model, Proporcje, Jakość, Rozdzielczość, Ile, Strój) wg schematu modelu z /api/swap -> cena na żywo
+// z /api/swap/wycena (darmowe `generate cost` bez zdjęć, cache po parametrach) -> „Generuj · X kr” pyta o zgodę i odpala zadanie
+// w tle (/api/swap). Stary formularz „zdjęcie z opisu” (autopilot) siedzi w zwiniętym „Zaawansowane”.
+state.sw = { katalog: null, slug: null, zrodlo: null, plik: null, ile: 1, wycena: null, liczy: false, wgrywa: false, seq: 0, timer: null };
+
 async function ladujZdjecia() {
+  const sw = state.sw, slug = state.aktywna;
+  if (!sw.katalog || sw.slug !== slug) {
+    const innaPersona = !!sw.slug && sw.slug !== slug;
+    sw.katalog = await api('/api/swap');
+    sw.slug = slug;
+    sw.wycena = null;
+    renderSwChipy(true);
+    // wstawione zdjęcie leży w folderze poprzedniej persony – to samo zdjęcie wgrywam dla nowej (nic nie idzie do Higgsfield)
+    if (innaPersona) { sw.zrodlo = null; if (sw.plik) swWgraj(sw.plik, true); }
+  }
+  renderSwPersona();
+  renderSwWstawione();
+  renderSwPrzycisk();
+  if (!sw.wycena && !sw.liczy && !sw.wgrywa) swWycenaPozniej(0);
+  // stary formularz (zdjęcia z opisu – autopilot) w „Zaawansowane”
   const s = state.stan || {};
   const u = s.ustawienia || {};
   $('#zdjecia-brak-modelu').hidden = !!u.zdjecia_model;
   $('#form-zdjecia').hidden = !u.zdjecia_model;
-  $('#zdjecia-opis-modelu').textContent = `Każde zdjęcie kosztuje ok. 2 kredyty Higgsfield.${state.pelny && u.zdjecia_model ? ` Model: ${u.zdjecia_model}.` : ''}`;
-  $('#zdjecia-dzis').textContent = `dziś zrobione: ${s.zdjecia_dzis !== undefined ? s.zdjecia_dzis : 0}${u.zdjecia_dziennie ? ` z ${u.zdjecia_dziennie} (autopilot)` : ''}`;
-  const [d, ust] = await Promise.allSettled([api('/api/zdjecia'), state.ustawieniaPelne ? Promise.resolve(state.ustawieniaPelne) : api('/api/ustawienia')]);
+  $('#zdjecia-opis-modelu').textContent = `Każde zdjęcie z opisu kosztuje ok. 2 kredyty Higgsfield.${u.zdjecia_model ? ` Model: ${u.zdjecia_model}.` : ''}${u.zdjecia_dziennie ? ` Autopilot robi ${u.zdjecia_dziennie} dziennie.` : ''}`;
+  const [, ust] = await Promise.allSettled([ladujGalerieZdjec(), state.ustawieniaPelne ? Promise.resolve(state.ustawieniaPelne) : api('/api/ustawienia')]);
   if (ust.status === 'fulfilled') { state.ustawieniaPelne = ust.value; state.stroje = ust.value.stroje || []; }
   renderStrojWybor();
-  if (d.status === 'rejected') throw d.reason;
-  state.zdjecia = d.value.zdjecia || [];
+}
+
+// Lista wyników (bez przeładowania paska) – także co 5 s, gdy na stronie Zdjęcia coś się robi.
+async function ladujGalerieZdjec() {
+  const d = await api('/api/zdjecia');
+  const json = JSON.stringify(d.zdjecia || []);
+  const s = state.stan || {};
+  $('#zdjecia-dzis').textContent = `Dziś zrobione: ${s.zdjecia_dzis !== undefined ? s.zdjecia_dzis : 0}. Gotowe lądują w folderze „tu zdjęcia zrobione”.`;
+  if (json === state.zdjeciaJson && $('#zdjecia-galeria').children.length) return;
+  state.zdjecia = d.zdjecia || [];
+  state.zdjeciaJson = json;
   renderZdjecia();
+}
+
+function swModel() {
+  const k = state.sw.katalog || {};
+  const lista = k.modele || [];
+  return lista.find(m => m.id === $('#sw-model').value) || lista.find(m => m.id === k.model_domyslny) || lista[0] || null;
+}
+
+function renderSwPersona() {
+  const k = state.sw.katalog || {};
+  const p = k.persona || {};
+  $('#sw-persona').textContent = p.nazwa || nazwaPersony(state.aktywna) || 'persona';
+}
+
+// Pasek jak w Higgsfield: chipy wg schematu wybranego modelu – opcja, której model nie ma, znika.
+function renderSwChipy(nowyKatalog = false) {
+  const k = state.sw.katalog;
+  if (!k) return;
+  const dom = k.domyslne || {};
+  if (nowyKatalog) {
+    const biezacy = $('#sw-model').value;
+    $('#sw-model').innerHTML = opcjeHtml((k.modele || []).map(m => [m.id, `${m.nazwa} · ${m.opis}`]),
+      (k.modele || []).some(m => m.id === biezacy) ? biezacy : (dom.model || k.model_domyslny));
+    const stroj = $('#sw-stroj').value;
+    const bib = (k.stroje || []).map(s => `<option value="${esc(s.id)}">${s.ulubiony ? '★ ' : ''}${esc(s.nazwa)}</option>`).join('');
+    $('#sw-stroj').innerHTML = `<option value="${esc(k.stroj_ze_zdjecia)}">Ze zdjęcia</option>`
+      + (bib ? `<optgroup label="Biblioteka strojów (★ = ulubione)">${bib}</optgroup>` : '');
+    ustawSelect('#sw-stroj', stroj || dom.stroj);
+  }
+  const m = swModel();
+  if (!m) return;
+  const jak = state.sw.zrodlo && state.sw.zrodlo.proporcje ? state.sw.zrodlo.proporcje[m.id] : null;
+  const prop = $('#sw-proporcje').value || dom.proporcje || k.jak_zdjecie;
+  $('#sw-proporcje').innerHTML = opcjeHtml([[k.jak_zdjecie, jak ? `Jak zdjęcie (${jak})` : 'Jak zdjęcie']].concat(m.proporcje.map(p => [p, p])),
+    prop === k.jak_zdjecie || m.proporcje.includes(prop) ? prop : k.jak_zdjecie);
+  const md = m.domyslne || {};
+  const q = $('#sw-jakosc').value;
+  $('#sw-jakosc').innerHTML = opcjeHtml(m.jakosc, m.jakosc.some(([v]) => v === q) ? q : md.jakosc);
+  $('#sw-chip-jakosc').hidden = !m.jakosc.length;
+  const r = $('#sw-rozdz').value;
+  $('#sw-rozdz').innerHTML = opcjeHtml(m.rozdzielczosc, m.rozdzielczosc.some(([v]) => v === r) ? r : md.rozdzielczosc);
+  $('#sw-chip-rozdz').hidden = !m.rozdzielczosc.length;
+  $('#sw-model').title = `${m.nazwa} – ${m.opis}`;
+  $('#sw-ile').textContent = `${state.sw.ile}/${k.max_ile || 4}`;
+  renderSwStrojMini();
+}
+
+function renderSwStrojMini() {
+  const k = state.sw.katalog || {};
+  const s = (k.stroje || []).find(x => x.id === $('#sw-stroj').value);
+  const img = $('#sw-stroj-mini');
+  if (s && s.url) { img.src = s.url; img.alt = s.nazwa; img.title = s.nazwa; img.hidden = false; }
+  else { img.hidden = true; img.removeAttribute('src'); }
+}
+
+function renderSwWstawione() {
+  const sw = state.sw, z = sw.zrodlo;
+  $('#sw-strefa').hidden = !!z;
+  $('#sw-wstawione').hidden = !z;
+  const strefa = $('#sw-strefa b');
+  if (strefa) strefa.textContent = sw.wgrywa ? 'Wstawiam zdjęcie…' : 'Upuść zdjęcie tutaj';
+  if (!z) return;
+  if ($('#sw-mini').getAttribute('src') !== z.url) $('#sw-mini').src = z.url;
+  $('#sw-nazwa').textContent = sw.wgrywa ? 'Wstawiam zdjęcie…' : z.nazwa;
+  $('#sw-wymiary').textContent = z.szer ? `${z.szer}×${z.wys} px` : '';
+}
+
+function swOpcje() {
+  return {
+    model: $('#sw-model').value, proporcje: $('#sw-proporcje').value, ile: state.sw.ile, stroj: $('#sw-stroj').value,
+    jakosc: $('#sw-chip-jakosc').hidden ? '' : $('#sw-jakosc').value,
+    rozdzielczosc: $('#sw-chip-rozdz').hidden ? '' : $('#sw-rozdz').value,
+    dopisek: $('#sw-dopisek').value.trim(),
+  };
+}
+
+function swWycenaPozniej(ms = 250) {
+  clearTimeout(state.sw.timer);
+  state.sw.timer = setTimeout(() => { swWycena().catch(() => {}); }, ms);
+}
+
+// Cena na żywo (darmowe `generate cost`, bez zdjęć – cena od nich nie zależy; serwer trzyma cache po parametrach).
+async function swWycena() {
+  const sw = state.sw;
+  if (!sw.katalog) return null;
+  const seq = ++sw.seq;
+  sw.liczy = true; sw.wycena = null;
+  renderSwPrzycisk();
+  $('#sw-info').innerHTML = '<span class="kropka akcent pulsuje"></span> Sprawdzam cenę w Higgsfield… (nic nie kosztuje)';
+  $('#sw-info').className = 'sw-info';
+  try {
+    const w = await api('/api/swap/wycena', 'POST', Object.assign({ zrodlo: sw.zrodlo ? sw.zrodlo.zrodlo : '' }, swOpcje()));
+    if (seq !== sw.seq) return null;
+    sw.wycena = w;
+    renderSwCena();
+    return w;
+  } catch (e) {
+    if (seq === sw.seq) { $('#sw-info').textContent = prostyBlad(e); $('#sw-info').className = 'sw-info zle'; }
+    return null;
+  } finally {
+    if (seq === sw.seq) { sw.liczy = false; renderSwPrzycisk(); }
+  }
+}
+
+function renderSwCena() {
+  const w = state.sw.wycena;
+  if (!w) return;
+  const d = w.dzis || {};
+  const ma = w.kr !== null && w.kr !== undefined;
+  const dodatki = [esc(w.opis || ''), 'sprawdzone w Higgsfield, nic nie zeszło'];
+  if (d.limit) dodatki.push(`dziś wydane ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))}`);
+  if (w.saldo !== null && w.saldo !== undefined) dodatki.push(`masz ${esc(liczba(w.saldo))} kr`);
+  $('#sw-info').innerHTML = ma
+    ? `Cena: <b>${esc(liczba(w.kr))} kr</b>${w.ile > 1 ? ` (${esc(liczba(w.kr_sztuka))} kr × ${w.ile})` : ''} <span class="muted">· ${dodatki.join(' · ')}</span>`
+      + (state.sw.zrodlo ? '' : ' <span class="muted">· wstaw zdjęcie, żeby zacząć</span>')
+    : 'Nie udało się sprawdzić ceny – spróbuj za chwilę.';
+  $('#sw-info').className = 'sw-info ' + (ma && w.mozna ? 'ok' : 'zle');
+  const uwagi = (w.powody || []).map(p => `Nie da się teraz: ${p}`).concat(w.ostrzezenia || []);
+  $('#sw-uwagi').innerHTML = uwagi.map(u => `<li>${esc(u)}</li>`).join('');
+  $('#sw-uwagi').hidden = !uwagi.length;
+}
+
+function renderSwPrzycisk() {
+  const sw = state.sw, w = sw.wycena;
+  const btn = $('#sw-generuj');
+  if (!btn) return;
+  const cena = w && w.kr !== null && w.kr !== undefined;
+  btn.disabled = !sw.zrodlo || sw.liczy || sw.wgrywa || !!(w && !w.mozna);
+  btn.textContent = cena ? `Generuj · ${liczba(w.kr)} kr` : (sw.liczy ? 'Sprawdzam cenę…' : 'Generuj');
+  btn.title = !sw.zrodlo ? 'Najpierw wstaw zdjęcie' : (w && !w.mozna ? 'Powód jest pod paskiem' : '');
+}
+
+// Wstawienie zdjęcia (strefa, wybór pliku, Ctrl+V): kopia trafia do folderu persony – do Higgsfield nic nie idzie.
+async function swWgraj(plik, cicho = false) {
+  if (!plik) return;
+  if (!/^image\/(png|jpe?g|webp)$/i.test(plik.type || '') && !/\.(png|jpe?g|webp)$/i.test(plik.name || '')) {
+    toast('To nie jest zdjęcie (png, jpg, webp).', 'uwaga');
+    return;
+  }
+  const sw = state.sw;
+  sw.wgrywa = true;
+  renderSwWstawione(); renderSwPrzycisk();
+  try {
+    const fd = new FormData();
+    fd.append('plik', plik, plik.name || 'wklejone.png');
+    sw.zrodlo = await api('/api/swap/zdjecie', 'POST', fd);
+    sw.plik = plik;
+    if (!cicho) toast('Zdjęcie wstawione. Wybierz model i kliknij „Generuj”.', 'ok');
+  } catch (e) {
+    bladToast(e);
+  } finally {
+    sw.wgrywa = false;
+    renderSwWstawione(); renderSwChipy();
+    swWycenaPozniej(0);
+  }
+}
+
+function swIle(krok) {
+  const max = (state.sw.katalog && state.sw.katalog.max_ile) || 4;
+  const n = Math.max(1, Math.min(max, state.sw.ile + krok));
+  if (n === state.sw.ile) return;
+  state.sw.ile = n;
+  $('#sw-ile').textContent = `${n}/${max}`;
+  swWycenaPozniej();
+}
+
+async function swGeneruj() {
+  const sw = state.sw;
+  if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
+  if (!sw.zrodlo) { toast('Najpierw wstaw zdjęcie (przeciągnij je, wybierz plik albo wklej Ctrl+V).', 'uwaga'); return; }
+  let w = sw.wycena;
+  if (!w || w.kr === null || w.kr === undefined) w = await swWycena();      // bez świeżej ceny: najpierw darmowa wycena
+  if (!w || w.kr === null || w.kr === undefined) return;
+  if (!w.mozna) { toast('Tego teraz nie zrobię – powód jest pod paskiem.', 'uwaga'); return; }
+  const k = sw.katalog || {};
+  const stroj = $('#sw-stroj').value === k.stroj_ze_zdjecia ? 'ze zdjęcia' : tekstOpcji('#sw-stroj').replace(/^★ /, '');
+  const ile = `${w.ile} ${odmiana(w.ile, 'zdjęcie', 'zdjęcia', 'zdjęć')}`;
+  const tresc = `<p><b>${esc(sw.zrodlo.nazwa)}</b> → <b>${esc(nazwaPersony(state.aktywna) || state.aktywna)}</b> (twarz, włosy i sylwetka persony; kadr, poza i tło ze zdjęcia)</p>`
+    + `<p class="muted">${esc(w.opis)} · strój: ${esc(stroj)} · ${esc(ile)}</p>`
+    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b>${w.ile > 1 ? ` (${esc(liczba(w.kr_sztuka))} kr za zdjęcie, każde osobno)` : ''}.`
+    + (w.saldo !== null && w.saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(Math.round((w.saldo - w.kr) * 100) / 100))} kr</b>.` : '') + '</p>'
+    + '<p class="dialog-uwaga">To wyda kredyty. Jeśli tuż przed wysłaniem cena wyjdzie wyższa – nic nie wyślę.</p>';
+  const ok = await potwierdz({ tytul: `Zrobić ${ile}?`, tresc, ok: `Generuj (${liczba(w.kr)} kr)` });
+  if (!ok) return;
+  try {
+    const r = await api('/api/swap', 'POST', Object.assign({ zrodlo: sw.zrodlo.zrodlo, kr: w.kr_sztuka }, swOpcje()));
+    state.konsola.start = null; state.konsola.trwalo = true;
+    state.zadanie = Object.assign({ trwa: true, typ: 'swap' }, r.zadanie || {});
+    toast(`Robię ${ile} – pojawią się niżej w Wynikach i w folderze „tu zdjęcia zrobione”.`, 'info');
+    if (state.pelny) otworzKonsole(true);
+    startKonsoli(); renderKonsolaStan();
+    sw.wycena = null; renderSwPrzycisk(); swWycenaPozniej(1500);
+    setTimeout(() => { ladujGalerieZdjec().catch(() => {}); }, 2000);
+  } catch (e) {
+    bladToast(e);
+  }
+}
+
+async function przerwijZdjecie(id) {
+  const w = await potwierdz({
+    tytul: 'Przestać czekać na to zdjęcie?',
+    tresc: '<p>Kredyty mogły już zejść. Najpierw sprawdź w apce Higgsfield (lista generacji), czy zdjęcie nie powstało – jeśli tak, pobierz je stamtąd.</p><p class="dialog-uwaga">Po tym fabryka przestanie na nie czekać (nie wyśle go drugi raz).</p>',
+    ok: 'Przestań czekać (sprawdziłem)', klasa: 'btn-zly',
+  });
+  if (!w) return;
+  await api(`/api/zdjecia/${id}/przerwij`, 'POST', { potwierdzam: true });
+  toast('Przestałem czekać – zdjęcie jest teraz „nie wyszło”.', 'info');
+  await ladujGalerieZdjec();
 }
 
 // Zdjęcia → „Strój”: Automatycznie (wg ustawienia zdjecia_stroje) / Bez stroju / Następny strój / konkretny plik ze stroje/.
@@ -2430,24 +2683,54 @@ function renderStrojMini() {
   if (s) { img.src = s.url || ''; img.alt = s.nazwa; img.title = s.nazwa; }
 }
 
+// Powód „nie wyszło” przy zdjęciu po ludzku (podmiana postaci: filtr NSFW / znana postać mają własne zdanie).
+function powodZdjecia(z) {
+  if (z.powod === 'nsfw') return 'Filtr treści Higgsfield odrzucił to zdjęcie (NSFW) – kredyty wróciły, nic nie wysłałem drugi raz. Spróbuj innego zdjęcia (mniej skóry), stroju albo modelu.';
+  if (z.powod === 'ip') return 'Model wykrył znaną postać albo markę – kredyty wróciły. Sprawdź, czy na zdjęciu nie ma logo albo celebryty.';
+  return state.pelny ? z.notatki : prostyBlad(z.notatki);
+}
+
+function kartaZdjecia(z) {
+  const swap = z.typ === 'swap';
+  const id = Number(z.id);
+  const robiSie = z.status === 'w_toku';
+  // swap: wynik duży, w rogu miniatura wstawionego zdjęcia (wejście -> wynik); bez wyniku – wstawione zdjęcie przygaszone
+  let obraz;
+  if (z.url) obraz = `<a href="${esc(z.url)}" target="_blank" rel="noopener"><img src="${esc(z.url)}" alt="" loading="lazy"></a>`;
+  else if (swap && z.zrodlo_url) obraz = `<div class="brak-obrazu zdjecie-czeka"><img src="${esc(z.zrodlo_url)}" alt="" loading="lazy">${robiSie ? '<span class="zdjecie-czeka-napis"><span class="kropka uwaga pulsuje"></span>robi się…</span>' : ''}</div>`;
+  else obraz = `<div class="brak-obrazu"><span class="ikona">${ikona('zdjecia')}</span></div>`;
+  const wejscie = swap && z.zrodlo_url && z.url
+    ? `<a class="zdjecie-wejscie" href="${esc(z.zrodlo_url)}" target="_blank" rel="noopener" title="Wstawione zdjęcie: ${esc(z.zrodlo_nazwa || '')}"><img src="${esc(z.zrodlo_url)}" alt="wstawione zdjęcie" loading="lazy"><span aria-hidden="true">→</span></a>` : '';
+  const opis = swap
+    ? `<div class="zdjecie-prompt" title="${esc(z.opis || '')}">${esc((z.opis || '').replace(/^Podmiana postaci: /, 'z: '))}</div>`
+    : `<div class="zdjecie-prompt" title="${esc(z.prompt)}">${esc(z.prompt || '')}</div>`;
+  const stroj = z.stroj && !swap ? `<span class="zdjecie-stroj" title="${esc(z.stroj)}">${ikona('stroj')}<span>strój: ${esc(bezRozszerzenia(nazwaPliku(z.stroj)))}</span></span>` : '';
+  const powod = z.status === 'blad' && (z.notatki || z.powod) ? `<div class="zdjecie-powod">${esc(powodZdjecia(z))}</div>`
+    : (z.notatki && !robiSie ? `<div class="muted">${esc(state.pelny ? z.notatki : prostyBlad(z.notatki))}</div>` : '');
+  const dlugo = robiSie && sekundOd(((z.w_toku || {}).od) || z.utworzono) > 15 * 60;
+  const przyciski = [
+    z.prompt && (state.pelny || !swap) ? `<button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(z.prompt)}" title="kopiuj prompt">${ikona('kopiuj')}</button>` : '',
+    robiSie && (dlugo || state.pelny) ? `<button class="btn btn-maly" type="button" data-akcja="przerwij-zdjecie" data-id="${id}" title="Gdy sprawdzisz w apce Higgsfield">Przestań czekać</button>` : '',
+    robiSie ? '' : `<button class="btn btn-maly btn-zly" type="button" data-akcja="usun-zdjecie" data-id="${id}">Usuń</button>`,
+  ].join('');
+  return `<figure class="zdjecie${swap ? ' swap' : ''}" data-id="${id}">
+    <div class="zdjecie-obraz">${obraz}${wejscie}</div>
+    <figcaption class="zdjecie-tresc">
+      <div class="zdjecie-stopka"><span class="status ${kolorStatusu(z.status)}"><span class="kropka ${kolorStatusu(z.status)}"></span>${esc(slowoStatusu(z.status, 'zdjecie'))}</span><span class="muted">${z.koszt ? esc(kredytow(z.koszt)) : ''}</span></div>
+      ${opis}${stroj}${powod}
+      <div class="zdjecie-stopka"><span class="muted">${esc(formatCzas(z.utworzono))}${state.pelny ? ` · #${id}` : ''}</span><span class="rzad" style="gap:4px">${przyciski}</span></div>
+    </figcaption>
+  </figure>`;
+}
+
 function renderZdjecia() {
   const kont = $('#zdjecia-galeria');
   const lista = state.zdjecia.slice().sort((a, b) => b.id - a.id);
   if (!lista.length) {
-    const u = (state.stan && state.stan.ustawienia) || {};
-    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>${u.zdjecia_model ? 'Wpisz, jakie zdjęcie chcesz, i kliknij „Zrób zdjęcie”.' : 'Najpierw wybierz model zdjęć w Ustawieniach – potem kliknij „Zrób zdjęcie”.'} Autopilot też może robić zdjęcia sam – ustaw „Ile zdjęć dziennie” w <a href="#ustawienia/autopilot">Ustawienia → Autopilot</a>.</span>${u.zdjecia_model ? '<button class="btn btn-maly btn-glowny" type="button" data-akcja="fokus-zdjecia">Zrób pierwsze zdjęcie</button>' : '<a class="btn btn-maly btn-glowny" href="#ustawienia/zdjecia">Wybierz model zdjęć</a>'}</div>`;
+    kont.innerHTML = `<div class="pusto" style="grid-column:1/-1"><span class="ikona">${ikona('zdjecia')}</span><b>Jeszcze nie ma zdjęć</b><span>Wstaw zdjęcie wyżej i kliknij „Generuj” – persona zajmie miejsce osoby na nim. Gotowe zdjęcia pojawią się tutaj i w folderze „tu zdjęcia zrobione”.</span><button class="btn btn-maly btn-glowny" type="button" data-akcja="sw-zmien">Wstaw zdjęcie</button></div>`;
     return;
   }
-  kont.innerHTML = lista.map(z => `<figure class="zdjecie" data-id="${Number(z.id)}">
-    ${z.url ? `<a href="${esc(z.url)}" target="_blank" rel="noopener"><img src="${esc(z.url)}" alt="" loading="lazy"></a>` : `<div class="brak-obrazu"><span class="ikona">${ikona('zdjecia')}</span></div>`}
-    <figcaption class="zdjecie-tresc">
-      <div class="zdjecie-stopka"><span class="status ${kolorStatusu(z.status)}"><span class="kropka ${kolorStatusu(z.status)}"></span>${esc(slowoStatusu(z.status, 'zdjecie'))}</span><span class="muted">${z.koszt !== null && z.koszt !== undefined ? esc(kredytow(z.koszt)) : ''}</span></div>
-      <div class="zdjecie-prompt" title="${esc(z.prompt)}">${esc(z.prompt || '')}</div>
-      ${z.stroj ? `<span class="zdjecie-stroj" title="${esc(z.stroj)}">${ikona('stroj')}<span>strój: ${esc(bezRozszerzenia(nazwaPliku(z.stroj)))}</span></span>` : ''}
-      ${z.notatki ? `<div class="muted">${esc(state.pelny ? z.notatki : prostyBlad(z.notatki))}</div>` : ''}
-      <div class="zdjecie-stopka"><span class="muted">${esc(formatCzas(z.utworzono))}${state.pelny ? ` · #${Number(z.id)}` : ''}</span><span class="rzad" style="gap:4px">${z.prompt ? `<button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(z.prompt)}" title="kopiuj opis">${ikona('kopiuj')}</button>` : ''}<button class="btn btn-maly btn-zly" type="button" data-akcja="usun-zdjecie" data-id="${Number(z.id)}">Usuń</button></span></div>
-    </figcaption>
-  </figure>`).join('');
+  kont.innerHTML = lista.map(kartaZdjecia).join('');
 }
 
 async function zrobZdjecia() {
@@ -2474,7 +2757,7 @@ async function usunZdjecie(id) {
   if (!w) return;
   await api(`/api/zdjecia/${id}${w.zaznaczone ? '?plik=1' : ''}`, 'DELETE');
   toast('Usunięto zdjęcie.', 'ok');
-  await ladujZdjecia();
+  await ladujGalerieZdjec();
 }
 
 // ---------- Lipsync ----------
@@ -3446,6 +3729,7 @@ async function zrobRolki() {
 async function wyslijPliki(typ, pliki) {
   pliki = Array.from(pliki || []);
   if (!pliki.length) return;
+  if (typ === 'swap') { await swWgraj(pliki[0]); return; }   // strona Zdjęcia: zdjęcie do podmiany postaci (jedno)
   const fd = new FormData();
   fd.append('typ', typ);
   pliki.forEach(f => fd.append('pliki', f, f.name));
@@ -3566,6 +3850,9 @@ document.addEventListener('click', async e => {
       // zdjęcia, lipsync
       case 'fokus-zdjecia': { const inp = $('#zd-prompt'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } break; }
       case 'usun-zdjecie': await usunZdjecie(id); break;
+      case 'przerwij-zdjecie': await przerwijZdjecie(id); break;
+      case 'sw-ile': swIle(Number(el.dataset.krok) || 0); break;
+      case 'sw-zmien': wybierzPliki('swap'); break;
       case 'usun-lipsync': await usunLipsync(id); break;
       case 'tts': await startTts(); break;
       // ustawienia
@@ -3595,6 +3882,7 @@ document.addEventListener('submit', async e => {
     if (f.id === 'form-nowa-persona') await nowaPersona();
     else if (f.id === 'form-pomysl-tekst') await dodajPomyslTekstowy(f);
     else if (f.id === 'form-zdjecia') await zrobZdjecia();
+    else if (f.id === 'form-swap') await swGeneruj();
     else if (f.id === 'form-lipsync') await startLipsync();
     else if (f.id === 'form-lipsync-dialog') await startLipsyncZDialogu();
     else if (f.hasAttribute('data-ustawienia')) await zapiszUstawienia(f);
@@ -3619,6 +3907,12 @@ document.addEventListener('change', e => {
   else if (el.id === 'ls-audio') { $('#ls-audio-sciezka-wrap').hidden = el.value !== '__inny'; if (el.value === '__inny') $('#ls-audio-sciezka').focus(); }
   else if (el.id === 'ls-dlg-audio') $('#ls-dlg-sciezka').hidden = !!el.value;
   else if (el.id === 'zd-stroj') renderStrojMini();
+  else if (el.matches && el.matches('[data-sw-pole]')) {
+    // pasek zdjęć: zmiana modelu przerysowuje chipy (proporcje/jakość/rozdzielczość wg schematu), potem świeża cena (0 kr)
+    if (el.id === 'sw-model') renderSwChipy();
+    if (el.id === 'sw-stroj') renderSwStrojMini();
+    swWycenaPozniej();
+  }
   else if (el.id === 'zp-persona') zmienPersone(el.value).catch(err => { bladToast(err); renderZpPersony(); });
   else if (el.id === 'zp-gotowe') {
     const g = ((state.zp.katalog || {}).pomysly || []).find(x => x.id === el.value);
@@ -3719,6 +4013,15 @@ document.addEventListener('drop', e => {
   e.preventDefault();
   const s = e.target.closest && e.target.closest('.strefa[data-upload]');
   if (s) { s.classList.remove('nad'); wyslijPliki(s.dataset.upload, e.dataTransfer.files); }
+});
+// Ctrl+V na stronie Zdjęcia: wklejony obraz (zrzut ekranu, skopiowane zdjęcie) = zdjęcie do podmiany postaci. Tekst wklejany
+// w pola (dopisek) przechodzi normalnie – przechwytujemy tylko pliki obrazów.
+document.addEventListener('paste', e => {
+  if (state.strona !== 'zdjecia' || !state.stan) return;
+  const pliki = Array.from((e.clipboardData && e.clipboardData.files) || []).filter(f => /^image\//i.test(f.type || ''));
+  if (!pliki.length) return;
+  e.preventDefault();
+  swWgraj(pliki[0]).catch(bladToast);
 });
 
 window.addEventListener('hashchange', zastosujHash);

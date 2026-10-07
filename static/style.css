@@ -981,3 +981,63 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
 @media (max-width: 720px) {
   .zp-stroj-mini { width: 52px; height: 68px; }
 }
+
+/* ---------- Zdjęcia 3.2: podmiana postaci – wstawione zdjęcie + pasek chipów jak w Higgsfield ---------- */
+.sw { gap: 14px; }
+.sw-strefa { min-height: 180px; justify-content: center; }
+.strefa.mala.sw-wstawione { justify-content: flex-start; flex-wrap: wrap; text-align: left; border-style: solid; border-width: 1px; }
+.sw-mini { width: 64px; height: 84px; object-fit: cover; border-radius: 8px; background: var(--karta-2); flex: none; }
+.sw-wstawione-tresc { display: flex; flex-direction: column; gap: 2px; min-width: 110px; flex: 1; }
+.sw-wstawione-tresc b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sw-wstawione-tresc small { color: var(--szary); white-space: nowrap; }
+.sw-wstawione .btn { margin-left: auto; }
+.sw-pasek { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sw-chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 3px 4px 3px 14px; max-width: 100%;
+  border: 1px solid var(--linia-2); border-radius: 999px; background: var(--karta-2); color: var(--tekst); font-size: 14.5px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.sw-chip:hover { border-color: var(--linia-3); }
+.sw-chip:focus-within { border-color: var(--akcent); box-shadow: 0 0 0 3px var(--akcent-tlo); }
+.sw-chip-etykieta { color: var(--szary); font-size: 12.5px; white-space: nowrap; }
+.sw-chip select {
+  width: auto; min-width: 0; max-width: 100%; min-height: 36px; padding: 4px 30px 4px 6px; border: 0; border-radius: 999px;
+  background-color: transparent; background-position: right 8px center; font-weight: 600; text-overflow: ellipsis;
+}
+.sw-chip select:focus { box-shadow: none; }
+.sw-ile { padding: 3px 4px; gap: 2px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.sw-ile span { min-width: 34px; text-align: center; }
+.sw-ile-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: var(--tekst); font-size: 20px;
+  line-height: 1; cursor: pointer;
+}
+.sw-ile-btn:hover { background: var(--karta-3); }
+.sw-chip-stroj { padding-left: 6px; }
+.sw-stroj-mini { width: 30px; height: 38px; object-fit: cover; border-radius: 999px 6px 6px 999px; flex: none; margin-right: 4px; }
+.sw-generuj { margin-left: auto; min-height: 48px; padding: 10px 24px; font-size: 16px; border-radius: 999px; }
+.sw-info { background: var(--karta-2); border: 1px solid var(--linia-2); border-left: 3px solid var(--linia-3);
+  border-radius: var(--promien-m); padding: 10px 14px; font-size: 14.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.sw-info .kropka { vertical-align: middle; margin-right: 6px; }
+.sw-info.ok { border-left-color: var(--ok); }
+.sw-info.zle { border-left-color: var(--zle); }
+.sw-dopisek textarea { margin-top: 8px; min-height: 64px; }
+/* wyniki: wynik duży, w rogu miniatura wstawionego zdjęcia (wejście -> wynik) */
+.zdjecie-obraz { position: relative; }
+.zdjecie .zdjecie-wejscie {
+  position: absolute; top: 8px; left: 8px; display: flex; align-items: center; gap: 2px; padding: 3px 6px 3px 3px;
+  background: rgba(0, 0, 0, .7); border-radius: 8px; color: #fff; font-weight: 700; text-decoration: none;
+}
+.zdjecie .zdjecie-wejscie img { width: 40px; height: 52px; aspect-ratio: auto; object-fit: cover; border-radius: 6px; }
+.zdjecie .zdjecie-czeka { position: relative; }
+.zdjecie .zdjecie-czeka img { opacity: .4; }
+.zdjecie-czeka-napis { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; font-weight: 600; font-size: 14px;
+  color: var(--tekst); text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+.zdjecie-czeka-napis .kropka { vertical-align: middle; margin-right: 6px; }
+.zdjecie-powod { font-size: 13.5px; line-height: 1.4; color: var(--tekst); background: var(--zle-tlo); border-radius: 8px; padding: 8px 10px; }
+@media (max-width: 720px) {
+  .sw-pasek { gap: 6px; }
+  .sw-chip { flex: 1 1 calc(50% - 6px); justify-content: space-between; }
+  .sw-chip select { flex: 1; }
+  .sw-ile { justify-content: center; }
+  .sw-generuj { flex: 1 1 100%; margin-left: 0; }
+}

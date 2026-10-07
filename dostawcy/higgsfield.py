@@ -43,6 +43,10 @@ def _prompt_na_drut(prompt):
     return re.sub(r"\n[ \t]*\n+", "\n", (prompt or "").strip())
 
 
+def _ten_sam_plik(a, b):
+    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+
+
 def przygotuj(z):
     """Zlecenie -> (model, params, media) dla CLI. Kolejnosc --image = numeracja @[Image N] w prompcie."""
     params = {
@@ -66,7 +70,10 @@ def przygotuj(z):
     obrazy = [o for o in (z.get("images") or []) if o]
     if obrazy:
         slug = z.get("slug")
-        media["image"] = baza.media_do_cli(slug, obrazy) if slug else obrazy   # UUID z cache zamiast ponownego uploadu
+        swiezy = z.get("obraz_swiezy")
+        # UUID z cache zamiast ponownego uploadu - poza `obraz_swiezy` (zdjecie usera w swapie: zawsze swiezy upload)
+        media["image"] = [o if (swiezy and _ten_sam_plik(o, swiezy)) or not slug else (baza.upload_id(slug, o) or o)
+                          for o in obrazy]
     for rola in ("audio", "start_image", "end_image"):
         if z.get(rola):
             media[rola] = z[rola]
@@ -77,6 +84,15 @@ def koszt(z):
     model, params, media = przygotuj(z)
     try:
         return hf.koszt(model, params, media)
+    except hf.HiggsfieldBlad as e:
+        raise BladDostawcy(str(e))
+
+
+def koszt_dokladny(z):
+    """Wycena z ulamkami (zdjecia: 2.5 kr) - `generate cost`, 0 kr, nic nie tworzy. Bez mediow w z = zero uploadu."""
+    model, params, media = przygotuj(z)
+    try:
+        return hf.koszt_dokladny(model, params, media)
     except hf.HiggsfieldBlad as e:
         raise BladDostawcy(str(e))
 
@@ -101,9 +117,12 @@ def zlec(z, klucz=None, znacznik=None, log=None):
     PRZED wyslaniem - po przerwaniu (zamkniety panel) fabryka znajdzie job po tym id na `generate list` zamiast wysylac drugi.
     klucz: Higgsfield nie ma Idempotency-Key - ignorowany. Rzuca BladDostawcy, gdy wyslanie sie nie udalo.
     WSZYSTKIE lokalne pliki (filmik, zdjecia bez UUID w cache, audio) sa wgrywane PRZED znacznikiem 'wysylam': sam
-    `generate create` jest wtedy szybki, a okno, w ktorym job moze powstac bez zapisanego id, mozliwie krotkie."""
+    `generate create` jest wtedy szybki, a okno, w ktorym job moze powstac bez zapisanego id, mozliwie krotkie.
+    z["obraz_swiezy"] (zdjecie usera w swapie zdjec, 3.2): ten obraz idzie swiezym uploadem (bez cache), a jego id trafia do
+    znacznik(obraz_id=...) - jak wideo_id u rolek: po przerwaniu job odnajdziemy po nim na `generate list --image`."""
     model, params, media = przygotuj(z)
     slug = z.get("slug")
+    swiezy = z.get("obraz_swiezy")
 
     def wgraj(sciezka, cache=False):
         try:
@@ -123,14 +142,26 @@ def zlec(z, klucz=None, znacznik=None, log=None):
         wideo_id = media["video"] = wgraj(wideo)        # swiezy upload per proba = unikalne id do odnalezienia joba
     elif wideo:
         wideo_id = str(wideo)
+    obraz_id = None
     if media.get("image"):
-        media["image"] = [wgraj(o, cache=True) if os.path.isfile(str(o)) else o for o in media["image"]]
+        wgrane = []
+        for o in media["image"]:
+            if swiezy and os.path.isfile(str(o)) and _ten_sam_plik(o, swiezy):
+                obraz_id = wgraj(o)                          # swiezy upload = unikalne id tej proby
+                wgrane.append(obraz_id)
+            else:
+                wgrane.append(wgraj(o, cache=True) if os.path.isfile(str(o)) else o)
+        media["image"] = wgrane
+    if swiezy and not obraz_id:
+        # bez swiezego id nie odnajdziemy joba po przerwaniu - nic nie wysylamy (job na pewno nie powstal)
+        raise BladDostawcy(f"brak pliku {os.path.basename(str(swiezy))} - nic nie wyslalem")
     for rola in ("audio", "start_image", "end_image"):
         if media.get(rola) and os.path.isfile(str(media[rola])):
             media[rola] = wgraj(media[rola])
     if znacznik:
-        # od tej chwili job MOZE powstac (wszystko juz wgrane) - po przerwaniu szukamy go po wideo_id, zamiast wysylac drugi
-        znacznik(wysylam=True, wideo_id=wideo_id)
+        # od tej chwili job MOZE powstac (wszystko juz wgrane) - po przerwaniu szukamy go po wideo_id / obraz_id, zamiast
+        # wysylac drugi
+        znacznik(wysylam=True, wideo_id=wideo_id, **({"obraz_id": obraz_id} if obraz_id else {}))
     try:
         job = hf.generuj(model, params, media, wait=False)
     except hf.HiggsfieldBlad as e:
@@ -178,18 +209,19 @@ def koszt_joba(wynik, wycena=None):
     return int(wycena or 0)
 
 
-def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), **_):
+def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, **_):
     """Szuka na `generate list` joba wyslanego przez przerwane wysylanie: ten sam model i ten sam wgrany filmik (media
     role=video, data.id == wideo_id - id jest swiezy dla kazdej proby, wiec BEZ filtra czasu: zegar komputera i serwera
     moze sie rozjechac) albo - bez filmiku - ten sam prompt i utworzony nie wczesniej niz `od` - 2 min.
+    obraz_id (swap zdjec, 3.2): job obrazu (`generate list --image`), w ktorego mediach jest swiezo wgrane zdjecie usera.
     Zwraca znormalizowany job albo None. Rzuca BladDostawcy, gdy listy nie da sie pobrac (wtedy NIE wolno wysylac ponownie)."""
     from datetime import datetime, timedelta, timezone
     try:
-        lista = hf.joby("video", 50)
+        lista = hf.joby("image" if obraz_id else "video", 50)
     except hf.HiggsfieldBlad as e:
         raise BladDostawcy(f"generate list: {e}")
     granica = None
-    if od and not wideo_id:
+    if od and not wideo_id and not obraz_id:
         try:
             granica = datetime.fromisoformat(str(od).replace("Z", "+00:00")) - timedelta(minutes=2)
             if granica.tzinfo is None:
@@ -213,7 +245,11 @@ def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), **_):
                 pass
         params = job.get("params") if isinstance(job.get("params"), dict) else {}
         media = params.get("medias") if isinstance(params.get("medias"), list) else []
-        if wideo_id:
+        if obraz_id:
+            ids = {str((m.get("data") or {}).get("id")) for m in media if isinstance(m, dict)}
+            if str(obraz_id) in ids:
+                return _normalizuj(job)
+        elif wideo_id:
             ids = {str((m.get("data") or {}).get("id")) for m in media if isinstance(m, dict) and m.get("role") == "video"}
             if str(wideo_id) in ids:
                 return _normalizuj(job)

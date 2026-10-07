@@ -38,7 +38,7 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
  "dzis": {"rolki": 3, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 135, "yapper": 0, "sync": 0}, "rolki_persony": 2},
  "foldery": {"wrzutnia": "C:\\Users\\yux\\Desktop\\ROLKI AI\\tu wrzucasz rolki\\Noemi", "gotowe": "...\\tu rolki zrobione\\Noemi", "zdjecia": "...\\tu zdjecia zrobione\\Noemi"},
  "pulpit": "C:\\Users\\yux\\Desktop\\ROLKI AI",
- "wersja": "2.9"}
+ "wersja": "3.2"}
 ```
 - Foldery na pulpicie (2.1): panel przy starcie (i `POST /api/modelki`) tworzy `Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>`,
   `...\tu rolki zrobione\<Persona>`, `...\tu zdjecia zrobione\<Persona>` i wpisuje je w `zrodla_dir` / `wyniki_dir` / `zdjecia_dir`
@@ -203,7 +203,7 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
 {"typ": "tts", "tekst": "Cześć!", "voice_id": "EXAVITQu4vr4xnSDxMaL", "nazwa": "intro"}   // sync.so -> audio/<nazwa>.mp3
 {"typ": "autopilot_raz"}                     // jeden przebieg autopilota dla aktywnej modelki
 ```
-Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez wysyłania drugi raz). Wynik `generuj`:
+Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek i zdjęć `w_toku`, bez wysyłania drugi raz). Wynik `generuj`:
 `{"wygenerowane", "bledy": [id], "odrzucone": [id] (NSFW/IP – podzbiór błędów, hamulec autopilota ich nie liczy), "pominiete", "w_toku", "stop"}`.
 - `GET /api/zadanie?od=0` → `{"trwa", "typ", "modelka", "start", "koniec", "wynik", "blad", "log": ["..."], "log_dlugosc": 42}`
   (`od` = indeks pierwszej linii logu, którą chcemy – panel dociąga tylko nowe)
@@ -260,9 +260,36 @@ Panel sam odpala przy starcie zadanie `wznow` (dokończenie rolek `w_toku`, bez 
 - `GET /api/glosy?dostawca=sync|higgsfield` → `{"glosy": [{"id": "...", "nazwa": "Rachel", "typ": "preset", "opis": "female"}]}`
   Gdy dostawca nie jest zalogowany/brak klucza: `{"ok": false, "blad": "..."}` (400) – GUI pokazuje komunikat, nie wywala się.
 
+## Zdjęcia – podmiana postaci (3.2, strona Zdjęcia, `zdjecia_swap.py`)
+User wstawia zdjęcie, persona aktywna w panelu zajmuje miejsce osoby na nim (kadr/poza/tło/światło ze zdjęcia; twarz, włosy,
+sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Higgsfield CLI.
+- `GET /api/swap` → `{"modele": [{"id": "seedream_v5_pro", "nazwa", "opis", "proporcje": ["9:16", ...], "jakosc": [["high", "Wysoka"], ...]
+  (pusta = model nie ma jakości – chip znika), "rozdzielczosc": [["2k", "2K"], ...], "max_obrazow": 10|null, "domyslne": {"jakosc", "rozdzielczosc"}}],
+  "model_domyslny": "seedream_v5_pro", "jak_zdjecie": "jak_zdjecie", "stroj_ze_zdjecia": "ze_zdjecia", "max_ile": 4, "max_dopisku": 300,
+  "domyslne": {"model", "proporcje": "jak_zdjecie", "ile": 1, "stroj": "ze_zdjecia"}, "persona": {slug, nazwa, referencje, sylwetka, wlosy},
+  "stroje": [{id, nazwa, ulubiony, ma_zdjecie, url}] (biblioteka – tylko ze zdjęciem, ulubione pierwsze), "folder": "...\\tu zdjecia zrobione\\Noemi"}`.
+  Modele: `seedream_v5_pro` (domyślny), `nano_banana_pro`, `gpt_image_2_5` – schematy z `model get` (panel odświeża je przy starcie, darmowe).
+- `POST /api/swap/zdjecie` multipart `plik` (png/jpg/webp) → kopia obrócona wg EXIF, bez metadanych, dłuższy bok ≤ 3072 px w
+  `modelki/<slug>/swap_zrodla/<czas>_<nazwa>.jpg|png` (nic nie idzie do Higgsfield) → `{"zrodlo": "<nazwa pliku>", "url", "nazwa",
+  "szer", "wys", "proporcje": {"<model>": "3:4"}}` (najbliższe obsługiwane proporcje). Nie-zdjęcie → 400.
+- `POST /api/swap/wycena {zrodlo?, model?, proporcje? ("jak_zdjecie" | "9:16"...), jakosc?, rozdzielczosc?, ile? (1-4), stroj?, dopisek?}`
+  → `{"model", "nazwa_modelu", "parametry": {aspect_ratio, resolution, quality?}, "opis", "ile", "kr_sztuka": 2.5 (cena 1 zdjęcia,
+  może być ułamkowa), "kr": 5 (razem), "kr_limit": 6 (do limitu dnia – w górę), "saldo", "dzis": {wydano (z rezerwą w toku), limit},
+  "min_kredyty", "mozna", "powody", "ostrzezenia"}`. Darmowe `generate cost` BEZ zdjęć (cena od nich nie zależy), cache 1 h po
+  parametrach. Wartość spoza schematu modelu → 400.
+- `POST /api/swap {zrodlo, model, proporcje, jakosc, rozdzielczosc, ile, stroj, dopisek, kr}` → `{"zadanie": {typ: "swap"}}`. Bez `kr`
+  (cena 1 zdjęcia z wyceny) → 400; coś trwa → 409. Każde zdjęcie = osobne zlecenie: wpis `w_toku` + znacznik przed wysłaniem, wstawione
+  zdjęcie świeżym uploadem (`w_toku.obraz_id`), create bez `--wait`, `job_id` zapisany od razu, cena liczona jeszcze raz (wyższa = nic),
+  limit dnia Higgsfield wspólny, blokada generacji persony; odrzucenie NSFW/IP = koniec serii (pozostałe nie idą). Wynik zadania:
+  `{"zrobione", "pliki", "bledy", "odrzucone", "w_toku", "stop", "ids"}`. Wznawianie: start panelu (`wznow`), autopilot, `fabryka.py wznow`.
+
 ## Zdjęcia, lipsync, dziennik, budżet, autopilot
-- `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki", "stroj"}]}`
-- `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik)
+- `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki", "stroj"}]}`; swap (3.2):
+  `typ: "swap"`, `status` też `w_toku`, `zrodlo` + `zrodlo_url` (miniatura wstawionego zdjęcia), `zrodlo_nazwa`, `model`, `parametry`,
+  `stroj_bib`, `stroj_url`, `opis` (krótko po polsku), `wycena` (np. 2.5), `koszt` (do limitu, w górę), `powod` (nsfw|ip|inny), `w_toku`
+- `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik); zdjęcie `w_toku` → 409
+- `POST /api/zdjecia/<id>/przerwij {"potwierdzam": true}` – „Przestań czekać” na zdjęcie `w_toku` (status blad + prośba o sprawdzenie
+  w apce); bez potwierdzenia 400, w trakcie wysyłania 409
 - `GET /api/lipsync` → `{"lipsync": [{"id", "wideo", "audio", "dostawca", "model", "pomysl_id", "status", "plik_wynikowy", "url", "koszt", "notatki", "utworzono", "styl"?, "audio_przygotowane"?}]}`
 - Brzmienie głosu (2.2): przed wysłaniem do sync.so głos jest przerabiany ffmpegiem wg ustawienia `lipsync_glos_styl`
   (`telefon` = jak nagranie z telefonu w pokoju: pasmo mikrofonu, lekki pogłos, szum tła, wyrównana głośność – domyślnie;
