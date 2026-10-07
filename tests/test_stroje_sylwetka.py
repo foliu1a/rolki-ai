@@ -442,3 +442,18 @@ def test_asystent_llm_komentarz_i_stroj_z_biblioteki(slug, monkeypatch):
     tresc = [z for z in zapytania if z and "messages" in z][0]["messages"][1]["content"]
     assert "*Ulubiony A" in tresc and "SPEAKER (the person filming, never visible): a young man" in tresc
     assert "krata_futerko" not in tresc                                   # odwazne nie sa juz domyslne
+
+
+def test_prawdziwa_biblioteka_bez_slow_ryzykownych():
+    """Opisy strojow z repo (stroje_biblioteka/stroje.json) ida do kazdej rolki z promptu - zero slow z SLOWA_RYZYKOWNE
+    (lace/mesh/fishnet/sheer/bra/mini skirt...), wyglad trzyma zdjecie stroju + slowa typu openwork, diamond-net."""
+    import json
+    plik = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stroje_biblioteka", "stroje.json")
+    stroje = json.load(open(plik, encoding="utf-8"))["stroje"]
+    assert len(stroje) >= 19 and sum(1 for s in stroje if s.get("ulubiony")) == 3
+    for s in stroje:
+        t = " " + re.sub(r"[^a-z0-9 -]+", " ", s["opis_en"].lower()) + " "
+        zle = [w for w in fabryka.SLOWA_RYZYKOWNE if f" {w} " in t or f" {w}s " in t]
+        assert not zle, (s["id"], zle)
+        if s.get("plik"):
+            assert os.path.isfile(os.path.join(os.path.dirname(plik), s["plik"])), s["plik"]
