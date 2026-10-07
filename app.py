@@ -33,7 +33,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.0"
+WERSJA = "3.1"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -274,7 +274,7 @@ def _lista_modeli(dostawca, typ=None, odswiez=False):
 # ---------------- pliki (bezpieczne serwowanie) ----------------
 
 def _dozwolone_foldery():
-    foldery = [baza.KATALOG_MODELEK]
+    foldery = [baza.KATALOG_MODELEK, baza.KATALOG_BIBLIOTEKI]      # biblioteka strojow: tylko miniatury (podglad w panelu)
     for slug in baza.lista_modelek():
         ust = baza.ustawienia_modelki(slug)
         for k in ("zrodla_dir", "wyniki_dir", "zdjecia_dir"):
@@ -503,7 +503,7 @@ def api_profil():
         return _blad(e)
     dane = request.json or {}
     zmiany = {}
-    for pole in ("instagram", "opis_stylu", "nazwa", "hashtagi", "wlosy"):
+    for pole in ("instagram", "opis_stylu", "nazwa", "hashtagi", "wlosy", "sylwetka"):
         if pole in dane:
             zmiany[pole] = str(dane[pole]).strip()
     if "wzrost_cm" in dane:
@@ -536,11 +536,19 @@ def _pomysl_dla_panelu(p):
     p["stroj_url"] = _url_pliku(p.get("stroj"))
     p["audio_nazwa"] = os.path.basename(p["audio"]) if p.get("audio") else None
     p["wariant"] = "prompt" if fabryka.z_promptu(p) else ("B" if p.get("stroj") else ("A" if p.get("zrodlo") else "tekst"))
+    # stroj z biblioteki (rolki z filmu i z promptu): nazwa PL do karty; zmiana stroju tylko przed generacja rolki z filmu
+    bib = baza.stroj_biblioteki(p.get("stroj_bib") or ((p.get("z_promptu") or {}).get("stroj_id")
+                                                       if (p.get("z_promptu") or {}).get("stroj_tryb") == "biblioteka" else None))
+    p["stroj_nazwa"] = bib["nazwa"] if bib else (os.path.basename(p["stroj"]) if p.get("stroj") else None)
+    p["stroj_ulubiony"] = bool(bib and bib["ulubiony"])
+    p["mozna_zmienic_stroj"] = (not fabryka.z_promptu(p) and bool(p.get("zrodlo")) and p.get("status") in ("nowy", "blad"))
     if fabryka.z_promptu(p):
         zp = p.get("z_promptu") or {}
         info = scenariusz.MODELE.get(zp.get("model") or "", {})
-        glos = {"tts": "głos ElevenLabs" + ("" if p.get("glos_dograny") else " (do dogrania)"),
-                "model": "głos modelu"}.get(zp.get("glos") or "", "")
+        kto = {"chlopak": "chłopak", "dziewczyna": "dziewczyna"}.get(zp.get("nagrywa") or "", "")
+        glos = {"tts": ("głos ElevenLabs" + (f" ({kto})" if kto else "") + ("" if p.get("glos_dograny") else " – do dogrania")
+                        if zp.get("komentarz") else ""),
+                "model": "głos modelu (stara rolka)"}.get(zp.get("glos") or "", "")
         p["z_promptu_opis"] = " · ".join(x for x in (zp.get("miejsce_nazwa"), (info.get("nazwa") or zp.get("model") or "").split(" –")[0],
                                                        f"{zp.get('dlugosc')} s" if zp.get("dlugosc") else "", zp.get("rozdzielczosc"),
                                                        "inne włosy" if zp.get("wlosy_zmienione") else "", glos) if x)
@@ -566,7 +574,8 @@ def api_pomysly():
         aktywna = _wymaga_modelki()
     except ValueError as e:
         return _blad(e)
-    return _ok(pomysly=[_pomysl_dla_panelu(p) for p in baza.lista_pomyslow(aktywna)], statusy=baza.STATUSY)
+    return _ok(pomysly=[_pomysl_dla_panelu(p) for p in baza.lista_pomyslow(aktywna)], statusy=baza.STATUSY,
+               biblioteka=_biblioteka_dla_panelu(tylko_ze_zdjeciem=True), ma_prompt_b=bool(baza.prompt_stroj(aktywna)))
 
 
 @app.route("/api/pomysly", methods=["POST"])
@@ -623,6 +632,56 @@ def api_ponow_pomysl(pid):
     return _ok(pomysl=_pomysl_dla_panelu(pomysl), od_zapasu=bool(krok))
 
 
+@app.route("/api/pomysly/<int:pid>/stroj", methods=["POST"])
+def api_stroj_pomyslu(pid):
+    """Zmiana stroju rolki z filmu PRZED generacja: {"stroj": "z_filmu" | "<id ze stroje_biblioteka (ze zdjeciem)>"}.
+    z_filmu = wariant A (prompt A), stroj z biblioteki = wariant B (prompt B, zdjecie stroju jako ostatni obraz). Prompt
+    zmieniamy tylko, gdy rolka ma prompt persony (A/B) albo pusty - wlasny prompt rolki zostaje (z uwaga)."""
+    try:
+        aktywna = _wymaga_modelki()
+        p = baza.pomysl(aktywna, pid)
+    except ValueError as e:
+        return _blad(e)
+    if p.get("status") == "w_toku":
+        return _blad(GENERUJE_SIE, 409)
+    if fabryka.z_promptu(p) or not p.get("zrodlo"):
+        return _blad("Stroj zmieniasz tylko w rolkach z filmiku (rolka z promptu: zrob nowa w zakladce Z promptu).")
+    if p.get("status") not in ("nowy", "blad"):
+        return _blad("Ta rolka jest juz zrobiona - stroj zmienia sie tylko przed generacja.")
+    wybor = str((request.json or {}).get("stroj") or "").strip()
+    prompt_a, prompt_b = baza.prompt_bazowy(aktywna), baza.prompt_stroj(aktywna)
+    obecny = (p.get("prompt_higgsfield") or "").strip()
+    persony = obecny in ("", prompt_a.strip(), prompt_b.strip())
+    if wybor == "z_filmu":
+        zmiany = {"stroj": None, "stroj_bib": None}
+        nowy_prompt = prompt_a
+    else:
+        s = baza.stroj_biblioteki(wybor)
+        if not s or not s.get("plik"):
+            return _blad("Nie ma takiego stroju ze zdjeciem w bibliotece strojow.")
+        if not prompt_b:
+            return _blad("Ta persona nie ma promptu B (stroj ze zdjecia) - bez niego stroj z biblioteki nie zadziala. "
+                         "Ustawienia -> Prompty.")
+        zmiany = {"stroj": s["plik"], "stroj_bib": s["id"]}
+        nowy_prompt = prompt_b
+    uwaga = ""
+    if persony:
+        zmiany["prompt_higgsfield"] = nowy_prompt
+    else:
+        uwaga = "Ta rolka ma wlasny prompt - zostawilem go; sprawdz, czy pasuje do nowego stroju."
+    pomysl = baza.aktualizuj_pomysl(aktywna, pid, **zmiany)
+    baza.dziennik_zapisz("info", f"#{pid}: stroj -> {('z filmu' if wybor == 'z_filmu' else zmiany.get('stroj_bib'))}",
+                         modelka=aktywna, pomysl=pid)
+    return _ok(pomysl=_pomysl_dla_panelu(pomysl), uwaga=uwaga)
+
+
+def _biblioteka_dla_panelu(tylko_ze_zdjeciem=False):
+    """Stroje z biblioteki do list w panelu: ulubione na gorze (gwiazdka), z miniatura, gdy jest zdjecie."""
+    return [{"id": s["id"], "nazwa": s["nazwa"], "ulubiony": s["ulubiony"], "ma_zdjecie": bool(s["plik"]),
+             "url": _url_pliku(s["plik"]) if s["plik"] else None}
+            for s in sorted(baza.stroje_biblioteki(tylko_ze_zdjeciem), key=lambda s: (not s["ulubiony"], -s["waga"]))]
+
+
 @app.route("/api/pomysly/<int:pid>/przerwij", methods=["POST"])
 def api_przerwij_czekanie(pid):
     """'Przestan czekac' na rolke w toku (np. utknela bez numeru joba). Wymaga {"potwierdzam": true} - panel pyta wczesniej,
@@ -673,7 +732,7 @@ def api_usun_pomysl(pid):
 
 OPCJE_Z_PROMPTU = ("pomysl_id", "tekst", "miejsce", "model", "dlugosc", "rozdzielczosc", "wlosy", "stroj", "stroj_tekst", "reakcja",
                    "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone", "obiekt", "nazwy", "glos", "wymowa",
-                   "asystent")
+                   "asystent", "nagrywa")
 
 
 def _slug_z_promptu(dane):
@@ -709,21 +768,24 @@ def api_z_promptu_katalog():
     kat = scenariusz.katalog(slug)
     kat["domyslne"] = dict(baza.USTAWIENIA_DOMYSLNE["z_promptu"], **(baza.ustawienia_modelki(slug).get("z_promptu") or {}))
     kat["glos_tts"] = _stan_tts()
-    kat["glos_id"] = baza.ustawienia_modelki(slug).get("z_promptu_glos") or ""
+    kat["stroje_biblioteka"] = _biblioteka_dla_panelu()
     kat["asystent_llm"] = bool(sekrety.klucz("openrouter"))
     return _ok(**kat)
 
 
 def _stan_tts():
-    """Czy komentarz moze isc przez ElevenLabs (klucz jest i dziala) - sprawdzenie bez kosztu, cache 10 min."""
+    """Czy komentarz moze isc przez ElevenLabs (klucz jest i dziala) - sprawdzenie bez kosztu, cache 10 min. Bez ElevenLabs rolka
+    wychodzi BEZ komentarza (model wideo nigdy nie mowi) - komunikat mowi to wprost."""
+    bez = " – rolka wyjdzie bez komentarza zza kamery (model wideo nic nie mówi); dograsz go potem przyciskiem „Dograj głos”."
     if not sekrety.klucz("elevenlabs"):
-        return {"ok": False, "komunikat": "brak klucza ElevenLabs – komentarz mówi model wideo (z poprawioną pisownią ą/ę)"}
+        return {"ok": False, "komunikat": "Brak klucza ElevenLabs (Ustawienia → Konta)" + bez}
     try:
         import komentarz_glos
         ok, kom = komentarz_glos.tts_dostepne()
     except Exception as e:
         ok, kom = False, str(e)
-    return {"ok": ok, "komunikat": "ElevenLabs działa – komentarz dograny po generacji" if ok else kom}
+    return {"ok": ok, "komunikat": "ElevenLabs działa – komentarz osoby nagrywającej dogram po generacji." if ok
+            else f"ElevenLabs nie działa ({kom})" + bez}
 
 
 @app.route("/api/z-promptu/asystent", methods=["POST"])
@@ -738,10 +800,9 @@ def api_z_promptu_asystent():
         if not isinstance(zab, dict):
             raise ValueError("zablokowane musi byc slownikiem.")
         tts = _stan_tts()
-        glos = "tts" if tts["ok"] else "model"
         w = asystent.dobierz(slug, (dane.get("tekst") or "").strip(), pomysl_id=dane.get("pomysl_id") or None,
                              zablokowane=zab, uzyj_llm=not dane.get("bez_llm"),
-                             glos_efektywny=zab.get("glos") if zab.get("glos") in ("tts", "model") else glos)
+                             glos_efektywny="tts" if tts["ok"] else "brak")
     except LookupError as e:
         return _blad(e, 404)
     except ValueError as e:
@@ -997,6 +1058,7 @@ def api_ustawienia():
         prompty={"a": baza.prompt_bazowy(slug), "b": baza.prompt_stroj(slug), "zdjecia": tekst_zdjec},
         referencje=_lista_plikow(baza.folder_referencji(slug), baza.ROZSZERZENIA_OBRAZU),
         stroje=_lista_plikow(baza.folder_strojow(slug), baza.ROZSZERZENIA_OBRAZU),
+        biblioteka=_biblioteka_dla_panelu(),
         audio=_lista_plikow(baza.folder_audio(slug), baza.ROZSZERZENIA_AUDIO),
         foldery={"modelka": baza.folder_modelki(slug), "wrzutnia": baza.folder_zrodel(slug), "gotowe": baza.folder_gotowych(slug),
                  "zdjecia": baza.folder_zdjec(slug), "audio": baza.folder_audio(slug), "referencje": baza.folder_referencji(slug),
@@ -1007,6 +1069,12 @@ def api_ustawienia():
 def _rzutuj(klucz, wartosc):
     """Wartosc z formularza -> typ jak w USTAWIENIA_DOMYSLNE (bool/int/dict/str)."""
     dom = baza.USTAWIENIA_DOMYSLNE[klucz]
+    wybory = {"stroj_swap": ("biblioteka", "z_filmu"), "nagrywa": ("chlopak", "dziewczyna")}
+    if klucz in wybory:
+        v = str(wartosc or "").strip()
+        if v not in wybory[klucz]:
+            raise ValueError(f"{klucz}: dozwolone {' / '.join(wybory[klucz])}")
+        return v
     if klucz == "zapas_nsfw":
         # [{"dostawca": "yapper", "model": "wan-3.0-prime"}, ...] - z formularza moze przyjsc jako tekst JSON
         if isinstance(wartosc, str):

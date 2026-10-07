@@ -164,7 +164,7 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - **Reakcje zdziwienia** (prosba usera): `REAKCJE_ZDZIWIENIE` (dwa_razy, para_kreci_glowa, szturcha_kolege, kasjerka_zamiera,
   mama_odciaga, szepcze_patrzac) + `SUBTELNE_REAKCJE` + `LINIE_REAKCJI` ("Jak ona może tak chodzić?", "Widziałaś to?", "No ja nie
   mogę…"); ton komentarza "half-whispering in disbelief".
-- **Glos komentarza** (`glos`): "model" (mowi model wideo; `wymowa: "fonetyczna"` = `fonetycznie()` w klamrach: wygląda ->
+- **Glos komentarza** (`glos`, stan 3.0 - od 3.1 tylko ElevenLabs, patrz "3.1" nizej): "model" (mowi model wideo; `wymowa: "fonetyczna"` = `fonetycznie()` w klamrach: wygląda ->
   wyglonda, mogę -> moge, się -> sie - model czyta polska pisownie fonetycznie), "tts" (wideo z SAMYM otoczeniem,
   `DZWIEK_BEZ_MOWY`; komentarz dogrywa `komentarz_glos.py` po pobraniu, PRZED Media Tool: ElevenLabs eleven_v3 z [whispers] ->
   pasmo telefonu + odbicia -> glosnosc = otoczenie (ebur128) + 3 LU w granicach -27..-15 LUFS -> adelay do `komentarz_t`
@@ -200,6 +200,42 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   cena (auto po dobraniu, darmowa), jeden duzy "Zrob rolke" (bez swiezej ceny najpierw ja sprawdza, potem pyta "Zrobic za N
   kr?"); wszystko inne w "Zmien szczegoly" (reczne zmiany = `state.zp.reczne`, asystent ich nie nadpisuje; "Oddaj wszystko
   asystentowi"). Karta rolki z promptu: "Asystent: dlaczego", "Jak wyszla? Dobra / Slaba", "Dograj glos".
+
+## 3.1 (2026-10-07): biblioteka strojow, sylwetka, glos tylko ElevenLabs
+
+- **Biblioteka strojow** `stroje_biblioteka/` (w gicie, wspolna dla person): `stroje.json` {id, nazwa PL, plik PNG albo null = sam
+  opis, ulubiony, waga 3/2/1, styl, opis_en} + oczyszczone PNG (ubranie na osobie/manekinie). `baza.stroje_biblioteki()`,
+  `stroj_biblioteki(id)`, `uzycia_strojow(slug)` (z pomysly.json: `stroj_bib` / z_promptu.stroj_id), `losuj_stroj_biblioteki()`
+  = waga x rotacja (ostatnio uzyte 1/3 puli odpadaja, najdawniej uzyte do 2x czesciej) x `mnozniki` (nauka) bez `unikaj` (NSFW).
+  Testy przekierowuja `baza.KATALOG_BIBLIOTEKI` na pusty tmp (fixtura `biblioteka` w conftest robi mala).
+- **Swap** (`stroj_swap` persony, domyslnie `biblioteka`, panel: Ustawienia -> Stroje i glos): `skanuj` daje KAZDEMU NOWEMU klipowi
+  stroj z biblioteki ZE ZDJECIEM -> wariant B (prompt B + zdjecie = ostatni --image, `p.stroj_bib`). Pierwszenstwo:
+  `<nazwa>.stroj.png` > `stroj_domyslny` > biblioteka; persona bez promptu B = wariant A + uwaga. Klipy w kolejce sie nie zmieniaja.
+  Zmiana przy klipie: `POST /api/pomysly/<id>/stroj` (panel Rolki: lista "Stroj: z filmu / ..."). `stroj_ze_zdjecia.txt` jest dla
+  wszystkich 4 person (Alicja/Lilianna @Image 5, Noemi 6, Bianka 7; zrobione z A wg wzoru roznic Noemi A->B, + zdanie "shows only
+  the clothing - ignore the hair, face, skin, tattoos and body shape of the person or mannequin"; kopia Noemi: `.bak`; Bianka nadal
+  mowi "five" zdjec - decyzja usera). Zapas Wan dla wariantu B dalej wylaczony (wan.txt bierze stroj z filmu) - wpis w dzienniku.
+- **Z promptu**: `stroj: "biblioteka" | "biblioteka:<id>"` (domyslny w panelu/asystencie/CLI; pusta biblioteka -> odwazny);
+  `opis_en` zawsze w prompcie, zdjecie stroju gdy jest i model ma miejsce (Gemini max 7 - inaczej sam opis) z jasnym zdaniem
+  "tylko ubranie". Odwazne/codzienne/cosplay zostaja w "Zmien szczegoly". Asystent wybiera z biblioteki (ulubione `*` dla LLM).
+- **Sylwetka**: `profil.sylwetka` (EN, panel: Ustawienia -> Persona -> "Sylwetka (po angielsku)"). Z promptu: "Body shape
+  (highest priority after her face): ..." tuz po wlosach/wzroscie, w limicie modelu (inaczej 1. zdanie / bez + ostrzezenie).
+  Swap: `fabryka.zlecenie` dokleja "BODY SHAPE (highest priority after face): ..." na koncu promptu A/B (pliki usera nietkniete,
+  pomysl.prompt_higgsfield tez); Wan (yapper/WaveSpeed) tylko gdy miesci sie w 5000 znakow (`doklej_sylwetke`, uwaga w
+  `sprawdz_prompt_wan`). Noemi: slowo "cleavage" jest na liscie `SLOWA_RYZYKOWNE` (Pomoc -> NSFW pokazuje).
+- **Glos**: model wideo NIGDY nie mowi (zawsze `DZWIEK_BEZ_MOWY`: persona nic nie mowi, nikt do kamery, ludzie tylko szemrza);
+  "auto"/stare "model" = "tts". Bez dzialajacego ElevenLabs rolka wychodzi BEZ komentarza (dziennik + `glos_blad` + "Dograj
+  glos"), nigdy mowa modelu. Komentarz mowi osoba NAGRYWAJACA: ustawienie persony `nagrywa` (chlopak domyslnie / dziewczyna,
+  per rolka w "Zmien szczegoly"), Voice ID `glos_chlopak` / `glos_dziewczyna` > `komentarz_glos.GLOSY_DOMYSLNE` (user wybral:
+  chlopak = Max `wJmRkw9W1EUa95AGkMrg`, dziewczyna = Jessica `cgSgspJ2msm6clMCkdW9`) > zapas, gdy ID nie dziala (`tts_osoby`):
+  dobor z konta - TYLKO premade/professional, polski, ta plec, nigdy cloned ani o imieniu jakiejkolwiek persony.
+  Brzmienie (`lancuch_telefonu`, prosba usera): wyraznie nagrane telefonem, ktory filmuje - highpass 250 Hz x2, lowpass 6,8 kHz x2,
+  +4 dB ~3 kHz, acompressor jak AGC telefonu, krotkie odbicia, bardzo cichy szum toru (anoisesrc). Darmowe demo bez TTS:
+  `komentarz_glos.probka(plik_glosu, cel.mp3)` (np. ..\claudzik\probka_glos_max_telefon.mp3). Komentarz TYLKO w rolkach z promptu.
+  Linie: `KOMENTARZE` neutralne, `WARIANTY_PLCI` (odważył/odważyła...) + `dopasuj_do_mowiacego`, LLM-owe sprawdza
+  `pasuje_do_mowiacego`. TTS dalej eleven_v3 + [whispers]. `z_promptu_glos` i "Pisownia dla modelu" usuniete z panelu.
+- Testy: tests/test_stroje_sylwetka.py (wagi, rotacja, swap B, numer obrazu, endpoint stroju, sylwetka A/B/Z promptu/Wan, brak
+  mowy z modelu, plec komentarzy, asystent z biblioteka) + glos_id w test_asystent_glos.py.
 
 ## Postprodukcja
 
@@ -262,15 +298,18 @@ app.py              panel Flask :5077 - kontrakt w API.md; jedno zadanie w tle n
                     /api/statystyki, /api/diagnoza, /api/autopilot/wznow; saldo w tle (stale-while-revalidate)
 templates/, static/ index.html + style.css + app.js (SPA, vanilla JS, bez CDN), widget.html (/widget - male okno)
 panel.py            (stary panel w konsoli - do skasowania, decyzja usera 2026-10-04)
+stroje_biblioteka/  wspolna biblioteka strojow (stroje.json + PNG; w gicie) - swap i Z promptu (3.1)
 modelki/<slug>/
-  profil.json       nazwa, instagram, cechy, hashtagi, wzrost_cm ("158-160"), wlosy (EN, wlosy ze zdjec - rolki z promptu)
+  profil.json       nazwa, instagram, cechy, hashtagi, wzrost_cm ("158-160"), wlosy (EN, wlosy ze zdjec - rolki z promptu),
+                    sylwetka (EN, doklejana do kazdej rolki - 3.1)
   ustawienia.json   patrz baza.USTAWIENIA_DOMYSLNE (komentarze = dokumentacja): dostawca (higgsfield|yapper|wavespeed), model/mode/aspect/resolution/duration,
                     mode_bez_zrodla, yapper{model,resolution,duration,prompt,min_kredyty,max_kredyty_na_rolke},
                     wavespeed{model,generate_audio,parametry,min_kredyty,max_kredyty_na_rolke - centy USD}, prompty A/B,
-                    stroj_domyslny, prompt_auto, soul_id, min_kredyty, max_kredyty_na_rolke, powtorki, zrodla_dir, wyniki_dir,
+                    stroj_domyslny, stroj_swap (biblioteka|z_filmu), nagrywa, glos_chlopak, glos_dziewczyna,
+                    prompt_auto, soul_id, min_kredyty, max_kredyty_na_rolke, powtorki, zrodla_dir, wyniki_dir,
                     mediatool, autopilot*, telegram_wysylaj, telegram_czat, zdjecia_* (+zdjecia_stroje, zdjecia_prompt_stroj),
                     lipsync_* (lipsync_auto domyslnie False), tts_*
-  prompty/          stroj_z_filmu.txt (A), stroj_ze_zdjecia.txt (B), zdjecia.txt - PROMPTY USERA, nie zmieniaj tresci;
+  prompty/          stroj_z_filmu.txt (A), stroj_ze_zdjecia.txt (B, od 3.1 u wszystkich 4), zdjecia.txt - PROMPTY USERA, nie zmieniaj tresci;
                     wan.txt = prompt dla Wan (yapper/zapas): max 5000 znakow, bez @[Image N], "the reference photos" (2026-10-04: SZKICE
                     od Claude do akceptacji usera - zapas_nsfw wylaczony, dopoki ich nie zatwierdzi)
   zrodla/           WRZUTNIA (gdy zrodla_dir puste); <nazwa>.stroj.png = wariant B, <nazwa>.audio.mp3 = lipsync po generacji
@@ -401,7 +440,8 @@ tests/test_wavespeed.py.
 - Prompty usera sa STALE per persona i NIE zaleza od klipu ("complete character replacement", strój z filmu
   albo ze zdjecia). `skanuj` z `prompt_auto=true` wpisuje je automatycznie. Agent nie pisze promptow od zera.
 - `@[Image N](image_N)` w prompcie = N-ty `--image` w kolejnosci: referencje/ (01_, 02_...) a na koncu strój.
-  Liczba @Image w prompcie MUSI zgadzac sie z liczba zdjec: Alicja 4, Noemi 5 (+1 strój w B), Bianka 6 (06 = cala sylwetka z boku w dlugim rekawie - bez tatuazu; prompt Bianki mowi jeszcze o 5 zdjeciach - do decyzji usera).
+  Liczba @Image w prompcie MUSI zgadzac sie z liczba zdjec: Alicja 4, Lilianna 4, Noemi 5, Bianka 6 (+1 strój w B u kazdej:
+  5/5/6/7) (Bianki 06 = cala sylwetka z boku w dlugim rekawie - bez tatuazu; prompt Bianki mowi jeszcze o 5 zdjeciach - do decyzji usera).
   CLI przekazuje prompt doslownie (nie zna tej skladni) - czy backend ja honoruje, potwierdzic na pierwszej taniej generacji
   (`--draft true` / 480p). yapper NIGDY nie dostaje tej skladni: prompt Wan = `yapper.prompt` albo `prompty/wan.txt` (max 5000 znakow);
   `dostawcy/yapper.py` odmawia (zanim cokolwiek wysle) promptu z @[Image N], za dlugiego albo filmiku > 15 s.

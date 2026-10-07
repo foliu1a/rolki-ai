@@ -75,9 +75,11 @@ def test_numeracja_zdjec_stroj_ostatni_i_jeden_komentarz(persona):
     tokeny = sorted({int(x) for x in re.findall(r"<<<image_(\d+)>>>", w["prompt"])})
     assert tokeny == [1, 2, 3] and len(w["obrazy"]) == 3 and w["obrazy"][-1] == stroj
     assert "<<<image_3>>> is only the outfit reference" in w["prompt"]
+    assert "ignore the hair, face, skin, tattoos and body shape of the person or mannequin" in w["prompt"]
     assert "\n\n" not in w["prompt"]
-    assert w["prompt"].count("Dialogue language: Polish.") == 1
-    assert len(re.findall(r"\{[^}]+\}", w["prompt"])) == 1 and "{Jak ona wygląda.}" in w["prompt"]
+    # 3.1: model wideo nic nie mowi - komentarz NIE jest w prompcie (dogrywa go ElevenLabs po generacji)
+    assert "Dialogue language" not in w["prompt"] and not re.findall(r"\{[^}]+\}", w["prompt"])
+    assert w["komentarz"] == "Jak ona wygląda." and w["glos"] == "tts" and "says nothing at all" in w["prompt"]
     assert "@[Image" not in w["prompt"]
     # zly plik stroju (spoza folderu Stroje) -> blad, nic nie zgadujemy
     with pytest.raises(ValueError):

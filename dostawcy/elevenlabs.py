@@ -11,6 +11,7 @@ ograniczone uprawnienia: 401 "missing_permissions" = klucz PRAWDZIWY (tylko bez 
 """
 import json
 import os
+import re
 import time
 
 import sekrety
@@ -128,26 +129,45 @@ def glosy():
     wynik = []
     for v in (dane or {}).get("voices") or []:
         if isinstance(v, dict) and v.get("voice_id"):
+            jezyki = [str(j.get("language") or "").lower() for j in (v.get("verified_languages") or []) if isinstance(j, dict)]
             wynik.append({"voice_id": v["voice_id"], "name": v.get("name") or "", "category": v.get("category") or "",
-                          "labels": v.get("labels") if isinstance(v.get("labels"), dict) else {}})
+                          "labels": v.get("labels") if isinstance(v.get("labels"), dict) else {}, "jezyki": jezyki})
     return wynik
 
 
-def wybierz_glos(lista, pomin_nazwy=()):
-    """Glos 'osoby, ktora nagrywa': najpierw polski (labels.language/accent 'pl'/'polish'), kobiecy przed meskim; bez glosow
-    o nazwie persony (np. 'Noemi' - to ona jest nagrywana, nie mowi). None = brak glosow."""
-    pomin = {n.strip().lower() for n in pomin_nazwy if n}
-    def ocena(v):
+KATEGORIE_GLOSOW = ("premade", "professional")   # NIGDY "cloned" (klony person i testy - przez nie mowila nie ta osoba)
+
+
+def glos_polski(v):
+    """Czy glos mowi po polsku: labels.language/accent ('pl', 'polish', 'polski') albo verified_languages."""
+    lab = {k: str(w).lower() for k, w in (v.get("labels") or {}).items()}
+    slowa = re.split(r"[\s,;/()-]+", " ".join([lab.get("language", ""), lab.get("accent", "")]))
+    return (any(s in ("pl", "polish", "polski", "polska") for s in slowa)
+            or any(j in ("pl", "polish") or j.startswith("pl-") for j in (v.get("jezyki") or [])))
+
+
+def wybierz_glos(lista, pomin_nazwy=(), plec=None):
+    """Glos osoby, ktora nagrywa (zza kamery): TYLKO kategoria premade/professional (nigdy cloned/generated), jezyk polski,
+    plec = `plec` ('male' / 'female', gdy podana - musi sie zgadzac), nazwa bez imienia ktorejkolwiek persony (to ona jest
+    nagrywana, nie mowi). None = nie ma takiego glosu (wtedy rolka bez komentarza - nie zgadujemy)."""
+    pomin = {n.strip().lower() for n in pomin_nazwy if n and n.strip()}
+    kandydaci = []
+    for v in lista or []:
+        nazwa = (v.get("name") or "").strip().lower()
         lab = {k: str(w).lower() for k, w in (v.get("labels") or {}).items()}
-        tekst = " ".join([lab.get("language", ""), lab.get("accent", ""), lab.get("description", ""), v.get("name", "").lower()])
-        polski = "polish" in tekst or "polski" in tekst or "pl" in tekst.replace(",", " ").split()
-        kobieta = lab.get("gender") == "female"
-        return (2 if polski else 0) + (1 if kobieta else 0)
-    kandydaci = [v for v in lista if v.get("name", "").strip().lower() not in pomin and
-                 not any(n and n in v.get("name", "").lower() for n in pomin)]
+        if (v.get("category") or "").lower() not in KATEGORIE_GLOSOW:
+            continue
+        if any(n in nazwa for n in pomin):
+            continue
+        if not glos_polski(v):
+            continue
+        if plec and lab.get("gender") != plec:
+            continue
+        kandydaci.append(v)
     if not kandydaci:
         return None
-    return max(kandydaci, key=ocena)
+    # professional (glosy z Voice Library, zwykle natywni Polacy) przed premade
+    return sorted(kandydaci, key=lambda v: (v.get("category") != "professional", v.get("name") or ""))[0]
 
 
 def tts(tekst, voice_id, cel, model=MODEL_TTS, ustawienia=None):

@@ -32,7 +32,10 @@ USTAWIENIA_DOMYSLNE = {
     "prompt_bazowy": "prompty/stroj_z_filmu.txt",     # wariant A: persona w stroju z filmu (tekst albo plik .txt w folderze modelki)
     "prompt_stroj": "prompty/stroj_ze_zdjecia.txt",   # wariant B: persona w stroju z dolaczonego zdjecia (ostatni --image)
     "stroj_domyslny": "",           # zdjecie stroju (np. stroje/mesh.png) uzywane dla kazdego klipu bez wlasnego <nazwa>.stroj.png
-    "prompt_auto": True,            # skanuj od razu wpisuje prompt do kazdego nowego pomyslu (prompt nie zalezy od klipu)
+    "stroj_swap": "biblioteka",     # rolki z filmu: "biblioteka" = kazdy NOWO zeskanowany klip dostaje stroj ze stroje_biblioteka/
+                                    # (tylko ze zdjeciem, wazone + rotacja) -> wariant B; "z_filmu" = wariant A (stroj z filmu).
+                                    # <nazwa>.stroj.png obok klipu i stroj_domyslny maja pierwszenstwo.
+    "prompt_auto": True,           # skanuj od razu wpisuje prompt do kazdego nowego pomyslu (prompt nie zalezy od klipu)
     "prompt_zasady": "",            # co w promptach ma byc zawsze / czego nigdy (notatki agenta)
     "min_kredyty": 200,             # generacja odmawia, gdy po niej zostaloby mniej
     "max_kredyty_na_rolke": 150,    # bezpiecznik na pojedyncza generacje
@@ -56,10 +59,13 @@ USTAWIENIA_DOMYSLNE = {
     "zapas_nsfw": [],               # zapas po odrzuceniu NSFW/IP: kroki po kolei, np. [{"dostawca": "yapper", "model": "wan-3.0-prime"},
                                     # {"dostawca": "wavespeed", "model": "alibaba/wan-3.0/reference-to-video"}]; [] = wylaczone.
                                     # Kazdy krok wymaga dziennego limitu swojego dostawcy (yapper / wavespeed).
-    "z_promptu": {"model": "seedance_2_5", "dlugosc": 10, "stroj": "odwazny", "komentarz": "losowy",   # zakladka "Z promptu":
+    "z_promptu": {"model": "seedance_2_5", "dlugosc": 10, "stroj": "biblioteka", "komentarz": "losowy",   # zakladka "Z promptu":
                   "reakcja": "losowa", "kamera": "auto", "glos": "auto", "nazwy": "prawdziwe",     # domyslne wybory formularza
                   "wymowa": "fonetyczna"},  # (scenariusz.py; asystent.py dobiera reszte). Zawsze Higgsfield, cosplay tylko recznie.
-    "z_promptu_glos": "",           # ElevenLabs Voice ID komentarza zza kamery ("" = komentarz_glos dobiera z konta: polski, kobiecy)
+    "z_promptu_glos": "",           # (stare, nieuzywane od 3.1 - glos komentarza: nagrywa + glos_chlopak / glos_dziewczyna)
+    "nagrywa": "chlopak",           # kto nagrywa zza kamery (mowi komentarz w rolkach z promptu): chlopak | dziewczyna
+    "glos_chlopak": "",             # ElevenLabs Voice ID glosu chlopaka ("" = komentarz_glos.GLOSY_DOMYSLNE: Max / Jessica; gdy ID
+    "glos_dziewczyna": "",          # nie dziala - zapas z konta: premade/professional, polski, ta plec, nigdy klon ani imie persony)
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie
@@ -353,6 +359,86 @@ def folder_strojow(slug):
     folder = os.path.join(folder_modelki(slug), "stroje")
     os.makedirs(folder, exist_ok=True)
     return folder
+
+
+# ---------------- biblioteka strojow (wspolna dla wszystkich person, od 2026-10-07) ----------------
+# stroje_biblioteka/stroje.json: {"stroje": [{id, nazwa (PL), plik (PNG w tym folderze albo null = tylko opis), ulubiony, waga,
+# styl, opis_en}]}. Zdjecia pokazuja ubranie na osobie/manekinie (czarne wlosy, tatuaze) - prompt zawsze mowi, ze bierzemy
+# z nich TYLKO ubranie. Uzycie stroju zapisuje pomysl: `stroj_bib` (id) - rolki z filmu i z promptu (rotacja liczona z pomysly.json).
+
+KATALOG_BIBLIOTEKI = os.path.join(KATALOG_SKRYPTU, "stroje_biblioteka")
+PLIK_BIBLIOTEKI = "stroje.json"
+
+
+def stroje_biblioteki(tylko_ze_zdjeciem=False):
+    """Stroje z biblioteki: [{id, nazwa, plik (pelna sciezka albo None), ulubiony, waga, styl, opis_en}]. Brak pliku zdjecia na
+    dysku = stroj tylko z opisu. tylko_ze_zdjeciem=True - tylko te ze zdjeciem (character swap: wariant B wymaga zdjecia)."""
+    try:
+        dane = _wczytaj_json(os.path.join(KATALOG_BIBLIOTEKI, PLIK_BIBLIOTEKI), {})
+    except (OSError, ValueError):
+        return []
+    wynik = []
+    for s in (dane.get("stroje") if isinstance(dane, dict) else None) or []:
+        if not isinstance(s, dict) or not s.get("id") or not str(s.get("opis_en") or "").strip():
+            continue
+        plik = os.path.join(KATALOG_BIBLIOTEKI, os.path.basename(str(s["plik"]))) if s.get("plik") else None
+        if plik and not (plik.lower().endswith(ROZSZERZENIA_OBRAZU) and os.path.isfile(plik)):
+            plik = None
+        if tylko_ze_zdjeciem and not plik:
+            continue
+        try:
+            waga = max(0.0, float(s.get("waga") if s.get("waga") is not None else 1))
+        except (TypeError, ValueError):
+            waga = 1.0
+        wynik.append({"id": str(s["id"]), "nazwa": str(s.get("nazwa") or s["id"]), "plik": plik, "ulubiony": bool(s.get("ulubiony")),
+                      "waga": waga, "styl": str(s.get("styl") or ""), "opis_en": re.sub(r"\s+", " ", str(s["opis_en"])).strip()})
+    return wynik
+
+
+def stroj_biblioteki(sid):
+    """Stroj z biblioteki po id albo None."""
+    return next((s for s in stroje_biblioteki() if s["id"] == str(sid or "")), None)
+
+
+def uzycia_strojow(slug):
+    """{id stroju z biblioteki: kiedy ostatnio uzyty (ISO)} - z pomysly.json persony (rolki z filmu `stroj_bib`, rolki z promptu
+    `z_promptu.stroj_id` przy stroju z biblioteki)."""
+    wynik = {}
+    for p in lista_pomyslow(slug):
+        zp = p.get("z_promptu") if isinstance(p.get("z_promptu"), dict) else {}
+        sid = p.get("stroj_bib") or (zp.get("stroj_id") if zp.get("stroj_tryb") == "biblioteka" else None)
+        if sid:
+            kiedy = str(p.get("utworzono") or "")
+            if kiedy >= wynik.get(sid, ""):
+                wynik[sid] = kiedy
+    return wynik
+
+
+def losuj_stroj_biblioteki(slug, tylko_ze_zdjeciem=False, los=None, unikaj=(), mnozniki=None, uzycia=None):
+    """Stroj z biblioteki dla persony: losowanie wazone `waga` (ulubione 3, wymyslone 2, reszta 1) z rotacja - ostatnio uzyte
+    (1/3 puli, min 1) odpadaja, a z reszty najdawniej uzyte (nigdy = najdawniej) maja do 2x wieksza szanse. `unikaj` = id do
+    pominiecia (np. odrzucone przez filtr NSFW), `mnozniki` = {id: mnoznik wagi} (nauka asystenta). None = biblioteka pusta."""
+    import random
+    los = los or random.Random()
+    unikaj = {str(u) for u in (unikaj or ())}
+    kand = [s for s in stroje_biblioteki(tylko_ze_zdjeciem) if s["id"] not in unikaj and s["waga"] > 0]
+    if not kand:
+        return None
+    uzycia = uzycia_strojow(slug) if uzycia is None else uzycia
+    uzyte = sorted((s for s in kand if s["id"] in uzycia), key=lambda s: uzycia[s["id"]], reverse=True)
+    n_pomin = min(len(kand) - 1, max(1, len(kand) // 3)) if uzyte else 0
+    pomin = {s["id"] for s in uzyte[:n_pomin]}
+    pula = sorted((s for s in kand if s["id"] not in pomin), key=lambda s: uzycia.get(s["id"], ""))   # najdawniej uzyte najpierw
+    n = len(pula)
+    wagi = [s["waga"] * (1.0 + (n - i) / n) * max(0.0, float((mnozniki or {}).get(s["id"], 1.0))) for i, s in enumerate(pula)]
+    if not sum(wagi):
+        wagi = [1.0] * n
+    x = los.random() * sum(wagi)
+    for s, w in zip(pula, wagi):
+        x -= w
+        if x <= 0:
+            return s
+    return pula[-1]
 
 
 def folder_zrodel(slug):

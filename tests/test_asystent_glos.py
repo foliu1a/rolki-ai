@@ -106,9 +106,9 @@ def test_reakcje_zdziwienia_subtelne_z_polskimi_liniami(slug):
         assert not _slowa_ryzykowne(sc.REAKCJE[r][1])
         w = sc.zbuduj(slug, dict(NOWE, reakcja=r))
         assert sc.REAKCJE[r][1] in w["prompt"] and "nobody points, laughs out loud or speaks to her" in w["prompt"]
-        assert "half-whispering in disbelief" in w["prompt"]
+        assert "Nobody in the clip speaks clearly" in w["prompt"]          # 3.1: komentarz tylko z ElevenLabs
     zwykla = sc.zbuduj(slug, {"pomysl_id": "galeria_fastfood", "reakcja": "smiech"})
-    assert "nobody points" not in zwykla["prompt"] and "(amused" in zwykla["prompt"]
+    assert "nobody points" not in zwykla["prompt"] and "says nothing at all" in zwykla["prompt"]
     assert asystent.reakcje_dla_miejsca("dyskont")[0] == "kasjerka_zamiera"
     assert set(asystent.reakcje_dla_miejsca("park")) <= set(sc.REAKCJE_ZDZIWIENIE)
 
@@ -117,21 +117,27 @@ def test_fonetycznie_i_wymowa_w_klamrach(slug):
     assert sc.fonetycznie("Jak ona wygląda…") == "Jak ona wyglonda…"
     assert sc.fonetycznie("Idą, mogę, się, zęby, ręka, wzięli, kąpie, Mają") == "Idom, moge, sie, zemby, renka, wzieli, kompie, Majom"
     assert sc.fonetycznie("Widziałaś to?") == "Widziałaś to?"
-    w = sc.zbuduj(slug, NOWE)
-    assert "{Widziałaś to? Jak ona wyglonda…}" in w["prompt"] and w["komentarz"] == "Widziałaś to? Jak ona wygląda…"
-    w = sc.zbuduj(slug, dict(NOWE, wymowa="zwykla"))
-    assert "{Widziałaś to? Jak ona wygląda…}" in w["prompt"]
+    # 3.1: komentarz nigdy nie trafia do promptu wideo (zapis fonetyczny juz niepotrzebny); ElevenLabs dostaje poprawna pisownie
+    for wymowa in ("fonetyczna", "zwykla"):
+        w = sc.zbuduj(slug, dict(NOWE, wymowa=wymowa))
+        assert "{" not in w["prompt"] and "wyglonda" not in w["prompt"] and w["komentarz"] == "Widziałaś to? Jak ona wygląda…"
 
 
 def test_glos_tts_wideo_bez_mowy_a_komentarz_osobno(slug):
     w = sc.zbuduj(slug, dict(NOWE, glos="tts"))
     p = w["prompt"]
-    assert "{" not in p and "The person filming stays silent" in p and "Dialogue language" not in p
+    assert "{" not in p and "the person filming stays completely silent" in p and "Dialogue language" not in p
+    assert "Noemi says nothing at all" in p and "nobody talks to her or to the camera" in p and "whisper indistinctly" in p
     assert w["glos"] == "tts" and w["komentarz"] == "Widziałaś to? Jak ona wygląda…" and w["komentarz_t"] == 5
-    k = sc.zbuduj(slug, dict(NOWE, glos="tts", model="wan3_0_prime"))
-    assert "{" not in k["prompt"] and "stays silent" in k["prompt"]
+    for model in ("wan3_0_prime", "gemini_omni_flash_1_1"):
+        k = sc.zbuduj(slug, dict(NOWE, glos="tts", model=model))
+        assert "{" not in k["prompt"] and "person filming stays silent" in k["prompt"] and "she says nothing" in k["prompt"]
     bez = sc.zbuduj(slug, dict(NOWE, komentarz="bez", glos="tts"))
-    assert bez["glos"] == "bez" and bez["komentarz_t"] is None and "Dialogue language: Polish." in bez["prompt"]
+    assert bez["glos"] == "bez" and bez["komentarz_t"] is None and "Dialogue language" not in bez["prompt"]
+    assert "says nothing at all" in bez["prompt"]
+    # stare "model" (np. z zapisanych opcji) = tez bez mowy w wideo, z ostrzezeniem
+    stary = sc.zbuduj(slug, NOWE)
+    assert stary["glos"] == "tts" and "{" not in stary["prompt"] and any("wylaczona" in u for u in stary["ostrzezenia"])
     with pytest.raises(ValueError):
         sc.zbuduj(slug, dict(NOWE, glos="robot"))
 
@@ -151,9 +157,10 @@ def test_dlugosc_promptow_z_nowymi_ustawieniami(slug):
 
 def test_katalog_ma_nowe_pola(slug):
     k = sc.katalog(slug)
-    assert k["stroje"][0][0] == "odwazny" and len(k["stroje_odwazne"]) == len(sc.STROJE_ODWAZNE)
+    assert k["stroje"][0][0] == "biblioteka" and "odwazny" in dict(k["stroje"]) and len(k["stroje_odwazne"]) == len(sc.STROJE_ODWAZNE)
     assert "zza_filaru" in k["kamery_ukryte"] and k["obiekty"]["galeria_foodcourt"][0][0] == "posnania"
-    assert {g[0] for g in k["glosy"]} == {"auto", "tts", "model"} and k["linie_reakcji"]["dwa_razy"]
+    assert {g[0] for g in k["glosy"]} == {"auto", "tts"} and k["linie_reakcji"]["dwa_razy"]      # "model" zniknal z wyboru
+    assert dict(k["nagrywa"]) == {"chlopak": "Chłopak", "dziewczyna": "Dziewczyna"} and k["persona"]["nagrywa"] == "chlopak"
 
 
 # ---------------- asystent: reguly i nauka ----------------
@@ -311,21 +318,82 @@ def test_elevenlabs_stan_klucza_i_tts(dane, monkeypatch):
 
 
 def test_wybor_glosu_polski_nie_persona():
-    lista = [{"voice_id": "1", "name": "Noemi", "labels": {"language": "pl", "gender": "female"}},
-             {"voice_id": "2", "name": "Sarah", "labels": {"gender": "female", "accent": "american"}},
-             {"voice_id": "3", "name": "Ola", "labels": {"accent": "polish", "gender": "female"}},
-             {"voice_id": "4", "name": "Adam", "labels": {"language": "pl", "gender": "male"}}]
-    assert elevenlabs.wybierz_glos(lista, ["Noemi"])["voice_id"] == "3"
-    assert elevenlabs.wybierz_glos(lista[:2], ["Noemi"])["voice_id"] == "2"
+    """3.1: tylko premade/professional, polski, wlasciwa plec; nigdy cloned (klony person/testy) ani o imieniu persony."""
+    lista = [{"voice_id": "1", "name": "Noemi", "category": "professional", "labels": {"language": "pl", "gender": "female"}},
+             {"voice_id": "2", "name": "Sarah", "category": "premade", "labels": {"gender": "female", "accent": "american"}},
+             {"voice_id": "3", "name": "Ola", "category": "professional", "labels": {"accent": "polish", "gender": "female"}},
+             {"voice_id": "4", "name": "Adam PL", "category": "professional", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "5", "name": "Mój klon", "category": "cloned", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "6", "name": "Kuba", "category": "generated", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "7", "name": "Bianka test", "category": "professional", "labels": {"language": "pl", "gender": "female"}},
+             {"voice_id": "8", "name": "Marek", "category": "premade", "labels": {"gender": "male"}, "jezyki": ["pl"]}]
+    assert elevenlabs.wybierz_glos(lista, ["Noemi", "Bianka"], plec="female")["voice_id"] == "3"
+    assert elevenlabs.wybierz_glos(lista, ["Noemi", "Bianka"], plec="male")["voice_id"] == "4"     # professional przed premade
+    assert elevenlabs.wybierz_glos([v for v in lista if v["voice_id"] != "4"], ["Noemi"], plec="male")["voice_id"] == "8"
+    # nie ma polskiego glosu tej plci (tylko klon / generated / angielski) -> None, nic nie zgadujemy
+    assert elevenlabs.wybierz_glos([lista[1], lista[4], lista[5]], [], plec="male") is None
+    assert elevenlabs.wybierz_glos([lista[1]], [], plec="female") is None
     assert elevenlabs.wybierz_glos([], []) is None
 
 
+def test_glos_id_osoby_nagrywajacej(slug, monkeypatch):
+    """komentarz_glos.glos_id: Voice ID z ustawien persony (glos_chlopak / glos_dziewczyna) > GLOSY_DOMYSLNE > dobor z konta
+    (plec wg `nagrywa`, pomija imiona WSZYSTKICH person i klony)."""
+    baza.utworz_modelke("Bianka")
+    lista = [{"voice_id": "bianka", "name": "Bianka", "category": "professional", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "klon", "name": "Ja", "category": "cloned", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "on", "name": "Tomek", "category": "professional", "labels": {"language": "pl", "gender": "male"}},
+             {"voice_id": "ona", "name": "Ola", "category": "professional", "labels": {"language": "pl", "gender": "female"}}]
+    monkeypatch.setattr(elevenlabs, "glosy", lambda: lista)
+    assert baza.ustawienia_modelki(slug)["nagrywa"] == "chlopak"
+    # domyslne glosy wybrane przez usera: chlopak = Max, dziewczyna = Jessica
+    assert komentarz_glos.glos_id(slug) == "wJmRkw9W1EUa95AGkMrg" and komentarz_glos.glos_id(slug, "dziewczyna") == "cgSgspJ2msm6clMCkdW9"
+    baza.zapisz_ustawienia(slug, nagrywa="dziewczyna", glos_dziewczyna="moja_ona")
+    assert komentarz_glos.glos_id(slug) == "moja_ona" and komentarz_glos.glos_id(slug, "chlopak") == "wJmRkw9W1EUa95AGkMrg"
+    # bez ustawionych ID: dobor z konta (plec wg `nagrywa`, bez imion person i klonow)
+    monkeypatch.setitem(komentarz_glos.GLOSY_DOMYSLNE, "chlopak", "")
+    monkeypatch.setitem(komentarz_glos.GLOSY_DOMYSLNE, "dziewczyna", "")
+    baza.zapisz_ustawienia(slug, glos_dziewczyna="")
+    assert komentarz_glos.glos_id(slug, "chlopak") == "on" and komentarz_glos.glos_id(slug, "dziewczyna") == "ona"
+    monkeypatch.setattr(elevenlabs, "glosy", lambda: lista[:2])           # tylko glos o imieniu persony i klon -> blad
+    with pytest.raises(komentarz_glos.BladGlosu, match="meskiego"):
+        komentarz_glos.glos_id(slug, "chlopak")
+
+
+def test_tts_osoby_zapas_gdy_id_nie_dziala(slug, monkeypatch):
+    """Ustawiony / domyslny Voice ID nie dziala (glos zniknal z konta) -> zapas: glos z konta tej plci. Zly klucz -> bez prob."""
+    from dostawcy import BladDostawcy
+    lista = [{"voice_id": "zapas_on", "name": "Tomek", "category": "professional", "labels": {"language": "pl", "gender": "male"}}]
+    monkeypatch.setattr(elevenlabs, "glosy", lambda: lista)
+    proby = []
+
+    def tts(tekst, vid, cel, **k):
+        proby.append(vid)
+        if vid != "zapas_on":
+            raise BladDostawcy("ElevenLabs 404: A voice with the voice_id was not found")
+        open(cel, "wb").write(b"ID3")
+        return cel
+    monkeypatch.setattr(elevenlabs, "tts", tts)
+    baza.zapisz_ustawienia(slug, glos_chlopak="stary_id")
+    cel = os.path.join(baza.folder_audio(slug), "k.mp3")
+    assert komentarz_glos.tts_osoby(slug, "[whispers] Widziałeś to?", cel, "chlopak") == "zapas_on"
+    assert proby == ["stary_id", "wJmRkw9W1EUa95AGkMrg", "zapas_on"]
+    monkeypatch.setattr(elevenlabs, "tts", lambda *a, **k: (_ for _ in ()).throw(BladDostawcy("ElevenLabs 401: zly klucz API")))
+    with pytest.raises(BladDostawcy, match="401"):
+        komentarz_glos.tts_osoby(slug, "x", cel, "chlopak")
+
+
 def test_glos_auto_i_filtr_miksu(dane, monkeypatch):
-    assert komentarz_glos.rozstrzygnij_glos("auto") == "model"           # bez klucza = mowi model
+    # 3.1: model wideo NIGDY nie mowi - bez klucza tez "tts" (rolka wyjdzie bez komentarza, nie z mowa modelu)
+    assert komentarz_glos.rozstrzygnij_glos("auto") == "tts" and komentarz_glos.rozstrzygnij_glos("model") == "tts"
     monkeypatch.setattr(elevenlabs, "stan_klucza", lambda odswiez=False: ("ok", "klucz dziala"))
-    assert komentarz_glos.rozstrzygnij_glos("auto") == "tts" and komentarz_glos.rozstrzygnij_glos("model") == "model"
+    assert komentarz_glos.rozstrzygnij_glos("auto") == "tts"
     f = komentarz_glos.filtr_miksu(5, -21)
     assert "adelay=5000|5000" in f and "loudnorm=I=-21.0" in f and "sidechaincompress" in f and "[out]" in f
+    # brzmienie telefonu, ktory filmuje: stromo przyciete doly (~250 Hz) i gora (~6,8 kHz), nacisk ~3 kHz, AGC, odbicia, szum toru
+    assert f.count("highpass=f=250") == 2 and f.count("lowpass=f=6800") == 2 and "equalizer=f=3000" in f
+    assert "acompressor=" in f and "aecho=" in f and "anoisesrc=" in f and "amix=inputs=3" in f
+    assert 200 <= komentarz_glos.TELEFON_DOLY_HZ <= 300 and 6000 <= komentarz_glos.TELEFON_GORA_HZ <= 7000
     assert komentarz_glos.docelowa_glosnosc(None) == -21.0 and komentarz_glos.docelowa_glosnosc(-40) == -27.0
     assert komentarz_glos.docelowa_glosnosc(-10) == -15.0 and komentarz_glos.docelowa_glosnosc(-22) == -19.0
     assert komentarz_glos.tekst_dla_tts("Widziałaś to?") == "[whispers] Widziałaś to?"
@@ -348,6 +416,10 @@ def test_miks_ffmpeg_naprawde(tmp_path):
     assert abs(komentarz_glos.czas_wideo(cel) - 4.0) < 0.3
     cel2, otoczenie2, _ = komentarz_glos.zmiksuj(w2, g, str(tmp_path / "out2.mp4"), 1)     # wideo bez dzwieku -> cisza + glos
     assert otoczenie2 is None and komentarz_glos.ma_dzwiek(cel2)
+    # darmowe demo brzmienia (ten sam miks, bez TTS): cisza + glos od 0,5 s
+    pr = komentarz_glos.probka(g, str(tmp_path / "probka.mp3"), t_s=0.5)
+    assert os.path.isfile(pr) and abs(komentarz_glos.czas_wideo(pr) - (1.0 + 0.5 + 1.2)) < 0.3
+    assert komentarz_glos.glosnosc_lufs(pr) is not None
 
 
 # ---------------- fabryka: glos tts po generacji, dogranie recznie ----------------
@@ -403,9 +475,13 @@ def test_blad_glosu_nie_psuje_oplaconej_rolki_i_dogranie_recznie(slug, cli, monk
     p = baza.pomysl(slug, pid)
     assert p["glos_dograny"] is True and open(gotowy, "rb").read() == b"mp4+glos" and len(cli.generacje) == 1
     assert wywolania[0][1].endswith(".raw.mp4")
-    # rolka z glosem modelu: dogranie odmawia (zdublowalby glos)
+    # 3.1: "model" z opcji = i tak glos tts (wideo bez mowy, komentarz ElevenLabs)
     pid2 = fabryka.dodaj_z_promptu(slug, dict(NOWE, glos="model"), kr=45)
+    assert baza.pomysl(slug, pid2)["z_promptu"]["glos"] == "tts" and "{" not in baza.pomysl(slug, pid2)["prompt_higgsfield"]
     fabryka.generuj(slug, ids=[pid2])
+    # STARA rolka (sprzed 3.1) z glosem modelu: dogranie odmawia (zdublowalby glos)
+    zp = dict(baza.pomysl(slug, pid2)["z_promptu"], glos="model")
+    baza.aktualizuj_pomysl(slug, pid2, z_promptu=zp)
     with pytest.raises(ValueError, match="zdublowal"):
         fabryka.dograj_glos(slug, pid2)
 
@@ -431,18 +507,25 @@ def klient(slug, cli):
 def test_api_asystent_ocena_usuniecie(klient, slug, cli):
     d = klient.post("/api/z-promptu/asystent", json={"tekst": "kupuje kawę na dworcu we Wrocławiu"}).get_json()
     assert d["ok"] and d["opcje"]["miejsce"] == "dworzec" and d["opcje"]["obiekt"] == "wroclaw_glowny"
-    assert d["zrodlo"] == "reguly" and d["glos_tts"]["ok"] is False and "mówi model wideo" in d["podsumowanie"]
+    # bez klucza ElevenLabs: NIE "mowi model" - jasno, ze rolka wyjdzie bez komentarza
+    assert d["zrodlo"] == "reguly" and d["glos_tts"]["ok"] is False and "ElevenLabs nie działa" in d["podsumowanie"]
+    assert "bez komentarza" in d["glos_tts"]["komunikat"] and "mówi model" not in d["podsumowanie"]
     assert cli.generacje == [] and baza.lista_pomyslow(slug) == []
     kat = klient.get("/api/z-promptu").get_json()
-    assert kat["domyslne"]["stroj"] == "odwazny" and kat["glos_tts"]["ok"] is False and kat["asystent_llm"] is False
+    assert kat["domyslne"]["stroj"] == "biblioteka" and kat["glos_tts"]["ok"] is False and kat["asystent_llm"] is False
     w = klient.post("/api/z-promptu/wycena", json=dict(d["opcje"], pora="popoludnie")).get_json()
-    assert w["ok"] and w["glos"] == "model" and w["obiekt"] == "wroclaw_glowny" and "Wrocław Główny" in w["prompt"]
+    assert w["ok"] and w["glos"] == "tts" and w["obiekt"] == "wroclaw_glowny" and "Wrocław Główny" in w["prompt"]
+    assert "{" not in w["prompt"] and any("bez komentarza" in u for u in w["ostrzezenia"])
     r = klient.post("/api/z-promptu", json=dict(d["opcje"], pora="popoludnie", ustalone=w["ustalone"], kr=w["kr"],
                                                 asystent={"dlaczego": d["dlaczego"], "zrodlo": d["zrodlo"]})).get_json()
     panel.konsola.watek.join(10)
     karta = [x for x in klient.get("/api/pomysly").get_json()["pomysly"] if x["id"] == r["id"]][0]
-    assert karta["z_promptu_dlaczego"] == d["dlaczego"] and "głos modelu" in karta["z_promptu_opis"]
-    assert karta["mozna_dograc_glos"] is False
+    assert karta["z_promptu_dlaczego"] == d["dlaczego"] and "głos ElevenLabs" in karta["z_promptu_opis"]
+    # klucza nie bylo: rolka gotowa BEZ komentarza, wpis w dzienniku, "Dograj glos" dostepne
+    p = baza.pomysl(slug, r["id"])
+    assert p["status"] == "gotowe" and p["glos_dograny"] is False and "ElevenLabs" in p["glos_blad"]
+    assert karta["mozna_dograc_glos"] is True and len(cli.generacje) == 1
+    assert any("BEZ komentarza" in w_["tekst"] for w_ in baza.dziennik_ostatnie(50, modelka=slug))
     o = klient.post(f"/api/pomysly/{r['id']}/ocena", json={"ocena": "dobra"}).get_json()
     assert o["ok"] and o["pomysl"]["ocena"] == "dobra"
     assert klient.post(f"/api/pomysly/{r['id']}/ocena", json={"ocena": "zla"}).status_code == 400
@@ -461,8 +544,12 @@ def test_api_klucze_openrouter_i_elevenlabs(klient, monkeypatch):
     assert d["ok"] and d["konta"]["openrouter"]["jest"] and "d" * 30 not in maska and len(maska) < 15
     monkeypatch.setattr(asystent, "test_klucza", lambda: (True, "klucz dziala"))
     assert klient.post("/api/konta/test", json={"dostawca": "openrouter"}).get_json()["dziala"] is True
-    assert klient.post("/api/ustawienia", json={"z_promptu_glos": "v123"}).get_json()["ustawienia"]["z_promptu_glos"] == "v123"
-    assert klient.get("/api/z-promptu").get_json()["glos_id"] == "v123"
+    u = klient.post("/api/ustawienia", json={"nagrywa": "dziewczyna", "glos_dziewczyna": "v123"}).get_json()["ustawienia"]
+    assert u["nagrywa"] == "dziewczyna" and u["glos_dziewczyna"] == "v123"
+    assert klient.get("/api/z-promptu").get_json()["persona"]["nagrywa"] == "dziewczyna"
+    assert klient.post("/api/ustawienia", json={"nagrywa": "kot"}).status_code == 400
+    assert klient.post("/api/ustawienia", json={"stroj_swap": "z_filmu"}).get_json()["ustawienia"]["stroj_swap"] == "z_filmu"
+    assert klient.post("/api/ustawienia", json={"stroj_swap": "cokolwiek"}).status_code == 400
 
 
 def test_api_akcja_dograj_glos(klient, slug, cli, monkeypatch):

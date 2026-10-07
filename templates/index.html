@@ -250,7 +250,7 @@
         <!-- ===================== Z PROMPTU (scenariusz.py + asystent.py, /api/z-promptu) ===================== -->
         <section class="strona" id="strona-z-promptu" hidden>
           <div class="naglowek-strony">
-            <div><h1>Rolka z promptu</h1><p>Bez filmiku: napisz w kilku słowach, co ma się dziać – asystent dobierze resztę (prawdziwe miejsce w Polsce, odważny strój, kamerę z ukrycia, reakcje ludzi), pokaże cenę i zrobi rolkę.</p></div>
+            <div><h1>Rolka z promptu</h1><p>Bez filmiku: napisz w kilku słowach, co ma się dziać – asystent dobierze resztę (prawdziwe miejsce w Polsce, strój z biblioteki, kamerę z ukrycia, reakcje ludzi), pokaże cenę i zrobi rolkę.</p></div>
           </div>
 
           <form class="karta zp" id="form-zp" autocomplete="off">
@@ -267,8 +267,12 @@
               </div>
 
               <div class="zp-asystent" id="zp-asystent" aria-live="polite">
-                <div class="zp-asystent-linia"><span class="zp-asystent-etykieta">Asystent dobrał:</span> <span id="zp-asystent-tekst">napisz pomysł albo kliknij „Losuj”.</span></div>
-                <small class="zp-asystent-dlaczego" id="zp-asystent-dlaczego"></small>
+                <img class="zp-stroj-mini" id="zp-stroj-mini" alt="" hidden>
+                <div class="zp-asystent-tresc">
+                  <div class="zp-asystent-linia"><span class="zp-asystent-etykieta">Asystent dobrał:</span> <span id="zp-asystent-tekst">napisz pomysł albo kliknij „Losuj”.</span></div>
+                  <div class="zp-asystent-stroj" id="zp-asystent-stroj" hidden></div>
+                  <small class="zp-asystent-dlaczego" id="zp-asystent-dlaczego"></small>
+                </div>
               </div>
 
               <div class="zp-cena" id="zp-cena" aria-live="polite">Cena pojawi się tutaj (sprawdzenie nic nie kosztuje).</div>
@@ -310,8 +314,7 @@
               <div class="zp-siatka">
                 <div class="pole"><label for="zp-komentarz">Komentarz zza kamery</label><select id="zp-komentarz" data-zp-pole="komentarz"></select>
                   <input type="text" id="zp-komentarz-tekst" placeholder="np. Widziałaś to?" maxlength="80" hidden></div>
-                <div class="pole"><label for="zp-glos">Kto mówi komentarz</label><select id="zp-glos" data-zp-pole="glos"></select></div>
-                <div class="pole"><label for="zp-wymowa">Pisownia dla modelu</label><select id="zp-wymowa" data-zp-pole="wymowa"></select></div>
+                <div class="pole"><label for="zp-nagrywa">Kto nagrywa (mówi komentarz)</label><select id="zp-nagrywa" data-zp-pole="nagrywa"></select></div>
               </div>
               <small class="pole-info" id="zp-glos-info"></small>
 
@@ -328,8 +331,6 @@
               <div class="zp-siatka">
                 <div class="pole"><label for="zp-sezon">Pora roku</label><select id="zp-sezon" data-zp-pole="sezon"></select></div>
                 <div class="pole"><label for="zp-pora">Pora dnia</label><select id="zp-pora" data-zp-pole="pora"></select></div>
-                <div class="pole" data-zaawansowane><label for="zp-glos-id">Głos komentarza (ElevenLabs Voice ID)</label>
-                  <input type="text" id="zp-glos-id" placeholder="puste = dobiorę sam (polski, kobiecy)" spellcheck="false"></div>
               </div>
 
               <details class="zp-prompt" id="zp-prompt-wrap" hidden>
@@ -479,6 +480,7 @@
                   <div class="pole szerokie" data-zaawansowane><label for="p-hashtagi">Hashtagi doklejane do każdego podpisu</label><input type="text" id="p-hashtagi" name="hashtagi" placeholder="np. #ai #lifestyle" autocomplete="off"><small class="pole-info">Fabryka dopisze je na końcu każdego podpisu pod rolką (np. <span class="mono">#ai #lifestyle</span>). Puste = bez hashtagów.</small></div>
                   <div class="pole szerokie"><label for="p-telegram">Konto Telegram tej persony</label><input type="text" id="p-telegram" name="telegram_czat" placeholder="@huy7128" autocomplete="off"><small class="pole-info">np. <span class="mono">@huy7128</span> — gotowe rolki tej persony polecą tam. To konto musi raz napisać <span class="mono">/start</span> do bota (Telegram nie pozwala botom pisać pierwszym). Puste = Twój główny czat.</small><small class="pole-info" id="p-telegram-stan"></small></div>
                   <div class="pole"><label for="p-wzrost">Wzrost (cm)</label><input type="text" id="p-wzrost" name="wzrost_cm" placeholder="np. 158-160" inputmode="numeric"><small class="pole-info">Do rolek z promptu – żeby była dobrze wyskalowana obok ludzi.</small></div>
+                  <div class="pole szerokie"><label for="p-sylwetka">Sylwetka (po angielsku)</label><textarea id="p-sylwetka" name="sylwetka" rows="3" placeholder="np. petite hourglass figure with a large, full natural bust, a narrow waist and wide hips"></textarea><small class="pole-info">Fabryka dokleja to do każdej rolki tej persony (z filmu i z promptu) jako „BODY SHAPE” – zaraz po twarzy najważniejsze. Twoje prompty zostają bez zmian. Puste = bez dopisku.</small></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-wlosy">Włosy ze zdjęć – opis dla AI (po angielsku)</label><input type="text" id="p-wlosy" name="wlosy" placeholder="np. long straight platinum blonde hair, center part"><small class="pole-info">Puste = z opisu persony w prompcie A. Rolki z promptu biorą stąd „jej własne włosy”.</small></div>
                   <div class="pole" data-zaawansowane><label for="p-cechy">Cechy (po przecinku)</label><input type="text" id="p-cechy" name="cechy" placeholder="blond, fitness, lifestyle"></div>
                   <div class="pole szerokie" data-zaawansowane><label for="p-styl">Opis stylu</label><textarea id="p-styl" name="opis_stylu" placeholder="lifestyle, golden hour, elegancko"></textarea></div>
@@ -502,6 +504,34 @@
                 <div class="strefa mala" data-upload="stroj" tabindex="0" role="button" aria-label="Dodaj zdjęcia strojów"><span class="ikona" data-ikona="upload"></span><span><b>Dodaj zdjęcia strojów</b> <small>(png, jpg)</small></span></div>
               </div>
             </div>
+          </details>
+
+          <!-- Stroje i glos (3.1): stroj_swap, nagrywa, glos_chlopak / glos_dziewczyna + podglad biblioteki strojow -->
+          <details class="sekcja" id="sekcja-stroje">
+            <summary><span class="ikona" data-ikona="stroj"></span><span class="sekcja-tytul">Stroje i głos</span><span class="sekcja-opis">Strój w rolkach z filmu, kto nagrywa i jakim głosem mówi komentarz.</span><span class="sekcja-strzalka" aria-hidden="true"></span></summary>
+            <form class="sekcja-tresc" data-ustawienia novalidate id="form-stroje">
+              <div class="pola-siatka">
+                <div class="pole szerokie"><label for="u-stroj-swap">Strój w rolkach z filmu</label>
+                  <select id="u-stroj-swap" name="stroj_swap">
+                    <option value="biblioteka">Z biblioteki strojów (polecane) – każdy nowy filmik dostaje strój ze zdjęcia</option>
+                    <option value="z_filmu">Z filmu – persona ma to, co osoba na filmiku</option>
+                  </select>
+                  <small class="pole-info">Dotyczy nowych filmików. Strój zmienisz też przy każdej rolce w kolejce (Rolki). Plik <span class="mono">nazwa.stroj.png</span> obok filmiku ma pierwszeństwo.</small></div>
+                <div class="pole"><label for="u-nagrywa">Kto nagrywa (głos zza kamery)</label>
+                  <select id="u-nagrywa" name="nagrywa"><option value="chlopak">Chłopak</option><option value="dziewczyna">Dziewczyna</option></select>
+                  <small class="pole-info">Komentarz w rolkach z promptu mówi osoba, która nagrywa – jej nie widać. Persona nic nie mówi.</small></div>
+                <div class="pole"><label for="u-glos-chlopak">Głos chłopaka (ElevenLabs Voice ID)</label><input type="text" id="u-glos-chlopak" name="glos_chlopak" placeholder="puste = Max (domyślny)" spellcheck="false" autocomplete="off"></div>
+                <div class="pole"><label for="u-glos-dziewczyna">Głos dziewczyny (ElevenLabs Voice ID)</label><input type="text" id="u-glos-dziewczyna" name="glos_dziewczyna" placeholder="puste = Jessica (domyślna)" spellcheck="false" autocomplete="off"></div>
+              </div>
+              <p class="muted">Komentarz brzmi jak nagrany telefonem, który filmuje (szept tuż przy mikrofonie). Puste pola = domyślne głosy (Max / Jessica). Gdy głos przestanie działać, dobiorę zapasowy spośród gotowych polskich głosów ElevenLabs (nigdy sklonowanych i nigdy o imieniu persony). Bez działającego klucza ElevenLabs rolka wyjdzie bez komentarza – dograsz go potem przyciskiem „Dograj głos”. Dotyczy tylko rolek z promptu.</p>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              <div class="podsekcja">
+                <h3>Biblioteka strojów</h3>
+                <p class="muted">Wspólna dla wszystkich person (folder <span class="mono">stroje_biblioteka</span>). ★ = ulubione, losowane częściej. Ze zdjęcia bierzemy tylko ubranie – nie włosy, twarz ani tatuaże osoby na zdjęciu.</p>
+                <div class="muted" id="biblioteka-licznik"></div>
+                <div class="miniaturki" id="biblioteka-lista"></div>
+              </div>
+            </form>
           </details>
 
           <!-- Prompty -->

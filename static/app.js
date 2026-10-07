@@ -421,6 +421,7 @@ const state = {
   personyHtml: '',
   // rolki
   pomysly: [], statusy: STATUSY.slice(), pomyslyJson: '', filtr: 'wszystkie',
+  biblioteka: [], maPromptB: true,   // stroje z biblioteki ze zdjęciem (lista „Strój:” przy rolce z filmu) + czy persona ma prompt B
   odbierzTelefon: false, rolkiTelefon: false,   // czy listy były rysowane z podłączonym telefonem (przycisk „Wyślij na telefon”)
   kosztJakosc: {},       // id rolki -> podpis jakości (rozdzielczość|długość) z chwili policzenia kosztu w tej sesji; inny podpis = koszt nieaktualny
   rolkiJakosc: '',       // podpis jakości, z którym rysowano listę rolek (zmiana zestawu przerysowuje szacunki „ok. N kr”)
@@ -1543,7 +1544,7 @@ async function ladujNsfw() {
   renderNsfw();
 }
 
-const NAZWY_PROMPTOW_NSFW = { A: 'Prompt A (strój z filmu)', B: 'Prompt B (strój ze zdjęcia)', zdjecia: 'Prompty zdjęć' };
+const NAZWY_PROMPTOW_NSFW = { A: 'Prompt A (strój z filmu)', B: 'Prompt B (strój ze zdjęcia)', zdjecia: 'Prompty zdjęć', sylwetka: 'Sylwetka persony' };
 // Wskazówki z /api/nsfw przychodzą bez polskich znaków (backend) – tu dopisujemy ogonki. Kolejność ma znaczenie (zdjecia przed zdjec).
 const POLSKIE_WSKAZOWKI = [
   [/odrzucil/g, 'odrzucił'], [/wracaja/g, 'wracają'], [/\bsa\b/g, 'są'], [/ktore/g, 'które'], [/blokowac/g, 'blokować'],
@@ -1576,7 +1577,7 @@ function renderNsfw() {
     <div class="dzis-poz${ostatnio ? ' zle' : ''}"><b>${esc(liczba(ostatnio))}</b><span>${esc(odmiana(ostatnio, 'odrzucona', 'odrzucone', 'odrzuconych'))} w ${dni} dni</span></div>
     <div class="dzis-poz"><b>${esc(liczba(razem))}</b><span>razem (${esc(nazwaPersony(state.aktywna) || 'persona')})</span></div>
   </div>`;
-  const wiersze = ['A', 'B', 'zdjecia'].map(k => {
+  const wiersze = ['A', 'B', 'zdjecia', 'sylwetka'].filter(k => k !== 'sylwetka' || (slowa.sylwetka || []).length).map(k => {
     const lista = Array.isArray(slowa[k]) ? slowa[k] : [];
     return `<div class="nsfw-slowa-wiersz"><b>${esc(NAZWY_PROMPTOW_NSFW[k])}:</b>${lista.length ? lista.map(s => `<span class="slowo">${esc(s)}</span>`).join('') : '<span class="slowo czyste">bez ryzykownych słów ✓</span>'}</div>`;
   }).join('');
@@ -1600,10 +1601,12 @@ async function ladujRolki(cicho) {
     // bez zmian w rolkach, telefonie i zestawie jakości (szacunki „ok. N kr” zależą od zestawu) – nic nie przerysowujemy
     if (json === state.pomyslyJson && telefon === state.rolkiTelefon && podpisRolek() === state.rolkiJakosc) return;
     const akt = document.activeElement;
-    if (akt && akt.tagName === 'TEXTAREA' && $('#rolki-lista').contains(akt)) return; // nie przerywaj edycji promptu
+    if (akt && ['TEXTAREA', 'SELECT'].includes(akt.tagName) && $('#rolki-lista').contains(akt)) return; // nie przerywaj edycji promptu / wyboru stroju
     if ($$('#rolki-lista video').some(v => !v.paused)) return;                        // ani odtwarzania
   }
   state.pomysly = d.pomysly || [];
+  state.biblioteka = d.biblioteka || [];          // stroje z biblioteki ze zdjęciem (lista „Strój:” przy klipie)
+  state.maPromptB = d.ma_prompt_b !== false;
   state.pomyslyJson = json;
   state.rolkiTelefon = telefon;
   renderRolki();
@@ -1740,6 +1743,20 @@ function kartaRolki(p) {
   const podgladGra = maPodglad && !gra && state.podglady.has(id);
   if (p.podglad_koszt !== null && p.podglad_koszt !== undefined) fakty.push(`podgląd: ${esc(kredytow(p.podglad_koszt))}`);
   else if (maPodglad) fakty.push('jest tani podgląd');
+  // strój rolki z filmu: miniatura + (przed generacją) lista „Strój: z filmu / stroje z biblioteki”
+  let strojBlok = '';
+  if (!zPromptu && (p.stroj_url || p.mozna_zmienic_stroj)) {
+    const mini = p.stroj_url ? `<img class="rolka-stroj-mini" src="${esc(p.stroj_url)}" alt="" loading="lazy" title="${esc(p.stroj_nazwa || '')}">` : '';
+    let wybor = `<span>Strój: <b>${p.stroj_url ? `${p.stroj_ulubiony ? '★ ' : ''}${esc(p.stroj_nazwa || 'ze zdjęcia')}` : 'z filmu'}</b></span>`;
+    if (p.mozna_zmienic_stroj && (state.biblioteka.length || p.stroj)) {
+      const obecny = p.stroj_bib ? p.stroj_bib : (p.stroj ? '__wlasny' : 'z_filmu');
+      const opcje = [['z_filmu', 'Strój: z filmu']];
+      if (p.stroj && !p.stroj_bib) opcje.push(['__wlasny', `Strój: ${p.stroj_nazwa || 'zdjęcie obok filmiku'}`]);
+      state.biblioteka.forEach(s => opcje.push([s.id, `Strój: ${s.ulubiony ? '★ ' : ''}${s.nazwa}`]));
+      wybor = `<label class="sr-only" for="stroj-${id}">Strój rolki</label><select id="stroj-${id}" class="rolka-stroj-wybor" data-stroj-pomysl="${id}"${state.maPromptB ? '' : ' title="Persona nie ma promptu B – stroje z biblioteki nie zadziałają"'}>${opcjeHtml(opcje, obecny)}</select>`;
+    }
+    strojBlok = `<div class="rolka-stroj">${mini}${wybor}</div>`;
+  }
   const mini = miniaturaRolki(p);
   const obraz = mini ? `<img src="${esc(mini)}" alt="" loading="lazy">` : ikona('film');
   // miniatura gotowej rolki = przycisk „Odtwórz” (klik otwiera film na karcie); rolki z tanim podglądem = przycisk „Zobacz podgląd”
@@ -1809,6 +1826,8 @@ function kartaRolki(p) {
       ${zPromptu && p.z_promptu_dlaczego ? `<div class="rolka-meta">Asystent: ${esc(p.z_promptu_dlaczego)}</div>` : ''}
       ${zPromptu && ['gotowe', 'wygenerowany'].includes(status) ? `<div class="rolka-ocena"><span>Jak wyszła?</span><button class="btn btn-maly${p.ocena === 'dobra' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="dobra" aria-pressed="${p.ocena === 'dobra'}">${ikona('ok')}Dobra – więcej takich</button><button class="btn btn-maly${p.ocena === 'slaba' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="slaba" aria-pressed="${p.ocena === 'slaba'}">Słaba</button></div>` : ''}
       <div class="rolka-fakty">${fakty.map(f => `<span class="fakt">${f}</span>`).join('')}</div>
+      ${strojBlok}
+      ${zPromptu && p.glos_blad && !p.glos_dograny ? `<div class="rolka-meta zle">Bez komentarza zza kamery: ${esc(prostyBlad(p.glos_blad))}. Napraw ElevenLabs (Ustawienia → Konta) i kliknij „Dograj głos”.</div>` : ''}
       ${powod}
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
       ${promptOtwarty ? `<div class="rolka-prompt"><label for="prompt-${id}">Prompt – opis dla AI, co zrobić z tym filmikiem</label><textarea id="prompt-${id}" data-prompt="${id}" spellcheck="false" placeholder="Wklej prompt persony albo własny…">${esc(p.prompt_higgsfield || '')}</textarea><div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="zapisz-prompt" data-id="${id}">Zapisz prompt</button>${bezPromptu ? '' : `<button class="btn btn-maly" type="button" data-akcja="prompt-pokaz" data-id="${id}">Zwiń</button>`}</div></div>` : ''}
@@ -1946,6 +1965,16 @@ async function przerwijPomysl(id) {
   odswiez();
 }
 
+// „Strój:” przy rolce z filmu (przed generacją): z filmu (wariant A) albo strój z biblioteki (wariant B, zdjęcie jako ostatni obraz).
+async function zmienStrojRolki(id, wartosc) {
+  if (!id || wartosc === '__wlasny') return;
+  const d = await api(`/api/pomysly/${id}/stroj`, 'POST', { stroj: wartosc });
+  const i = state.pomysly.findIndex(x => Number(x.id) === id);
+  if (i >= 0 && d.pomysl) state.pomysly[i] = d.pomysl;
+  toast(d.uwaga || (wartosc === 'z_filmu' ? 'Rolka będzie w stroju z filmu.' : `Strój zmieniony: ${(d.pomysl || {}).stroj_nazwa || ''}.`), d.uwaga ? 'uwaga' : 'ok');
+  renderRolki();
+}
+
 async function usunPomysl(id) {
   const w = await potwierdz({ tytul: 'Usunąć tę rolkę z listy?', tresc: '<p>Filmik źródłowy w folderze zostaje. Jeśli chcesz, usunę też gotowy plik wideo.</p>', ok: 'Usuń', klasa: 'btn-zly', checkbox: 'Usuń też gotowy plik wideo' });
   if (!w) return;
@@ -2041,32 +2070,66 @@ function renderZpFormularz() {
   $('#zp-miejsce').innerHTML = `<option value="">Dobierze asystent</option><option value="losowe">Losowe miejsce</option>${grupy}`;
   $('#zp-nazwy').innerHTML = opcjeHtml(k.nazwy || [], dom.nazwy || 'prawdziwe');
   renderZpObiekt();
+  // strój: biblioteka (domyślnie; ★ ulubione na górze) + stare kategorie (odważne, jak na zdjęciach, codzienny, cosplay, pliki persony)
+  const bib = (k.stroje_biblioteka || []).map(s => `<option value="biblioteka:${esc(s.id)}">${s.ulubiony ? '★ ' : ''}${esc(s.nazwa)}${s.ma_zdjecie ? '' : ' (sam opis)'}</option>`).join('');
   const odwazne = (k.stroje_odwazne || []).map(([v, t]) => `<option value="odwazny:${esc(v)}">${esc(t)}</option>`).join('');
-  const tryby = (k.stroje || []).filter(([v]) => v !== 'wlasny');
+  const tryby = (k.stroje || []).filter(([v]) => v !== 'wlasny').map(([v, t]) => [v, v === 'biblioteka' ? 'Z biblioteki – dobierze asystent' : t]);
   const pliki = (per.stroje || []).map(n => [`plik:${n}`, `Ze zdjęcia: ${n}`]);
-  $('#zp-stroj').innerHTML = opcjeHtml(tryby.concat(pliki, [['wlasny', 'Własny opis']]), dom.stroj || 'odwazny')
+  $('#zp-stroj').innerHTML = opcjeHtml(tryby.slice(0, 1), dom.stroj || 'biblioteka')
+    + (bib ? `<optgroup label="Biblioteka strojów (★ = ulubione)">${bib}</optgroup>` : '')
+    + `<optgroup label="Inne">${opcjeHtml(tryby.slice(1).concat(pliki, [['wlasny', 'Własny opis']]), dom.stroj || 'biblioteka')}</optgroup>`
     + (odwazne ? `<optgroup label="Odważne – przyciągają wzrok">${odwazne}</optgroup>` : '');
   $('#zp-reakcja').innerHTML = opcjeHtml((k.reakcje || []).map(([v, t]) => [v, v === 'losowa' ? 'Dobierze asystent' : t]), dom.reakcja || 'losowa');
   $('#zp-kamera').innerHTML = opcjeHtml([['auto', 'Z ukrycia – dobierz do miejsca']].concat(k.kamery || []), dom.kamera || 'auto');
-  $('#zp-komentarz').innerHTML = opcjeHtml([['losowy', 'Dobierze asystent'], ['bez', 'Bez komentarza']].concat((k.komentarze || []).map(t => [t, `„${t}”`]), [['wlasny', 'Własny…']]), dom.komentarz || 'losowy');
-  $('#zp-glos').innerHTML = opcjeHtml(k.glosy || [], dom.glos || 'auto');
-  $('#zp-wymowa').innerHTML = opcjeHtml(k.wymowy || [], dom.wymowa || 'fonetyczna');
+  $('#zp-nagrywa').innerHTML = opcjeHtml(k.nagrywa || [['chlopak', 'Chłopak'], ['dziewczyna', 'Dziewczyna']], per.nagrywa || 'chlopak');
+  renderZpKomentarze(dom.komentarz || 'losowy');
   $('#zp-wlosy-kolor').innerHTML = opcjeHtml(k.wlosy.kolory, 'wlasne');
   $('#zp-wlosy-fryzura').innerHTML = opcjeHtml(k.wlosy.fryzury, 'wlasna');
   $('#zp-wlosy-grzywka').innerHTML = opcjeHtml(k.wlosy.grzywki, 'wlasna');
   const sezonTeraz = (k.sezony || []).find(([v]) => v === k.sezon_teraz);
   $('#zp-sezon').innerHTML = opcjeHtml([['auto', `Jak teraz (${sezonTeraz ? sezonTeraz[1].toLowerCase() : 'wg daty'})`]].concat(k.sezony || []), 'auto');
   $('#zp-pora').innerHTML = opcjeHtml([['auto', 'Dobierz do miejsca']].concat(k.pory || []), 'auto');
-  $('#zp-glos-id').value = k.glos_id || '';
-  const tts = k.glos_tts || {};
-  $('#zp-glos-info').textContent = tts.ok ? 'Komentarz dogra ElevenLabs po generacji – poprawna polska wymowa.'
-    : `Komentarz mówi model wideo (pisownia ą/ę poprawiona). Żeby mówił ElevenLabs: wklej klucz sk_… w Ustawienia → Konta → ElevenLabs.`;
+  renderZpGlosInfo();
   let info = 'Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.';
   if (!per.wzrost_cm) info += ` Wpisz wzrost (Ustawienia → Persona) – rolka będzie lepiej wyskalowana obok ludzi.`;
   $('#zp-wlosy-info').textContent = info;
   $('#zp-stroj-tekst').hidden = $('#zp-stroj').value !== 'wlasny';
   $('#zp-komentarz-tekst').hidden = $('#zp-komentarz').value !== 'wlasny';
   wstawIkony($('#strona-z-promptu'));
+}
+
+// Komentarze zza kamery: neutralne + w formie osoby nagrywającej (chłopak/dziewczyna). Zmiana „Kto nagrywa” zamienia znaną linię
+// na formę drugiej płci (np. „Ja bym się tak nie odważyła.” -> „odważył.”), tak jak robi to backend (scenariusz.dopasuj_do_mowiacego).
+function renderZpKomentarze(wybrany) {
+  const k = state.zp.katalog || {};
+  const kto = ($('#zp-nagrywa') && $('#zp-nagrywa').value) || 'chlopak';
+  const plec = (k.komentarze_plec || {});
+  const inna = plec[kto === 'chlopak' ? 'dziewczyna' : 'chlopak'] || [];
+  const moje = plec[kto] || [];
+  const i = inna.indexOf(wybrany);
+  if (i >= 0 && moje[i]) wybrany = moje[i];
+  $('#zp-komentarz').innerHTML = opcjeHtml([['losowy', 'Dobierze asystent'], ['bez', 'Bez komentarza']]
+    .concat((k.komentarze || []).concat(moje).map(t => [t, `„${t}”`]), [['wlasny', 'Własny…']]), wybrany || 'losowy');
+  if (wybrany && !['losowy', 'bez', 'wlasny'].includes(wybrany) && $('#zp-komentarz').value !== wybrany) {
+    $('#zp-komentarz').value = 'wlasny'; $('#zp-komentarz-tekst').value = wybrany;
+  }
+}
+
+// Kto mówi komentarz: zawsze osoba nagrywająca (ElevenLabs po generacji); bez ElevenLabs – jasno, że rolka będzie bez komentarza.
+function renderZpGlosInfo() {
+  const tts = ((state.zp.katalog || {}).glos_tts) || {};
+  const kto = $('#zp-nagrywa').value === 'dziewczyna' ? 'dziewczyna, która nagrywa (nie widać jej)' : 'chłopak, który nagrywa (nie widać go)';
+  $('#zp-glos-info').textContent = tts.ok
+    ? `Komentarz mówi ${kto} – głos ElevenLabs dograny po generacji, jak nagrany telefonem. Persona i ludzie obok nic nie mówią. Głosy ustawisz w Ustawienia → Stroje i głos.`
+    : (tts.komunikat || 'ElevenLabs nie działa – rolka wyjdzie bez komentarza; dograsz go potem przyciskiem „Dograj głos”.');
+  $('#zp-glos-info').className = 'pole-info' + (tts.ok ? '' : ' zle');
+}
+
+// Strój z biblioteki wybrany w formularzu (do linijki „Asystent dobrał” i miniatury) albo null.
+function zpStrojBib() {
+  const v = $('#zp-stroj').value || '';
+  if (!v.startsWith('biblioteka:')) return null;
+  return ((state.zp.katalog || {}).stroje_biblioteka || []).find(s => s.id === v.slice(11)) || null;
 }
 
 function ustawSelect(sel, wartosc) {
@@ -2089,11 +2152,10 @@ function ustawZpZOpcji(o) {
   if (!r.stroj) ustawSelect('#zp-stroj', o.stroj);
   if (!r.reakcja) ustawSelect('#zp-reakcja', o.reakcja);
   if (!r.kamera) ustawSelect('#zp-kamera', o.kamera);
+  if (!r.nagrywa && o.nagrywa) { ustawSelect('#zp-nagrywa', o.nagrywa); renderZpKomentarze($('#zp-komentarz').value); renderZpGlosInfo(); }
   if (!r.komentarz) {
     if (!ustawSelect('#zp-komentarz', o.komentarz)) { $('#zp-komentarz').value = 'wlasny'; $('#zp-komentarz-tekst').value = o.komentarz || ''; }
   }
-  if (!r.glos) ustawSelect('#zp-glos', o.glos);
-  if (!r.wymowa) ustawSelect('#zp-wymowa', o.wymowa);
   if (!r.wlosy && o.wlosy) { ustawSelect('#zp-wlosy-kolor', o.wlosy.kolor); ustawSelect('#zp-wlosy-fryzura', o.wlosy.fryzura); ustawSelect('#zp-wlosy-grzywka', o.wlosy.grzywka); }
   $('#zp-stroj-tekst').hidden = $('#zp-stroj').value !== 'wlasny';
   $('#zp-komentarz-tekst').hidden = $('#zp-komentarz').value !== 'wlasny';
@@ -2106,7 +2168,7 @@ function zbierzZp() {
     model: $('#zp-model').value, dlugosc: Number($('#zp-dlugosc').value),
     rozdzielczosc: $('#zp-rozdz').value || 'auto', stroj: $('#zp-stroj').value, stroj_tekst: $('#zp-stroj-tekst').value.trim(),
     reakcja: $('#zp-reakcja').value, komentarz: $('#zp-komentarz').value, komentarz_tekst: $('#zp-komentarz-tekst').value.trim(),
-    glos: $('#zp-glos').value, wymowa: $('#zp-wymowa').value,
+    glos: 'auto', nagrywa: $('#zp-nagrywa').value,     // 3.1: komentarz zawsze ElevenLabs (model wideo nic nie mówi)
     wlosy: { kolor: $('#zp-wlosy-kolor').value, fryzura: $('#zp-wlosy-fryzura').value, grzywka: $('#zp-wlosy-grzywka').value },
     sezon: $('#zp-sezon').value, pora: $('#zp-pora').value, kamera: $('#zp-kamera').value,
   };
@@ -2127,7 +2189,8 @@ function zpPodsumowanie() {
   const miejsce = $('#zp-miejsce').value ? tekstOpcji('#zp-miejsce') : 'miejsce dobierze asystent';
   const obiekt = $('#zp-obiekt').value && !$('#zp-obiekt').disabled ? tekstOpcji('#zp-obiekt') : '';
   const kom = $('#zp-komentarz').value === 'wlasny' ? $('#zp-komentarz-tekst').value.trim() : ($('#zp-komentarz').value === 'bez' ? '' : ($('#zp-komentarz').value === 'losowy' ? '' : $('#zp-komentarz').value));
-  const glos = $('#zp-glos').value === 'auto' ? (((state.zp.katalog || {}).glos_tts || {}).ok ? 'głos ElevenLabs' : 'mówi model') : ($('#zp-glos').value === 'tts' ? 'głos ElevenLabs' : 'mówi model');
+  const kto = $('#zp-nagrywa').value === 'dziewczyna' ? 'dziewczyna' : 'chłopak';
+  const glos = (((state.zp.katalog || {}).glos_tts || {}).ok) ? `mówi ${kto} zza kamery, ElevenLabs` : 'ElevenLabs nie działa – rolka bez komentarza';
   const czesci = [obiekt ? `${miejsce}: ${obiekt}` : miejsce, `strój: ${tekstOpcji('#zp-stroj')}`, `kamera: ${tekstOpcji('#zp-kamera').toLowerCase()}`,
     `reakcja: ${tekstOpcji('#zp-reakcja').toLowerCase()}`];
   if (kom) czesci.push(`„${kom}” (${glos})`);
@@ -2139,11 +2202,23 @@ function renderZpAsystent() {
   const a = state.zp.asystent;
   const el = $('#zp-asystent-tekst');
   if (state.zp.dobiera) { el.innerHTML = '<span class="kropka akcent pulsuje"></span> dobieram miejsce, strój, kamerę i reakcje…'; $('#zp-asystent-dlaczego').textContent = ''; return; }
-  if (!a) { el.textContent = 'napisz pomysł albo kliknij „Losuj”.'; $('#zp-asystent-dlaczego').textContent = ''; return; }
+  if (!a) { el.textContent = 'napisz pomysł albo kliknij „Losuj”.'; $('#zp-asystent-dlaczego').textContent = ''; renderZpStrojMini(); return; }
   el.textContent = zpPodsumowanie();
+  renderZpStrojMini();
   const reczne = Object.keys(state.zp.reczne).length;
   const zrodlo = (a.zrodlo || '').startsWith('openrouter') ? 'AI' : 'reguły';
   $('#zp-asystent-dlaczego').textContent = `Dlaczego: ${a.dlaczego || ''}` + (reczne ? ` (zmieniłeś ręcznie: ${reczne})` : '') + ` · ${zrodlo}` + (a.uwaga && state.pelny ? ` · ${a.uwaga}` : '');
+}
+
+// Przy „Asystent dobrał”: nazwa stroju (PL) i miniatura zdjęcia stroju z biblioteki (gdy jest).
+function renderZpStrojMini() {
+  const s = state.zp.asystent ? zpStrojBib() : null;
+  const img = $('#zp-stroj-mini'), linia = $('#zp-asystent-stroj');
+  if (s && s.url) { img.src = s.url; img.alt = `Strój: ${s.nazwa}`; img.title = s.nazwa; img.hidden = false; } else { img.hidden = true; img.removeAttribute('src'); }
+  if (s) {
+    linia.innerHTML = `Strój: <b>${s.ulubiony ? '★ ' : ''}${esc(s.nazwa)}</b>` + (s.ma_zdjecie ? ' <span class="muted">(ze zdjęcia – tylko ubranie)</span>' : ' <span class="muted">(z opisu)</span>');
+    linia.hidden = false;
+  } else linia.hidden = true;
 }
 
 // Asystent dobiera wszystko do pomysłu (0 kr), potem od razu darmowa wycena.
@@ -2295,13 +2370,6 @@ function zpRecznie(el) {
   const domyslne = ['', 'auto', 'losowa', 'losowy'];
   if (pole !== 'wlosy' && domyslne.includes(v)) delete state.zp.reczne[pole];
   else state.zp.reczne[pole] = v;
-}
-
-async function zpZapiszGlosId() {
-  const v = $('#zp-glos-id').value.trim();
-  await api('/api/ustawienia', 'POST', { z_promptu_glos: v });
-  if (state.zp.katalog) state.zp.katalog.glos_id = v;
-  toast(v ? 'Zapisane – komentarz będzie mówił ten głos ElevenLabs.' : 'Zapisane – głos dobiorę sam z Twojego konta ElevenLabs.', 'ok');
 }
 
 async function ocenRolke(id, ocena) {
@@ -2726,6 +2794,7 @@ async function ladujUstawienia() {
   $$('#strona-ustawienia form[data-ustawienia]').forEach(f => wypelnijFormularz(f, dane));
   przelaczDostawce();
   renderReferencje(d);
+  renderBiblioteka(d);
   renderFoldery(d);
   renderPromptyInfo();
   renderJakosc();
@@ -2734,7 +2803,7 @@ async function ladujUstawienia() {
   const prof = state.profile[state.aktywna] || d.profil || {};
   wypelnijFormularz($('#form-profil'), {
     nazwa: prof.nazwa || nazwaPersony(state.aktywna) || '', instagram: prof.instagram || '', opis_stylu: prof.opis_stylu || '',
-    hashtagi: prof.hashtagi || '', wzrost_cm: prof.wzrost_cm || '', wlosy: prof.wlosy || '',
+    hashtagi: prof.hashtagi || '', wzrost_cm: prof.wzrost_cm || '', wlosy: prof.wlosy || '', sylwetka: prof.sylwetka || '',
     cechy: Array.isArray(prof.cechy) ? prof.cechy.join(', ') : (prof.cechy || ''),
     telegram_czat: u.telegram_czat || '',   // ustawienie persony (nie profil) – zapis w zapiszProfil idzie do /api/ustawienia
   });
@@ -2771,6 +2840,16 @@ function renderReferencje(d) {
   $('#referencje-lista').innerHTML = refs.map((r, i) => miniaturka(r, 'referencja', `@Image ${i + 1}`)).join('');
   $('#stroje-licznik').textContent = stroje.length ? `${stroje.length} ${odmiana(stroje.length, 'strój', 'stroje', 'strojów')}` : 'Brak strojów (nie są konieczne).';
   $('#stroje-lista').innerHTML = stroje.map(s => miniaturka(s, 'stroj', '')).join('');
+}
+
+// Ustawienia → Stroje i głos: podgląd wspólnej biblioteki strojów (tylko do oglądania; ★ = ulubione).
+function renderBiblioteka(d) {
+  const lista = d.biblioteka || [];
+  const zdj = lista.filter(s => s.ma_zdjecie).length;
+  $('#biblioteka-licznik').textContent = lista.length
+    ? `${lista.length} ${odmiana(lista.length, 'strój', 'stroje', 'strojów')} (${zdj} ze zdjęciem – te idą też do rolek z filmu, reszta tylko z opisu do rolek z promptu).`
+    : 'Biblioteka jest pusta (folder stroje_biblioteka) – rolki z filmu idą wtedy ze strojem z filmu.';
+  $('#biblioteka-lista').innerHTML = lista.map(s => `<div class="miniaturka${s.url ? '' : ' bez-zdjecia'}" title="${esc(s.nazwa)}">${s.url ? `<img src="${esc(s.url)}" alt="${esc(s.nazwa)}" loading="lazy">` : `<span class="opis-stroju">${ikona('stroj')}sam opis</span>`}${s.ulubiony ? '<span class="numer">★</span>' : ''}<div class="nazwa">${esc(s.nazwa)}</div></div>`).join('');
 }
 
 function renderStrojDomyslny(d) {
@@ -2912,6 +2991,7 @@ async function zapiszUstawienia(f) {
     if (f.id === 'form-zdjecia-ust' && state.ustawieniaPelne) {
       state.ustawieniaPelne.prompty = Object.assign({}, state.ustawieniaPelne.prompty, { zdjecia: dane.zdjecia_prompty_tekst });
     }
+    if (f.id === 'form-stroje') state.zp.katalog = null;    // „Kto nagrywa” persony – Z promptu wczyta domyślne od nowa
     toast('Zapisane.', 'ok');
     odswiezDiagnoze();
     odswiez();
@@ -2938,7 +3018,7 @@ async function zapiszProfil(f) {
   const dane = zbierzFormularz(f);
   const znany = !!state.profile[state.aktywna];   // profil znamy tylko po zapisie w tej sesji (API nie ma GET profilu)
   const payload = { nazwa: dane.nazwa || '' };
-  for (const k of ['instagram', 'opis_stylu', 'cechy', 'hashtagi', 'wzrost_cm', 'wlosy']) {
+  for (const k of ['instagram', 'opis_stylu', 'cechy', 'hashtagi', 'wzrost_cm', 'wlosy', 'sylwetka']) {
     const v = String(dane[k] === undefined || dane[k] === null ? '' : dane[k]).trim();
     if (v || znany) payload[k] = v;   // puste pole kasuje wartość tylko wtedy, gdy ją widzieliśmy – inaczej zostawiamy to, co zapisane
   }
@@ -3546,12 +3626,13 @@ document.addEventListener('change', e => {
     state.zp.pomyslId = g ? g.id : null;
     if (g) zpAsystent(true); else zpZmiana();
   }
-  else if (el.id === 'zp-glos-id') zpZapiszGlosId().catch(bladToast);
+  else if (el.matches && el.matches('select[data-stroj-pomysl]')) zmienStrojRolki(Number(el.dataset.strojPomysl), el.value).catch(err => { bladToast(err); ladujRolki(false).catch(() => {}); });
   else if (el.closest && el.closest('#form-zp') && el.id !== 'zp-prompt') {
     if (el.id === 'zp-model') renderZpModel();
     if (el.id === 'zp-miejsce') { delete state.zp.reczne.obiekt; renderZpObiekt(); }
     if (el.id === 'zp-nazwy') renderZpObiekt($('#zp-obiekt').value);
-    if (el.id === 'zp-stroj') $('#zp-stroj-tekst').hidden = el.value !== 'wlasny';
+    if (el.id === 'zp-nagrywa') { renderZpKomentarze($('#zp-komentarz').value === 'wlasny' ? $('#zp-komentarz-tekst').value.trim() : $('#zp-komentarz').value); renderZpGlosInfo(); }
+    if (el.id === 'zp-stroj') { $('#zp-stroj-tekst').hidden = el.value !== 'wlasny'; renderZpStrojMini(); }
     if (el.id === 'zp-komentarz') $('#zp-komentarz-tekst').hidden = el.value !== 'wlasny';
     zpRecznie(el);
     zpZmiana();

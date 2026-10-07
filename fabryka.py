@@ -159,11 +159,40 @@ def sprawdz_prompt(slug, ust=None):
     stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
     if (stroje or baza.stroj_domyslny(slug)) and not b:
         uwagi.append("sa zdjecia strojow, ale prompt B (stroj ze zdjecia) jest pusty")
+    if (ust.get("stroj_swap") or "biblioteka") == "biblioteka" and not b and baza.stroje_biblioteki(tylko_ze_zdjeciem=True):
+        uwagi.append("stroje z biblioteki wymagaja promptu B (stroj ze zdjecia) - bez niego nowe klipy ida ze strojem z filmu")
     uwagi += sprawdz_prompt_wan(slug, ust)
     return uwagi
 
 
 LIMIT_PROMPTU_WAN = 5000
+
+# Sylwetka persony (profil.sylwetka, EN) - fabryka dokleja ja na KONCU promptu persony w character swap (A i B, Seedance i Wan);
+# pliki promptow usera zostaja nietkniete. Feedback usera 2026-10-07: model robi Noemi za maly biust i posladki.
+NAGLOWEK_SYLWETKI = "BODY SHAPE (highest priority after face):"
+
+
+def sylwetka_persony(slug):
+    """profil.sylwetka (EN) jedna linijka albo ''."""
+    return re.sub(r"\s+", " ", str(baza.profil_modelki(slug).get("sylwetka") or "")).strip()
+
+
+def doklej_sylwetke(prompt, sylwetka, limit=None):
+    """Prompt persony + blok 'BODY SHAPE (highest priority after face): ...' na koncu. limit (Wan: 5000 znakow): gdy pelny opis
+    sie nie miesci - tylko pierwsze zdanie, a gdy i to nie - prompt bez zmian. Zwraca (prompt, 'pelna'|'krotka'|'pominieta'|
+    'brak'|'jest')."""
+    prompt = prompt or ""
+    if not sylwetka or not prompt.strip():
+        return prompt, "brak"
+    if NAGLOWEK_SYLWETKI in prompt:
+        return prompt, "jest"
+    m = re.match(r"(.+?[.!?])(\s|$)", sylwetka)
+    for wersja, tekst in (("pelna", sylwetka), ("krotka", m.group(1) if m else sylwetka)):
+        tekst = tekst.strip()
+        nowy = f"{prompt.rstrip()}\n\n{NAGLOWEK_SYLWETKI} {tekst}" + ("" if tekst.endswith((".", "!", "?")) else ".")
+        if limit is None or len(nowy) <= limit:
+            return nowy, wersja
+    return prompt, "pominieta"
 
 
 def _krok_uzywa_wan(dostawca, model):
@@ -205,6 +234,11 @@ def sprawdz_prompt_wan(slug, ust=None):
         uwagi.append(f"prompt Wan ma {len(wan)} znakow, a Wan przyjmuje max {LIMIT_PROMPTU_WAN}")
     if _WZORZEC_IMAGE.search(wan):
         uwagi.append("prompt Wan ma skladnie @[Image N] z Higgsfielda - Wan jej nie zna (pisz 'the reference photos')")
+    _, syl = doklej_sylwetke(wan, sylwetka_persony(slug), LIMIT_PROMPTU_WAN)
+    if syl == "pominieta":
+        uwagi.append(f"sylwetka persony nie miesci sie w prompcie Wan (max {LIMIT_PROMPTU_WAN} znakow) - Wan dostaje prompt bez niej")
+    elif syl == "krotka":
+        uwagi.append("prompt Wan dostaje tylko pierwsze zdanie sylwetki (pelna nie miesci sie w 5000 znakow)")
     return uwagi
 
 
@@ -601,6 +635,16 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
     stroj_dom = baza.stroj_domyslny(slug)
     if ust.get("prompt_auto") and not prompt_a:
         log("UWAGA: prompt_auto=true, ale prompt_bazowy (wariant A) jest pusty.")
+    uwaga_biblioteki = []
+
+    def stroj_klipu(zrodlo):
+        """(sciezka zdjecia stroju albo None, stroj z biblioteki albo None): <nazwa>.stroj.png > stroj_domyslny > biblioteka."""
+        wlasny = _stroj_dla(zrodlo) or stroj_dom
+        if wlasny:
+            return wlasny, None
+        bib = _stroj_z_biblioteki(slug, ust, log, uwaga_biblioteki)
+        return (bib["plik"], bib) if bib else (None, None)
+
     for zrodlo in nowe:
         _sprawdz_stop(stop)
         nazwa = os.path.splitext(os.path.basename(zrodlo))[0]
@@ -622,7 +666,6 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
                 log(f"[UWAGA] {nazwa}: nie udalo sie pociac ({e}) - robie z pierwszych {MAX_SEKUND_ZRODLA} s")
                 kawalki = []
             if kawalki:
-                stroj_oryg = _stroj_dla(zrodlo)
                 audio_oryg = baza.audio_dla_zrodla(zrodlo)
                 for i, kawalek in enumerate(kawalki, 1):
                     try:
@@ -635,16 +678,18 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
                         klatki.arkusz(kawalek, os.path.join(folder_k, "arkusz.jpg"), ile=6)
                     except Exception as e:
                         log(f"[UWAGA] klatki dla {nazwa} cz.{i}: {e}")
-                    stroj_k = stroj_oryg or stroj_dom
+                    stroj_k, bib_k = stroj_klipu(zrodlo)       # kazdy kawalek = osobna rolka (z biblioteki: kolejny stroj)
                     prompt_k = prompt_b if stroj_k else prompt_a
                     opis = f"{os.path.basename(zrodlo)} cz. {i}/{len(kawalki)} ({inf_k['czas']}s, {inf_k['szer']}x{inf_k['wys']})"
-                    pid = baza.dodaj_pomysl(slug, opis, prompt_k, zrodlo=kawalek, klatki=folder_k, info_zrodla=inf_k, stroj=stroj_k)
+                    pid = baza.dodaj_pomysl(slug, opis, prompt_k, zrodlo=kawalek, klatki=folder_k, info_zrodla=inf_k, stroj=stroj_k,
+                                            **({"stroj_bib": bib_k["id"]} if bib_k else {}))
                     if audio_oryg and i == 1:
                         baza.aktualizuj_pomysl(slug, pid, audio=audio_oryg)
                     wynik["nowe"].append(pid)
                     if not prompt_k:
                         wynik["bez_promptu"].append(pid)
-                    _zdarzenie(log, slug, "info", f"#{pid}  {opis}", pomysl=pid)
+                    _zdarzenie(log, slug, "info", f"#{pid}  {opis}" + (f"   [B: stroj z biblioteki: {bib_k['nazwa']}]" if bib_k else ""),
+                               pomysl=pid)
                 continue
         folder = os.path.join(folder_klatek, _bezpieczna_nazwa(nazwa))
         try:
@@ -653,17 +698,18 @@ def skanuj(slug, ile_klatek=4, log=None, stop=None, czekaj_na_kopiowanie=False):
         except Exception as e:
             log(f"[UWAGA] klatki dla {nazwa}: {e}")
 
-        stroj = _stroj_dla(zrodlo) or stroj_dom
+        stroj, bib = stroj_klipu(zrodlo)
         if stroj:
             prompt = prompt_b
-            wariant = "B: stroj ze zdjecia " + os.path.basename(stroj)
+            wariant = (f"B: stroj z biblioteki: {bib['nazwa']}" if bib else "B: stroj ze zdjecia " + os.path.basename(stroj))
             if ust.get("prompt_auto") and not prompt_b:
                 log(f"[UWAGA] {nazwa}: jest zdjecie stroju, ale prompt_stroj (wariant B) jest pusty.")
         else:
             prompt = prompt_a
             wariant = "A: stroj z filmu"
         opis = f"{os.path.basename(zrodlo)} ({inf['czas']}s, {inf['szer']}x{inf['wys']})"
-        pid = baza.dodaj_pomysl(slug, opis, prompt, zrodlo=zrodlo, klatki=folder, info_zrodla=inf, stroj=stroj)
+        pid = baza.dodaj_pomysl(slug, opis, prompt, zrodlo=zrodlo, klatki=folder, info_zrodla=inf, stroj=stroj,
+                                **({"stroj_bib": bib["id"]} if bib else {}))
         wynik["nowe"].append(pid)
         if not prompt:
             wynik["bez_promptu"].append(pid)
@@ -693,6 +739,20 @@ def _stroj_dla(zrodlo):
             if os.path.isfile(p):
                 return p
     return None
+
+
+def _stroj_z_biblioteki(slug, ust, log, uwaga=None):
+    """stroj_swap="biblioteka": stroj ze stroje_biblioteka/ dla NOWEGO klipu (tylko ze zdjeciem - wariant B bierze stroj ze zdjecia;
+    wazone losowanie + rotacja, baza.losuj_stroj_biblioteki). None = "z_filmu", pusta biblioteka albo persona bez promptu B
+    (wtedy klip idzie wariantem A - jedna uwaga w logu na przebieg)."""
+    if (ust.get("stroj_swap") or "biblioteka") != "biblioteka":
+        return None
+    if not baza.prompt_stroj(slug):
+        if uwaga is not None and not uwaga:
+            uwaga.append(1)
+            log("[UWAGA] stroje z biblioteki: persona nie ma promptu B (stroj ze zdjecia) - nowe klipy ida ze strojem z filmu")
+        return None
+    return baza.losuj_stroj_biblioteki(slug, tylko_ze_zdjeciem=True)
 
 
 # ---------------- prompt ----------------
@@ -761,8 +821,12 @@ def zlecenie(slug, p, ust=None):
         "yapper": dict(ust.get("yapper") or {}),
         "wavespeed": dict(ust.get("wavespeed") or {}),
     }
+    # sylwetka persony (profil.sylwetka) doklejana na koncu promptu persony - pliki promptow usera zostaja nietkniete
+    syl = sylwetka_persony(slug)
+    z["prompt"] = doklej_sylwetke(z["prompt"], syl)[0]
     # yapper (Wan): wlasny krotki prompt persony (yapper.prompt albo prompty/wan.txt) - bez @[Image N], max 5000 znakow
-    z["yapper"]["prompt"] = baza.prompt_wan(slug)
+    # (sylwetka tylko gdy sie miesci - skrocona do 1. zdania albo wcale; sprawdz_prompt_wan o tym mowi)
+    z["yapper"]["prompt"] = doklej_sylwetke(baza.prompt_wan(slug), syl, LIMIT_PROMPTU_WAN)[0]
     # WaveSpeed: Seedance dostaje prompt persony (z["prompt"], @[Image N] -> @Image N), modele Wan - ten sam prompt Wan
     z["wavespeed"]["prompt_wan"] = z["yapper"]["prompt"]
     return z
@@ -780,6 +844,7 @@ def cmd_wgraj(args):
     pliki = list(baza.sciezki_referencji(slug))
     stroje = baza.folder_strojow(slug)
     pliki += [os.path.join(stroje, n) for n in sorted(os.listdir(stroje)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
+    pliki += [s["plik"] for s in baza.stroje_biblioteki(tylko_ze_zdjeciem=True)]     # wspolna biblioteka strojow (cache per persona)
     if not pliki:
         print("Brak referencji/strojow do wgrania.")
         return 1
@@ -1006,7 +1071,8 @@ def wskazowki_nsfw(slug, dni=14):
                  if p.get("powod") == "nsfw" or (p.get("status") == "blad" and "nsfw" in (p.get("notatki") or "").lower())]
     ostatnio = [p for p in odrzucone if baza.dzien_lokalny(p.get("zaktualizowano") or p.get("utworzono")) >= granica]
     ust = baza.ustawienia_modelki(slug)
-    teksty = {"A": baza.prompt_bazowy(slug), "B": baza.prompt_stroj(slug), "zdjecia": "\n".join(baza.prompty_zdjec(slug))}
+    teksty = {"A": baza.prompt_bazowy(slug), "B": baza.prompt_stroj(slug), "zdjecia": "\n".join(baza.prompty_zdjec(slug)),
+              "sylwetka": sylwetka_persony(slug)}
     slowa = {}
     for nazwa, tekst in teksty.items():
         t = f" {re.sub(r'[^a-z0-9 -]+', ' ', (tekst or '').lower())} "
@@ -1017,7 +1083,8 @@ def wskazowki_nsfw(slug, dni=14):
                          f"(razem {_odmiana(len(odrzucone), 'rolke', 'rolki', 'rolek')}). Kredyty za odrzucone wracaja.")
     for nazwa, lista in slowa.items():
         if lista:
-            gdzie = {"A": "prompcie A (stroj z filmu)", "B": "prompcie B (stroj ze zdjecia)", "zdjecia": "promptach zdjec"}[nazwa]
+            gdzie = {"A": "prompcie A (stroj z filmu)", "B": "prompcie B (stroj ze zdjecia)", "zdjecia": "promptach zdjec",
+                     "sylwetka": "sylwetce persony (doklejana do kazdej rolki)"}[nazwa]
             wskazowki.append(f"W {gdzie} sa slowa, ktore filtr lubi blokowac: {', '.join(lista)}. Zamien je na neutralne opisy "
                              f"(np. 'black top' zamiast 'mesh top', 'outfit from the image' zamiast opisu materialu).")
     stroje = [n for n in os.listdir(baza.folder_strojow(slug)) if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]
@@ -1157,6 +1224,14 @@ def _wyslij(slug, p, d, z, k, krok, ust, log):
         log(f"#{pid}: job nie powstal - wysylam jeszcze raz za 10 s (proba {proba + 1}/{ile})")
         time.sleep(10)
     raise dostawcy.BladDostawcy("wyslanie nie wyszlo")
+
+
+def _prompt_wyslany(slug, p, ust):
+    """Prompt, ktory poszedl do dostawcy (prompt pomyslu + doklejka sylwetki) - do szukania joba po tresci promptu."""
+    try:
+        return zlecenie(slug, p, ust).get("prompt") or p.get("prompt_higgsfield")
+    except Exception:
+        return p.get("prompt_higgsfield")
 
 
 def _pomin_przy_szukaniu(p, d, marker):
@@ -1309,8 +1384,9 @@ def _przygotuj_zapas(slug, p, ust, krok, log, potwierdz=None, tylko_wycena=False
         # stroj zachowa - wtedy probujemy dalej.
         if zapas_dla_stroju(kroki[krok:]):
             return pomin("stroj", "rolka ze strojem ze zdjecia (wariant B) - ten krok bierze prompt Wan (stroj z filmu), probuje dalej")
-        raise _BezZapasu("rolka ze strojem ze zdjecia (wariant B) - prompt Wan bierze stroj z filmu, wiec zapas zgubilby stroj; "
-                         "zrob ja na Higgsfield (inne zdjecie stroju / inny fragment) albo bez zdjecia stroju", wszystkie=True)
+        raise _BezZapasu("rolka ze strojem ze zdjecia (wariant B, takze stroj z biblioteki) - prompt Wan bierze stroj z filmu, wiec "
+                         "zapas Wan zgubilby stroj i jest dla niej wylaczony; zrob ja na Higgsfield (inny stroj / inny fragment) albo "
+                         "zmien przy klipie 'Stroj: z filmu'", wszystkie=True)
     if nazwa not in dostawcy.NAZWY_ZAPASU or not model:
         return pomin("nieobslugiwany", "zapas obsluguje kroki {\"dostawca\": \"yapper\" albo \"wavespeed\", \"model\": ...}")
     if nazwa == "wavespeed":
@@ -1430,7 +1506,8 @@ def _komentarz_po_generacji(slug, p, surowy, log):
         baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=True, glos_plik=plik, glos_blad=None)
         return plik
     except Exception as e:
-        tekst = f"#{p['id']}: komentarz ElevenLabs nie dograny ({e}) - rolka ma tylko dzwiek otoczenia; 'Dograj glos' w panelu"
+        tekst = (f"#{p['id']}: komentarz ElevenLabs nie dograny ({e}) - rolka wyszla BEZ komentarza zza kamery (tylko dzwiek "
+                 f"otoczenia; model wideo nic nie mowi). Napraw ElevenLabs (Ustawienia -> Konta) i kliknij 'Dograj glos' w panelu")
         _zdarzenie(log, slug, "uwaga", tekst, pomysl=p["id"])
         baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=False, glos_blad=str(e)[:300])
         return None
@@ -1544,7 +1621,7 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
                 wiek = _wiek_s(od_wyslania)
                 idem = getattr(d, "IDEMPOTENTNY", False)
                 try:
-                    znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=p.get("prompt_higgsfield"),
+                    znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=_prompt_wyslany(slug, p, ust),
                                           od=od_wyslania, klucz=marker.get("klucz"),
                                           pomin=_pomin_przy_szukaniu(p, d, marker))
                 except dostawcy.BladDostawcy as e:
@@ -1928,20 +2005,17 @@ def _dane_z_promptu(sc):
     return {k: sc.get(k) for k in ("model", "mode", "dlugosc", "rozdzielczosc", "parametry", "generate_audio", "obrazy",
                                    "pomysl_id", "miejsce", "miejsce_nazwa", "wlosy_zmienione", "stroj_plik", "komentarz",
                                    "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje", "glos", "wymowa",
-                                   "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy", "stroj_id", "stroj_tryb", "reakcja")}
+                                   "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy", "stroj_id", "stroj_tryb", "reakcja",
+                                   "stroj_nazwa", "nagrywa", "sylwetka")}
 
 
 def _rozstrzygnij_glos(opcje):
-    """glos "auto" -> "tts" (dobry klucz ElevenLabs: wideo z samym otoczeniem + komentarz dograny po generacji) albo "model"
-    (komentarz mowi model wideo). Raz rozstrzygniety glos jedzie w `ustalone` - wycena i "Zrob rolke" daja ten sam prompt."""
+    """Od 3.1 model wideo NIGDY nie mowi komentarza: "auto" (i stare "model") -> "tts" = wideo z samym otoczeniem, komentarz osoby
+    nagrywajacej dogrywa ElevenLabs po generacji. Gdy ElevenLabs nie dziala, rolka wychodzi bez komentarza (wpis w dzienniku,
+    "Dograj glos" w panelu) - nie wraca do mowy z modelu."""
     o = dict(opcje or {})
-    if (o.get("glos") or "") == "auto":
-        u = o.get("ustalone") or {}
-        if u.get("glos") in ("tts", "model"):
-            o["glos"] = u["glos"]
-        else:
-            import komentarz_glos
-            o["glos"] = komentarz_glos.rozstrzygnij_glos("auto")
+    if (o.get("glos") or "auto") in ("auto", "model"):
+        o["glos"] = "tts"
     return o
 
 
@@ -1949,8 +2023,7 @@ def _zbuduj_z_promptu(slug, opcje):
     import scenariusz
     o = _rozstrzygnij_glos(opcje)
     sc = scenariusz.zbuduj(slug, o)
-    if o.get("glos") in ("tts", "model"):
-        sc["ustalone"]["glos"] = o["glos"]
+    sc["ustalone"]["glos"] = "tts"
     return sc
 
 
@@ -1966,8 +2039,19 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     wynik = {k: sc.get(k) for k in ("prompt", "znaki", "limit", "ostrzezenia", "ustalone", "model", "rozdzielczosc", "dlugosc",
                                     "tytul", "miejsce", "miejsce_nazwa", "pomysl_id", "wlosy_zmienione", "komentarz", "sezon",
                                     "pora", "kamera", "glos", "wymowa", "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy",
-                                    "stroj_id", "reakcja")}
+                                    "stroj_id", "stroj_tryb", "stroj_nazwa", "reakcja", "nagrywa")}
+    wynik["ostrzezenia"] = list(wynik.get("ostrzezenia") or [])
+    if sc.get("komentarz"):
+        try:
+            import komentarz_glos
+            ok, kom = komentarz_glos.tts_dostepne()
+        except Exception as e:      # sprawdzenie klucza nie moze zepsuc wyceny
+            ok, kom = False, str(e)
+        if not ok:
+            wynik["ostrzezenia"].append(f"ElevenLabs nie dziala ({kom}) - rolka wyjdzie bez komentarza zza kamery (model wideo "
+                                        f"nic nie mowi); dograsz go potem przyciskiem 'Dograj glos'.")
     wynik.update({"obrazy": [os.path.basename(o) for o in sc["obrazy"]], "kr": None, "saldo": None,
+                  "stroj_plik": os.path.basename(sc["stroj_plik"]) if sc.get("stroj_plik") else None,
                   "dzis": {"wydano": baza.wydano_z_rezerwa(nazwa), "limit": baza.limit_dzienny(nazwa)},
                   "min_kredyty": min_k, "max_kredyty_na_rolke": max_k, "mozna": False, "powody": [], "dostawca": nazwa})
     if not z_cena:
@@ -2019,7 +2103,8 @@ def dodaj_z_promptu(slug, opcje, prompt=None, kr=None):
     zp["wycena"] = kr
     zp["prompt_reczny"] = tekst != sc["prompt"]
     pid = baza.dodaj_pomysl(slug, sc["tytul"] or f"z promptu: {sc['miejsce_nazwa']}", tekst, stroj=sc.get("stroj_plik"),
-                            typ="prompt", z_promptu=zp, koszt=kr, resolution=sc["rozdzielczosc"], model=sc["model"])
+                            typ="prompt", z_promptu=zp, koszt=kr, resolution=sc["rozdzielczosc"], model=sc["model"],
+                            **({"stroj_bib": sc["stroj_id"]} if sc.get("stroj_tryb") == "biblioteka" else {}))
     _zdarzenie(None, slug, "info", f"#{pid}: rolka z promptu - {sc['miejsce_nazwa']}, {sc['model']} {sc['dlugosc']} s "
                f"{sc['rozdzielczosc']}" + (f", wycena {kr} kr" if kr is not None else ""), pomysl=pid)
     return pid
@@ -2033,12 +2118,15 @@ def cmd_z_promptu(args):
              "reakcja": args.reakcja, "sezon": args.sezon, "pora": args.pora, "kamera": args.kamera, "glos": args.glos,
              "wymowa": args.wymowa, "nazwy": args.nazwy, "obiekt": args.obiekt or "",
              "wlosy": {"kolor": args.wlosy, "fryzura": args.fryzura, "grzywka": args.grzywka}}
+    if args.nagrywa:
+        opcje["nagrywa"] = args.nagrywa
     if args.gotowy and not args.tekst:
         import scenariusz
         opcje["tekst"] = scenariusz.POMYSLY_PO_ID[args.gotowy]["pl"] if args.gotowy in scenariusz.POMYSLY_PO_ID else ""
     if args.asystent:
         import asystent
-        reczne = {k: v for k, v in opcje.items() if k in ("miejsce", "kamera", "reakcja", "obiekt") and v not in ("", "auto", "losowa")}
+        reczne = {k: v for k, v in opcje.items() if k in ("miejsce", "kamera", "reakcja", "obiekt", "nagrywa")
+                  and v not in ("", "auto", "losowa")}
         reczne.update(model=args.model, dlugosc=args.dlugosc)
         a = asystent.dobierz(slug, opcje["tekst"], pomysl_id=args.gotowy, zablokowane=reczne)
         opcje = dict(a["opcje"], asystent=a)
@@ -2397,11 +2485,14 @@ def main(argv=None):
     s.add_argument("--gotowy", help="id gotowego pomyslu (scenariusz.POMYSLY), np. galeria_fastfood")
     s.add_argument("--miejsce", help="id miejsca (scenariusz.MIEJSCA) albo 'losowe'")
     s.add_argument("--model", default="seedance_2_5"); s.add_argument("--dlugosc", type=int, default=10)
-    s.add_argument("--rozdzielczosc", default="auto"); s.add_argument("--stroj", default="zdjecia")
+    s.add_argument("--rozdzielczosc", default="auto")
+    s.add_argument("--stroj", default="biblioteka", help="biblioteka | biblioteka:<id> | odwazny[:<id>] | zdjecia | codzienny | cosplay | plik:<nazwa>")
     s.add_argument("--komentarz", default="losowy"); s.add_argument("--reakcja", default="losowa")
     s.add_argument("--sezon", default="auto"); s.add_argument("--pora", default="auto")
     s.add_argument("--wlosy", default="wlasne"); s.add_argument("--fryzura", default="wlasna"); s.add_argument("--grzywka", default="wlasna")
-    s.add_argument("--kamera", default="auto"); s.add_argument("--glos", default="model", choices=("auto", "tts", "model"))
+    s.add_argument("--kamera", default="auto")
+    s.add_argument("--glos", default="auto", choices=("auto", "tts"), help="komentarz zawsze ElevenLabs po generacji (model wideo nic nie mowi)")
+    s.add_argument("--nagrywa", choices=("chlopak", "dziewczyna"), help="kto nagrywa zza kamery (domyslnie z ustawien persony)")
     s.add_argument("--wymowa", default="zwykla", choices=("zwykla", "fonetyczna"))
     s.add_argument("--nazwy", default="prawdziwe", choices=("prawdziwe", "opisowe")); s.add_argument("--obiekt", help="np. posnania")
     s.add_argument("--asystent", action="store_true", help="asystent dobiera miejsce/stroj/kamere/reakcje/komentarz (OpenRouter albo reguly)")

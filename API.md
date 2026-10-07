@@ -145,7 +145,7 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
   `obiekty[miejsce]`: galerie, dworce, stacje metra, dzielnice, miasta), `glos: "auto" | "tts" | "model"` (auto = tts, gdy klucz
   ElevenLabs działa), `wymowa: "fonetyczna" | "zwykla"`, `asystent {dlaczego, zrodlo, podsumowanie}` (zapisywane w rolce).
   Reakcje zdziwienia: `reakcje_zdziwienie`, `linie_reakcji {reakcja: [polskie linie]}`. Katalog ma też `glosy`, `wymowy`, `nazwy`,
-  `glos_tts {ok, komunikat}`, `glos_id` (ustawienie `z_promptu_glos`), `asystent_llm` (jest klucz OpenRouter).
+  `glos_tts {ok, komunikat}`, `asystent_llm` (jest klucz OpenRouter). (3.1: `glos_id` / `z_promptu_glos` już nieużywane.)
 - Wycena zwraca dodatkowo `glos` (rozstrzygnięty), `wymowa`, `komentarz_t` (sekunda komentarza), `obiekt`, `obiekt_nazwa`, `nazwy`,
   `stroj_id`, `reakcja`; `ustalone.glos` zamraża głos (ten sam prompt przy „Zrób rolkę”).
 - `POST /api/z-promptu/asystent {slug?, tekst, pomysl_id?, zablokowane: {pole: wartość ustawiona ręcznie}, bez_llm?}` →
@@ -157,10 +157,24 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
 - Konta: `openrouter` (klucz `sk-or-…`, test = `GET /api/v1/key`, darmowe). `POST /api/konta` odrzuca klucz ElevenLabs bez `sk_`
   i OpenRouter bez `sk-or-` (400).
 
+### 3.1 – biblioteka strojów, sylwetka, głos tylko ElevenLabs
+- `stroj: "biblioteka" | "biblioteka:<id>"` (domyślny; katalog `stroje_biblioteka [{id, nazwa, ulubiony, ma_zdjecie, url}]`, ulubione
+  pierwsze). Wycena zwraca `stroj_id`, `stroj_tryb`, `stroj_nazwa`, `stroj_plik` (nazwa zdjęcia albo null), `nagrywa`.
+- `glos`: tylko `"auto" | "tts"` (stare `"model"` = tts z ostrzeżeniem) – model wideo nigdy nie mówi; bez działającego ElevenLabs
+  wycena ma ostrzeżenie, a rolka wychodzi bez komentarza (`glos_blad`, „Dograj głos”). `nagrywa: "chlopak" | "dziewczyna"` (brak =
+  ustawienie persony) – komentarz w formie mówiącego; katalog: `nagrywa`, `komentarze_plec {chlopak: [...], dziewczyna: [...]}`,
+  `persona.nagrywa`, `persona.sylwetka`. `glos_id` i `wymowa` w panelu usunięte.
+- `POST /api/pomysly/<id>/stroj {"stroj": "z_filmu" | "<id ze stroje_biblioteka ze zdjęciem>"}` – zmiana stroju rolki z filmu przed
+  generacją (A <-> B, prompt persony podmieniany; własny prompt zostaje + `uwaga`) → `{pomysl, uwaga}`; `w_toku` → 409, zrobiona /
+  z promptu / bez zdjęcia → 400. `GET /api/pomysly` ma też `biblioteka` (stroje ze zdjęciem) i `ma_prompt_b`; karta: `stroj_bib`,
+  `stroj_nazwa`, `stroj_ulubiony`, `mozna_zmienic_stroj`.
+- Ustawienia: `stroj_swap` (`biblioteka` | `z_filmu`), `nagrywa`, `glos_chlopak`, `glos_dziewczyna` (złe wartości → 400);
+  `GET /api/ustawienia` ma `biblioteka` (wszystkie stroje z miniaturami). Profil: `POST /api/profil {"sylwetka": "<EN>"}`.
+
 ## Modelki (persony)
 - `POST /api/modelki` `{"nazwa": "Noemi", "instagram": "@uroczanoemi"}` → `{"slug": "noemi"}` (ustawia jako aktywną)
 - `POST /api/modelki/aktywna` `{"slug": "noemi"}`
-- `POST /api/profil` `{"instagram": "", "opis_stylu": "", "nazwa": "", "cechy": "a, b", "wzrost_cm": "158-160", "wlosy": ""}` → `{"profil": {...}}`
+- `POST /api/profil` `{"instagram": "", "opis_stylu": "", "nazwa": "", "cechy": "a, b", "wzrost_cm": "158-160", "wlosy": "", "sylwetka": ""}` → `{"profil": {...}}`
 
 ## Kolejka pomysłów (rolki)
 - `GET /api/pomysly` → `{"pomysly": [...], "statusy": ["nowy","w_toku","wygenerowany","postprodukcja","gotowe","blad"]}`

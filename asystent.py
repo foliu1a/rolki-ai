@@ -2,8 +2,9 @@
 """asystent.py - "Agent AI w tle" zakladki Z promptu (feedback usera 2026-10-07).
 
 User pisze krotko po polsku, co ma sie dziac (albo "Losuj"), a asystent SAM dobiera reszte: miejsce (prawdziwa galeria/dworzec/
-dzielnica), odwazny stroj na pore roku, kamere z ukrycia, reakcje zdziwienia ludzi, komentarz zza kamery, wlosy, dlugosc i model -
-i tlumaczy wybor jednym zdaniem. Uczy sie z tego, co wyszlo:
+dzielnica), stroj ze wspolnej biblioteki strojow (3.1: ulubione czesciej, rotacja bez powtorek; pusta biblioteka = odwazny stroj na
+pore roku), kamere z ukrycia, reakcje zdziwienia ludzi, komentarz zza kamery (forma pod osobe nagrywajaca: chlopak/dziewczyna),
+wlosy, dlugosc i model - i tlumaczy wybor jednym zdaniem. Uczy sie z tego, co wyszlo:
   * ocena usera na karcie rolki ("Dobra" / "Slaba"; usuniecie gotowej rolki = slaba - app.py dopisuje ja do archiwum),
   * odrzucenia filtrow: NSFW -> unika tego stroju, IP -> unika tego obiektu (a przy powtorce: nazw w ogole, `nazwy: "opisowe"`),
   * gotowa rolka bez oceny = lekki plus.
@@ -152,6 +153,9 @@ def nauka(slug):
 def _etykieta(rodzaj, wartosc):
     """Id z katalogu -> polska etykieta (do panelu)."""
     if rodzaj == "stroj":
+        bib = baza.stroj_biblioteki(wartosc)
+        if bib:
+            return bib["nazwa"]
         return (sc.STROJE_ODWAZNE.get(wartosc) or (wartosc,))[0]
     if rodzaj == "miejsce":
         return (sc.MIEJSCA.get(wartosc) or {}).get("nazwa", wartosc)
@@ -236,19 +240,34 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
         chce = zab.get("obiekt") if zab.get("obiekt") in sc.obiekty_miejsca(miejsce) else None
         obiekt = sc.wybierz_obiekt(miejsce, tekst, los, chce=chce, unikaj=n["ip_obiekty"])
 
-    # stroj: odwazny na pore roku, bez odrzuconych przez NSFW, sprawdzone czesciej
-    if zab.get("stroj"):
+    # stroj (3.1): z biblioteki strojow (goth) - waga (ulubione 3x) x nauka z ocen x rotacja (bez ostatnio uzytych), bez
+    # odrzuconych przez NSFW. Pusta biblioteka = jak dawniej: odwazny na pore roku.
+    bib = None
+    if zab.get("stroj") and zab["stroj"] not in ("biblioteka",):
         stroj = zab["stroj"]
     else:
-        kand = [s for s in sc.stroje_odwazne_na(sezon) if s not in n["nsfw_stroje"]] or sc.stroje_odwazne_na(sezon)
-        sid = _losuj_wazone(los, sorted(kand), [_waga(n, "stroj", s) for s in sorted(kand)])
-        stroj = f"odwazny:{sid}"
-        if n["punkty"]["stroj"].get(sid, 0) > 0:
-            powody.append("ten strój już się sprawdził")
-        elif n["nsfw_stroje"]:
-            powody.append("omijam stroje odrzucone przez filtr")
+        bib = baza.losuj_stroj_biblioteki(slug, los=los, unikaj=n["nsfw_stroje"],
+                                          mnozniki={s["id"]: _waga(n, "stroj", s["id"]) for s in baza.stroje_biblioteki()})
+        if bib:
+            stroj = f"biblioteka:{bib['id']}"
+            if n["punkty"]["stroj"].get(bib["id"], 0) > 0:
+                powody.append("ten strój już się sprawdził")
+            elif bib["ulubiony"]:
+                powody.append("jeden z Twoich ulubionych strojów")
+            elif n["nsfw_stroje"]:
+                powody.append("omijam stroje odrzucone przez filtr")
+            else:
+                powody.append("strój z biblioteki (goth)")
         else:
-            powody.append(f"odważny strój na {sc.SEZONY[sezon]['nazwa'].lower()}")
+            kand = [s for s in sc.stroje_odwazne_na(sezon) if s not in n["nsfw_stroje"]] or sc.stroje_odwazne_na(sezon)
+            sid = _losuj_wazone(los, sorted(kand), [_waga(n, "stroj", s) for s in sorted(kand)])
+            stroj = f"odwazny:{sid}"
+            if n["punkty"]["stroj"].get(sid, 0) > 0:
+                powody.append("ten strój już się sprawdził")
+            elif n["nsfw_stroje"]:
+                powody.append("omijam stroje odrzucone przez filtr")
+            else:
+                powody.append(f"odważny strój na {sc.SEZONY[sezon]['nazwa'].lower()}")
 
     kamera = zab["kamera"] if zab.get("kamera") in sc.KAMERY else sc.kamera_ukryta(miejsce)
     if not zab.get("kamera"):
@@ -263,14 +282,18 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
         kand = reakcje_dla_miejsca(miejsce)
         reakcja = _losuj_wazone(los, kand, [_waga(n, "reakcja", r) * (1.6 if i == 0 else 1.0) for i, r in enumerate(kand)])
 
+    # kto nagrywa (mowi komentarz): recznie > ustawienie persony; linie reakcji sa neutralne, reczne dopasowujemy do mowiacego
+    ust = baza.ustawienia_modelki(slug)
+    nagrywa = zab["nagrywa"] if zab.get("nagrywa") in sc.NAGRYWA else (
+        ust.get("nagrywa") if ust.get("nagrywa") in sc.NAGRYWA else sc.NAGRYWA_DOMYSLNIE)
     if zab.get("komentarz"):
-        komentarz = zab["komentarz"]
+        komentarz = sc.dopasuj_do_mowiacego(zab["komentarz"], nagrywa)
     else:
         linie = sc.LINIE_REAKCJI.get(reakcja) or ["Widziałaś to?", "No ja nie mogę…"]
         komentarz = _wybierz(los, linie)
 
     model = zab.get("model") if zab.get("model") in sc.MODELE else (
-        (baza.ustawienia_modelki(slug).get("z_promptu") or {}).get("model") or sc.MODEL_DOMYSLNY)
+        (ust.get("z_promptu") or {}).get("model") or sc.MODEL_DOMYSLNY)
     mi = sc.MODELE.get(model, sc.MODELE[sc.MODEL_DOMYSLNY])
     dl = zab.get("dlugosc")
     try:
@@ -281,7 +304,7 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
         dl = 10 if 10 in mi["dlugosci"] else mi["dlugosci"][0]
     opcje = {"tekst": tekst or (pomysl or {}).get("pl", ""), "pomysl_id": (pomysl or {}).get("id") or "", "miejsce": miejsce,
              "nazwy": nazwy, "obiekt": obiekt or "", "stroj": stroj, "kamera": kamera, "reakcja": reakcja, "komentarz": komentarz,
-             "glos": zab.get("glos") if zab.get("glos") in sc.GLOSY else "auto",
+             "nagrywa": nagrywa, "glos": zab.get("glos") if zab.get("glos") in sc.GLOSY else "auto",
              "wymowa": zab.get("wymowa") if zab.get("wymowa") in sc.WYMOWY else "fonetyczna",
              "wlosy": zab.get("wlosy") if isinstance(zab.get("wlosy"), dict) else {"kolor": "wlasne", "fryzura": "wlasna", "grzywka": "wlasna"},
              "model": model, "dlugosc": dl, "rozdzielczosc": zab.get("rozdzielczosc") or "auto",
@@ -345,12 +368,21 @@ def test_klucza():
     return True, "klucz dziala" + darmowy
 
 
-def _katalog_dla_llm(sezon, n):
+def _stroje_dla_llm(sezon, n):
+    """[(id, etykieta)] strojow, z ktorych model moze wybierac: biblioteka (ulubione z '*'), a gdy pusta - odwazne na pore roku."""
+    bib = [s for s in baza.stroje_biblioteki() if s["id"] not in n["nsfw_stroje"] and s["waga"] > 0]
+    if bib:
+        return [(s["id"], ("*" if s["ulubiony"] else "") + s["nazwa"]) for s in sorted(bib, key=lambda s: not s["ulubiony"])]
     stroje = [s for s in sc.stroje_odwazne_na(sezon) if s not in n["nsfw_stroje"]] or sc.stroje_odwazne_na(sezon)
+    return [(k, sc.STROJE_ODWAZNE[k][0]) for k in stroje]
+
+
+def _katalog_dla_llm(sezon, n):
     linie = [
         "PLACES (id: Polish name):", "; ".join(f"{k}: {v['nazwa']}" for k, v in sc.MIEJSCA.items()
                                              if sezon in (v.get("sezony") or (sezon,))),
-        "OUTFITS (id: Polish label):", "; ".join(f"{k}: {sc.STROJE_ODWAZNE[k][0]}" for k in stroje),
+        "OUTFITS (id: Polish label; * = the user's favourite, prefer these):",
+        "; ".join(f"{k}: {etykieta}" for k, etykieta in _stroje_dla_llm(sezon, n)),
         "CAMERAS (id: label; covert ones are the default):", "; ".join(f"{k}: {sc.KAMERY[k][0]}" for k in sc.KAMERY_UKRYTE),
         "REACTIONS (id: label):", "; ".join(f"{k}: {v[0]}" for k, v in sc.REAKCJE.items() if k != "losowa"),
         "COMMENT LINES (examples):", " | ".join(sc.KOMENTARZE),
@@ -359,12 +391,15 @@ def _katalog_dla_llm(sezon, n):
 
 
 SYSTEM_LLM = (
-    "You pick settings for a short vertical AI reel: a young woman in a bold, eye-catching street outfit is secretly filmed on a "
+    "You pick settings for a short vertical AI reel: a young woman in a bold goth street outfit is secretly filmed on a "
     "phone in a real place in Poland while people around react with subtle surprise. Pick the combination that best fits the "
     "user's idea and is most likely to look real and get reactions. Rules: if the idea names a place or city, follow it; outfits "
-    "must come from the OUTFITS list; camera must be covert (from the CAMERAS list); prefer a surprise reaction that fits the "
-    "place unless the idea says otherwise; the comment is ONE very short natural Polish line (max 6 words) said quietly by the "
-    "person filming; prefer what the learning notes say worked, avoid what failed. Answer with ONLY a JSON object: "
+    "must come from the OUTFITS list (prefer the user's favourites marked with *); camera must be covert (from the CAMERAS "
+    "list); prefer a surprise reaction that fits the place unless the idea says otherwise; the comment is ONE very short natural "
+    "Polish line (max 6 words) said quietly by the person filming (see SPEAKER) - she herself never speaks; any first-person "
+    "past or conditional verb must match the speaker's gender (a young man: 'widziałem', 'odważyłbym'; a young woman: "
+    "'widziałam', 'odważyłabym'), neutral lines are best; prefer what the learning notes say worked, avoid what failed. "
+    "Answer with ONLY a JSON object: "
     '{"miejsce": "<place id>", "stroj": "<outfit id>", "kamera": "<camera id>", "reakcja": "<reaction id>", '
     '"komentarz": "<Polish line>", "dlugosc": 10, "dlaczego": "<one short sentence in Polish, max 140 characters>"}'
 )
@@ -379,10 +414,12 @@ def _json_z_tekstu(tekst):
     return json.loads(m.group(0))
 
 
-def zapytaj_llm(slug, tekst, sezon, n, model):
+def zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=None):
     """Jedno zapytanie do darmowego modelu -> surowy slownik z JSON (bez walidacji)."""
+    kto = "a young woman" if nagrywa == "dziewczyna" else "a young man"
     uzytkownik = (f"Idea (Polish): „{tekst or 'brak - wybierz sam cos z duza szansa na reakcje ludzi'}”\n"
                   f"Season now: {sc.SEZONY[sezon]['en']}.\n"
+                  f"SPEAKER (the person filming, never visible): {kto}.\n"
                   f"Learning notes: {opis_nauki(n, dla_llm=True) or 'none yet'}.\n\n{_katalog_dla_llm(sezon, n)}")
     odp = _http_json("POST", LLM_API + "/chat/completions", {
         "model": model,
@@ -415,9 +452,10 @@ def _zastosuj_llm(opcje, wynik, n, sezon, zab, miejsce_z_tekstu):
             if not zab.get("kamera"):
                 opcje["kamera"] = sc.kamera_ukryta(m)
         przyjete.append("miejsce")
-    s = str(wynik.get("stroj") or "").replace("odwazny:", "")
-    if s in sc.STROJE_ODWAZNE and s not in n["nsfw_stroje"] and sezon in sc.STROJE_ODWAZNE[s][2] and not zab.get("stroj"):
-        opcje["stroj"] = f"odwazny:{s}"
+    s = str(wynik.get("stroj") or "").replace("odwazny:", "").replace("biblioteka:", "").lstrip("*").strip()
+    dozwolone = {k for k, _ in _stroje_dla_llm(sezon, n)}
+    if s in dozwolone and not (zab.get("stroj") and zab["stroj"] != "biblioteka"):
+        opcje["stroj"] = f"biblioteka:{s}" if baza.stroj_biblioteki(s) else f"odwazny:{s}"
         przyjete.append("stroj")
     k = wynik.get("kamera")
     if k in sc.KAMERY_UKRYTE and not zab.get("kamera"):
@@ -428,7 +466,8 @@ def _zastosuj_llm(opcje, wynik, n, sezon, zab, miejsce_z_tekstu):
         opcje["reakcja"] = r
         przyjete.append("reakcja")
     kom = re.sub(r"[{}„”\"\[\]]", "", str(wynik.get("komentarz") or "")).strip()
-    if kom and _POLSKIE.match(kom) and len(kom.split()) <= 7 and not zab.get("komentarz"):
+    if (kom and _POLSKIE.match(kom) and len(kom.split()) <= 7 and not zab.get("komentarz")
+            and sc.pasuje_do_mowiacego(kom, opcje.get("nagrywa"))):
         opcje["komentarz"] = kom
         przyjete.append("komentarz")
     try:
@@ -451,16 +490,23 @@ def podsumowanie(opcje, glos_efektywny=None):
         gdzie = (f"Galeria {obiekty[opcje['obiekt']][0]}" if opcje.get("miejsce") in ("galeria_foodcourt", "galeria_pasaz")
                  else f"{gdzie}, {obiekty[opcje['obiekt']][0]}")
     st = str(opcje.get("stroj") or "")
-    stroj = sc.STROJE_ODWAZNE[st.split(":", 1)[1]][0] if st.startswith("odwazny:") and st.split(":", 1)[1] in sc.STROJE_ODWAZNE \
-        else sc.STROJE_TRYBY.get(st.split(":")[0], st)
+    bib = baza.stroj_biblioteki(st.split(":", 1)[1]) if st.startswith("biblioteka:") else None
+    if bib:
+        stroj = ("★ " if bib["ulubiony"] else "") + bib["nazwa"]
+    elif st.startswith("odwazny:") and st.split(":", 1)[1] in sc.STROJE_ODWAZNE:
+        stroj = sc.STROJE_ODWAZNE[st.split(":", 1)[1]][0]
+    else:
+        stroj = sc.STROJE_TRYBY.get(st.split(":")[0], st)
     kamera = (sc.KAMERY.get(opcje.get("kamera")) or ("",))[0]
     reakcja = (sc.REAKCJE.get(opcje.get("reakcja")) or ("",))[0]
     glos = glos_efektywny or opcje.get("glos")
-    glos_txt = {"tts": "głos ElevenLabs", "model": "mówi model wideo"}.get(glos, "")
+    kto = "dziewczyna" if opcje.get("nagrywa") == "dziewczyna" else "chłopak"
+    glos_txt = (f"mówi {kto} zza kamery, ElevenLabs" if glos in ("tts", "auto", None)
+                else f"ElevenLabs nie działa – rolka bez komentarza")
     model = sc.MODELE.get(opcje.get("model"), {}).get("nazwa", "").split(" –")[0]
     czesci = [gdzie, f"strój: {stroj}", f"kamera: {kamera.lower()}", f"reakcja: {reakcja.lower()}"]
     if opcje.get("komentarz") and opcje.get("komentarz") != "bez":
-        czesci.append(f"„{opcje['komentarz']}”" + (f" ({glos_txt})" if glos_txt else ""))
+        czesci.append(f"„{opcje['komentarz']}” ({glos_txt})")
     czesci.append(f"{opcje.get('dlugosc')} s · {model}")
     return " · ".join(c for c in czesci if c)
 
@@ -478,7 +524,7 @@ def dobierz(slug, tekst="", pomysl_id=None, zablokowane=None, uzyj_llm=True, los
         bledy = []
         for model in modele_llm()[:MAX_PROB_LLM]:
             try:
-                wynik = zapytaj_llm(slug, tekst, sezon, n, model)
+                wynik = zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=opcje.get("nagrywa"))
             except (RuntimeError, ValueError) as e:
                 bledy.append(f"{model.split('/')[-1]}: {e}")
                 if "zly klucz" in str(e) or "doladowania" in str(e):

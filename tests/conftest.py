@@ -22,6 +22,8 @@ def dane(tmp_path, monkeypatch):
     monkeypatch.setattr(baza, "PLIK_BUDZETU", str(tmp_path / "budzet.json"))
     monkeypatch.setattr(baza, "PLIK_DZIENNIKA", str(tmp_path / "dziennik.jsonl"))
     monkeypatch.setattr(sekrety, "PLIK_KLUCZY", str(tmp_path / "klucze.json"))
+    # biblioteka strojow: pusta (stare testy = jak przed 3.1); testy biblioteki tworza ja fixtura `biblioteka`
+    monkeypatch.setattr(baza, "KATALOG_BIBLIOTEKI", str(tmp_path / "stroje_biblioteka"))
     monkeypatch.setenv("ROLKI_PULPIT", str(tmp_path / "pulpit" / "ROLKI AI"))   # foldery "na pulpicie" tez w tmp
     for env in ("YAPPER_API_KEY", "WAVESPEED_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(env, raising=False)
@@ -47,6 +49,36 @@ def modelka(dane):
         with open(os.path.join(folder, "referencje", n), "wb") as f:
             f.write(b"img")
     return slug
+
+
+BIBLIOTEKA_TESTOWA = [
+    # 2 ulubione ze zdjeciem, 2 zwykle ze zdjeciem, 1 wymyslony bez zdjecia
+    {"id": "ulub_a", "nazwa": "Ulubiony A", "plik": "ulub_a.png", "ulubiony": True, "waga": 3, "styl": "goth",
+     "opis_en": "a black corset top and a short black pleated skirt"},
+    {"id": "ulub_b", "nazwa": "Ulubiony B", "plik": "ulub_b.png", "ulubiony": True, "waga": 3, "styl": "goth",
+     "opis_en": "a burgundy corset and black leather shorts"},
+    {"id": "zwykly_c", "nazwa": "Zwykły C", "plik": "zwykly_c.png", "ulubiony": False, "waga": 1, "styl": "goth",
+     "opis_en": "a white satin dress with black knee socks"},
+    {"id": "zwykly_d", "nazwa": "Zwykły D", "plik": "zwykly_d.png", "ulubiony": False, "waga": 1, "styl": "goth",
+     "opis_en": "a black halter top and black flared trousers"},
+    {"id": "opis_e", "nazwa": "Tylko opis E", "plik": None, "ulubiony": False, "waga": 2, "styl": "goth",
+     "opis_en": "a purple velvet corset top and a black tiered skirt"},
+]
+
+
+@pytest.fixture
+def biblioteka(dane):
+    """Mala biblioteka strojow w tmp (4 ze zdjeciem, 1 tylko z opisu). Zwraca sciezke folderu."""
+    import json
+    folder = baza.KATALOG_BIBLIOTEKI
+    os.makedirs(folder, exist_ok=True)
+    for s in BIBLIOTEKA_TESTOWA:
+        if s["plik"]:
+            with open(os.path.join(folder, s["plik"]), "wb") as f:
+                f.write(b"png")
+    with open(os.path.join(folder, "stroje.json"), "w", encoding="utf-8") as f:
+        json.dump({"stroje": BIBLIOTEKA_TESTOWA}, f, ensure_ascii=False)
+    return folder
 
 
 class UdawaneCLI:

@@ -14,8 +14,11 @@ Zasady (sprawdzone na przewodniku Seedance 2.5 i na rolkach usera z 6.10, PROJEK
 - wlosy do wyboru per rolka (domyslnie wlasne ze zdjec), zmiana wlosow nie zmienia twarzy; wzrost persony z profilu (wzrost_cm);
 - (zp-2, feedback usera 2026-10-07) odwazne, przyciagajace wzrok stroje (STROJE_ODWAZNE, legalna moda uliczna), kamera z ukrycia
   (KAMERY_UKRYTE: z daleka, z biodra, zza filaru - nigdy nie podchodzi), subtelne reakcje zdziwienia (REAKCJE_ZDZIWIENIE + polskie
-  linie), glos komentarza: `glos` "model" (mowi model wideo; `wymowa: "fonetyczna"` = ą/ę zapisane tak, jak sie je czyta) albo
-  "tts" (wideo tylko z dzwiekiem otoczenia, komentarz ElevenLabs dogrywa komentarz_glos.py po generacji).
+  linie), glos komentarza ElevenLabs (komentarz_glos.py po generacji).
+- (zp-3, 2026-10-07) stroj domyslnie ze WSPOLNEJ biblioteki (stroje_biblioteka/, `stroj: "biblioteka[:<id>]"`): opis_en zawsze w
+  prompcie, zdjecie stroju (gdy jest i model ma miejsce) jako ostatni obraz z jasnym zdaniem "tylko ubranie - ignoruj wlosy, twarz,
+  skore, tatuaze i sylwetke osoby/manekina"; sylwetka persony (profil.sylwetka) tuz po wlosach/wzroscie; model wideo NIGDY nie
+  mowi (zawsze DZWIEK_BEZ_MOWY) - komentarz mowi osoba nagrywajaca (`nagrywa`: chlopak / dziewczyna, gramatyka linii pod nia).
 """
 import os
 import random
@@ -25,7 +28,7 @@ from datetime import date
 
 import baza
 
-WERSJA_SZABLONU = "zp-2"
+WERSJA_SZABLONU = "zp-3"
 
 # ---------------- modele (wszystkie przez CLI Higgsfield, wyceny `generate cost` z 2026-10-07) ----------------
 
@@ -129,6 +132,7 @@ WLOSY_GRZYWKI = {
 # ---------------- stroje ----------------
 
 STROJE_TRYBY = {
+    "biblioteka": "Z biblioteki strojów (goth, losowy)",
     "odwazny": "Odważny, przyciąga wzrok (losowy)",
     "zdjecia": "Jak na jej zdjęciach",
     "codzienny": "Codzienny, w jej stylu (losowy)",
@@ -282,17 +286,57 @@ LINIE_REAKCJI = {
     "mama_odciaga": ["Jak ona może tak chodzić?", "Widziałaś to?"],
     "szepcze_patrzac": ["Widziałaś to?", "No ja nie mogę…", "Jak ona może tak chodzić?"],
 }
+# Komentarz mowi osoba NAGRYWAJACA zza kamery (chlopak albo dziewczyna - ustawienie `nagrywa`). KOMENTARZE sa neutralne wzgledem
+# mowiacego ("Widziałaś to?" = pytanie do kolezanki obok, pasuje do obu); linie z forma 1. osoby (odważył/odważyła) sa w
+# KOMENTARZE_PLEC w parach (WARIANTY_PLCI) - dopasuj_do_mowiacego() zamienia je na forme mowiacego.
 KOMENTARZE = ["Jak ona wygląda.", "Patrz, patrz…", "Co ona ma na sobie?", "O matko…", "Zobacz, zobacz…", "Teraz tak się chodzi?",
-              "Ej, patrz na nią.", "No to mamy cyrk.", "Ale odwaga.", "Serio tak wyszła z domu?", "Ja bym tak nie wyszła.",
+              "Ej, patrz na nią.", "No to mamy cyrk.", "Ale odwaga.", "Serio tak wyszła z domu?",
               "Jak ona może tak chodzić?", "Widziałaś to?", "Widziałeś to?", "No ja nie mogę…",
               "Widziałaś to? Jak ona wygląda…"]
+WARIANTY_PLCI = [   # (chlopak, dziewczyna)
+    ("Ja bym tak nie wyszedł.", "Ja bym tak nie wyszła."),
+    ("Ja bym się tak nie odważył.", "Ja bym się tak nie odważyła."),
+    ("Pierwszy raz widziałem coś takiego.", "Pierwszy raz widziałam coś takiego."),
+]
+NAGRYWA = {"chlopak": "Chłopak", "dziewczyna": "Dziewczyna"}
+NAGRYWA_DOMYSLNIE = "chlopak"
+KOMENTARZE_PLEC = {"chlopak": [a for a, _ in WARIANTY_PLCI], "dziewczyna": [b for _, b in WARIANTY_PLCI]}
 KOMENTARZE_COSPLAY = ["Halloween już był.", "Gdzie jest ten konwent?"]
+# 1. osoba czasu przeszlego / trybu przypuszczajacego: -łam/-łabym albo "bym ... -ła" = mowi kobieta, -łem/-łbym albo
+# "bym ... -ł" = mowi mezczyzna ("Serio tak wyszła z domu?" to 3. osoba - o niej - wiec neutralne)
+_FORMA_KOBIECA = re.compile(r"\w+(?:łam|łabym)\b|\bbym\b(?:\s+\w+){0,5}?\s+\w+ła\b", re.I)
+_FORMA_MESKA = re.compile(r"\w+(?:łem|łbym)\b|\bbym\b(?:\s+\w+){0,5}?\s+\w+ł\b", re.I)
 
-# Glos komentarza zza kamery: kto go "mowi" (feedback usera: model wideo przekreca polskie ą - "wyględa" zamiast "wygląda")
+
+def komentarze_dla(nagrywa):
+    """Linie komentarza pasujace do mowiacego: neutralne + w jego formie (chlopak / dziewczyna)."""
+    return KOMENTARZE + KOMENTARZE_PLEC.get(nagrywa if nagrywa in NAGRYWA else NAGRYWA_DOMYSLNIE, [])
+
+
+def pasuje_do_mowiacego(tekst, nagrywa):
+    """False, gdy linia ma forme 1. osoby drugiej plci (np. 'wyszłam' u chlopaka, 'widziałem' u dziewczyny)."""
+    if nagrywa == "chlopak":
+        return not _FORMA_KOBIECA.search(tekst or "")
+    if nagrywa == "dziewczyna":
+        return not _FORMA_MESKA.search(tekst or "")
+    return True
+
+
+def dopasuj_do_mowiacego(tekst, nagrywa):
+    """Znana linia w formie drugiej plci -> ta sama linia w formie mowiacego (z WARIANTY_PLCI); reszta bez zmian."""
+    for meska, kobieca in WARIANTY_PLCI:
+        if nagrywa == "chlopak" and tekst == kobieca:
+            return meska
+        if nagrywa == "dziewczyna" and tekst == meska:
+            return kobieca
+    return tekst
+
+
+# Glos komentarza zza kamery (3.1): ZAWSZE ElevenLabs po generacji - model wideo nic nie mowi (feedback usera: mowila nie ta osoba
+# i przekrecala polskie slowa). "model" zostal tylko dla starych rolek (zbuduj traktuje go jak "tts").
 GLOSY = {
-    "auto": "Automatycznie (ElevenLabs, gdy jest dobry klucz; inaczej model)",
-    "tts": "Dograny po generacji (ElevenLabs v3, poprawna polszczyzna)",
-    "model": "Mówi model wideo (bywa zła wymowa ą/ę)",
+    "auto": "ElevenLabs po generacji (osoba nagrywająca, poprawna polszczyzna)",
+    "tts": "ElevenLabs po generacji (osoba nagrywająca, poprawna polszczyzna)",
 }
 WYMOWY = {"fonetyczna": "ą/ę zapisane tak, jak się je czyta (model mówi lepiej)", "zwykla": "zwykła pisownia"}
 NAZWY_TRYBY = {"prawdziwe": "Prawdziwe nazwy (np. Posnania, Złote Tarasy)", "opisowe": "Bez nazw (bezpieczniej dla filtra IP)"}
@@ -1505,7 +1549,7 @@ SZABLON_PELNY = (
     "[References] {REF} show one and the same young woman, {IMIE}: the only source of her face, eyes, skin, {WLOSY_REF}piercings "
     "and body proportions. Keep her exactly recognizable in every frame, never blend her with anyone, only one of her."
     "{LINIA_STROJU}\n"
-    "[{IMIE}] {TOZ}. Hair: {WLOSY}. {WZROST}Outfit: {STROJ}.\n"
+    "[{IMIE}] {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ}.\n"
     "[Place] {OPIS} Real Polish details: {DETALE}. {SZYLDY} "
     "{POGODA}Ordinary Polish people of all ages in {SEZON} clothes ({UBRANIA}) go about their business; nobody looks like a "
     "model.\n"
@@ -1530,16 +1574,17 @@ KAMERA_Z_UKRYCIA = ("Ordinary iPhone (1x lens, a little digital zoom), secretly 
                     "be filming. {RUCH} They keep their distance the whole time and never walk up to her; she never notices the "
                     "phone. Constant small hand shake, deep phone focus, the background as sharp as she is. No tripod, gimbal, "
                     "drone, slow motion or cinematic moves.")
-# [Sound]: komentarz mowi model wideo (z_modelem) albo wideo ma tylko dzwiek otoczenia, a komentarz dogrywa ElevenLabs (bez_mowy)
-DZWIEK_Z_MODELEM = ("Phone-microphone sound: {DZWIEKI}; people nearby talk in Polish (words unclear). Dialogue language: "
-                    "Polish. {KOMENTARZ}No background music.")
-DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}; people nearby murmur in Polish (words unclear). The person filming "
-                   "stays silent: no clear speech close to the phone. No background music.")
+# [Sound] (3.1): wideo ZAWSZE tylko z dzwiekiem otoczenia - nikt w kadrze nic nie mowi, komentarz osoby nagrywajacej dogrywa
+# ElevenLabs po generacji (komentarz_glos.py). Mowa z modelu wideo wylaczona: mowila nie ta osoba i przekrecala polskie slowa.
+DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}. Nobody in the clip speaks clearly: {IMIE} says nothing at all, nobody "
+                   "talks to her or to the camera, and the person filming stays completely silent; people nearby only murmur and "
+                   "whisper indistinctly in the background, with no understandable words. No dialogue, no voice-over, no "
+                   "background music.")
 
 SZABLON_KROTKI = (
-    "Candid vertical 9:16 smartphone video, real footage, not a film: someone secretly films {IMIE}, the young woman from the "
-    "reference photos, in {KROTKO}, Poland, on an ordinary {PORA} in {SEZON}. Keep her face, skin, piercings and body exactly as "
-    "in the reference photos; never blend her with anyone; only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}Outfit: {STROJ}.\n"
+    "Candid vertical 9:16 smartphone video, real footage, not a film: someone secretly films {IMIE}, the young woman from {REF_K}, "
+    "in {KROTKO}, Poland, on an ordinary {PORA} in {SEZON}. Keep her face, skin, piercings and body exactly as in {REF_K}; "
+    "never blend her with anyone; only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ}.\n"
     "Place: {OPIS} {SZYLDY} Ordinary Polish people in {SEZON} clothes go about their business.\n"
     "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.{SUBTELNIE}\n"
     "Camera: {KAMERA}\n"
@@ -1551,8 +1596,8 @@ SZABLON_KROTKI = (
 KAMERA_KROTKA = "ordinary iPhone, 1x lens, hand-held by someone {OPERATOR}: small shake, off-centre framing, deep focus, no cinematic moves. {RUCH}"
 KAMERA_KROTKA_UKRYTA = ("ordinary iPhone, secretly filmed by someone {OPERATOR} who pretends not to film and never walks up to "
                         "her: {RUCH} Small shake, deep focus, no cinematic moves.")
-DZWIEK_KROTKI_Z_MODELEM = "ambience ({DZWIEKI}); dialogue language Polish. {KOMENTARZ}No music."
-DZWIEK_KROTKI_BEZ_MOWY = "ambience only ({DZWIEKI}), Polish murmur in the background; the person filming stays silent. No music."
+DZWIEK_KROTKI_BEZ_MOWY = ("ambience only ({DZWIEKI}); nobody speaks clearly: she says nothing, nobody talks to the camera, the "
+                          "person filming stays silent, people nearby only murmur indistinctly. No dialogue, no music.")
 
 
 def szyldy(miejsce_id, nazwy="prawdziwe", obiekt_id=None):
@@ -1620,11 +1665,14 @@ def zbuduj(slug, opcje=None, los=None):
         ("losowy" | "bez" | "wlasny" | tekst z KOMENTARZE), komentarz_tekst, sezon ("auto" | klucz SEZONY), pora ("auto" |
         klucz PORY_DNIA), kamera ("auto" = z ukrycia wg miejsca | klucz KAMERY), ustalone (losowe wybory z poprzedniego
         budowania - ten sam prompt). zp-2: stroj "odwazny" | "odwazny:<id STROJE_ODWAZNE>", nazwy ("prawdziwe" | "opisowe"),
-        obiekt (id z obiekty_miejsca, "" = wg miasta z pomyslu / losowo), glos ("model" | "tts"; "auto" rozstrzyga fabryka),
-        wymowa ("zwykla" | "fonetyczna" - tylko komentarz mowiony przez model).
+        obiekt (id z obiekty_miejsca, "" = wg miasta z pomyslu / losowo), glos ("auto" | "tts" - zawsze ElevenLabs po
+        generacji, model wideo nic nie mowi; stare "model" = "tts"), wymowa (bez znaczenia od 3.1). zp-3: stroj "biblioteka" |
+        "biblioteka:<id ze stroje_biblioteka>" (DOMYSLNY w panelu/asystencie), nagrywa ("chlopak" | "dziewczyna"; brak = z
+        ustawien persony) - gramatyka komentarza pod mowiacego.
     Zwraca {"prompt", "obrazy" (sciezki), "znaki", "limit", "ostrzezenia", "ustalone", "model", "mode", "parametry",
             "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon", "glos", "komentarz",
-            "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja"}.
+            "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja",
+            "stroj_nazwa", "nagrywa", "sylwetka" (pelna/krotka/pominieta/brak)}.
     Rzuca ValueError przy zlych opcjach (model, dlugosc, brak zdjec persony, za dlugi prompt...)."""
     o = dict(opcje or {})
     u = dict(o.get("ustalone") or {})
@@ -1737,11 +1785,45 @@ def zbuduj(slug, opcje=None, los=None):
     stroj_wybor = (o.get("stroj") or "zdjecia").strip()
     stroj_plik = None
     stroj_id = None
+    stroj_nazwa = None
     linia_stroju = ""
     obrazy_n = len(baza.sciezki_referencji(slug))
     if not obrazy_n:
         raise ValueError(f"{imie} nie ma zdjec w referencje/ - bez nich model nie wie, kogo pokazac.")
-    if stroj_wybor == "zdjecia":
+    ref_k = "the reference photos"          # krotki szablon: skad twarz/cialo (bez zdjecia stroju na koncu)
+    bib = None
+    if stroj_wybor == "biblioteka" or stroj_wybor.startswith("biblioteka:"):
+        # wspolna biblioteka strojow (zp-3, domyslna): konkretny, ten z ustalonych albo wazone losowanie z rotacja
+        chce = stroj_wybor.split(":", 1)[1] if ":" in stroj_wybor else (
+            u.get("stroj_id") if u.get("stroj_tryb") == "biblioteka" else None)
+        bib = baza.stroj_biblioteki(chce) if chce else None
+        if chce and not bib and ":" in stroj_wybor:
+            raise ValueError(f"Nie ma stroju '{chce}' w bibliotece strojow.")
+        bib = bib or baza.losuj_stroj_biblioteki(slug, los=los)
+        if not bib:
+            ostrzezenia.append("Biblioteka strojow jest pusta (stroje_biblioteka/) - wzialem odwazny stroj na pore roku.")
+            stroj_wybor = "odwazny"
+    if bib:
+        stroj_id, stroj_nazwa = bib["id"], bib["nazwa"]
+        u["stroj_id"], u["stroj_tryb"] = bib["id"], "biblioteka"
+        opis = bib["opis_en"].rstrip(".")
+        if bib["plik"] and obrazy_n + 1 <= mi["max_obrazow"]:
+            stroj_plik = bib["plik"]
+            k = obrazy_n + 1
+            if mi["tokeny"]:
+                linia_stroju = (f" <<<image_{k}>>> shows ONLY the outfit she wears: ignore the hair, face, skin, tattoos and body "
+                                f"shape of the person or mannequin wearing it - her hair, face and body come only from "
+                                f"{_lista_tokenow(obrazy_n)}.")
+                stroj = f"{opis} - exactly the clothing shown in <<<image_{k}>>>, a bold goth street look"
+            else:
+                ref_k = f"the first {obrazy_n} reference photos"
+                stroj = (f"{opis} - exactly the clothing from the last reference photo, a bold goth street look (that photo shows "
+                         f"only the outfit: ignore the hair, face, skin, tattoos and body of the person or mannequin wearing it)")
+        else:
+            if bib["plik"]:
+                ostrzezenia.append(f"{mi['nazwa']} przyjmuje max {mi['max_obrazow']} zdjec - stroj idzie tylko z opisu, bez zdjecia.")
+            stroj = f"{opis} - a bold goth street look (not the clothes from the reference photos)"
+    elif stroj_wybor == "zdjecia":
         stroj = "the same outfit she wears in the reference photos"
     elif stroj_wybor == "odwazny" or stroj_wybor.startswith("odwazny:"):
         stroj_id = stroj_wybor.split(":", 1)[1] if ":" in stroj_wybor else (
@@ -1770,11 +1852,14 @@ def zbuduj(slug, opcje=None, los=None):
         stroj_plik = plik_stroju(slug, stroj_wybor[5:])
         k = obrazy_n + 1
         if mi["tokeny"]:
-            linia_stroju = (f" <<<image_{k}>>> is only the outfit reference: she wears exactly this clothing; never take face, "
-                            f"hair or body from it.")
+            linia_stroju = (f" <<<image_{k}>>> is only the outfit reference: she wears exactly this clothing; ignore the hair, "
+                            f"face, skin, tattoos and body shape of the person or mannequin wearing it - never take face, hair or "
+                            f"body from it.")
             stroj = f"exactly the clothing from <<<image_{k}>>>"
         else:
-            stroj = "exactly the clothing from the last reference photo (that photo is only for the outfit, not her face)"
+            ref_k = f"the first {obrazy_n} reference photos"
+            stroj = ("exactly the clothing from the last reference photo (that photo shows only the outfit: ignore the hair, face, "
+                     "skin, tattoos and body of the person or mannequin wearing it)")
     else:
         raise ValueError(f"Nieznany wybor stroju '{stroj_wybor}'.")
 
@@ -1788,8 +1873,15 @@ def zbuduj(slug, opcje=None, los=None):
         ostrzezenia.append("Nie znalazlem opisu twarzy persony (sekcja '# 2. ... IDENTITY' promptu A albo prompty/tozsamosc.txt) "
                            "- model oprze sie tylko na zdjeciach.")
         toz = f"{imie} looks exactly like in the reference photos"
+    # sylwetka persony (profil.sylwetka, EN - feedback usera: za maly biust/posladki u Noemi) - mocno, tuz po wlosach i wzroscie
+    sylwetka = re.sub(r"\s+", " ", str(prof.get("sylwetka") or "")).strip()
 
-    # --- komentarz ---
+    # --- kto nagrywa (mowi komentarz zza kamery) ---
+    nagrywa = o.get("nagrywa") if o.get("nagrywa") in NAGRYWA else (
+        baza.ustawienia_modelki(slug).get("nagrywa") if baza.ustawienia_modelki(slug).get("nagrywa") in NAGRYWA
+        else NAGRYWA_DOMYSLNIE)
+
+    # --- komentarz (mowi osoba nagrywajaca; forma gramatyczna pod chlopaka / dziewczyne) ---
     kom = (o.get("komentarz") or "losowy").strip()
     if kom == "bez":
         kom_tekst = ""
@@ -1798,7 +1890,7 @@ def zbuduj(slug, opcje=None, los=None):
         if not kom_tekst:
             raise ValueError("Wpisz wlasny komentarz albo wybierz inny.")
     elif kom == "losowy":
-        pula = KOMENTARZE + (KOMENTARZE_COSPLAY if stroj_wybor == "cosplay" else [])
+        pula = komentarze_dla(nagrywa) + (KOMENTARZE_COSPLAY if stroj_wybor == "cosplay" else [])
         kom_tekst = u.get("komentarz") if u.get("komentarz_tryb") == "losowy" and u.get("komentarz") else (
             (pomysl or {}).get("komentarz") if stroj_wybor != "cosplay" and pomysl else _wybierz(los, pula))
         u["komentarz_tryb"] = "losowy"
@@ -1807,6 +1899,9 @@ def zbuduj(slug, opcje=None, los=None):
     kom_tekst = re.sub(r"[{}„”\"]", "", kom_tekst).strip()[:80]
     if kom_tekst and kom_tekst[-1] not in ".!?…":
         kom_tekst += "."
+    kom_tekst = dopasuj_do_mowiacego(kom_tekst, nagrywa)
+    if kom_tekst and not pasuje_do_mowiacego(kom_tekst, nagrywa):
+        ostrzezenia.append(f"Komentarz „{kom_tekst}” ma forme drugiej plci - nagrywa {NAGRYWA[nagrywa].lower()}.")
 
     # --- swiatlo ---
     swiatlo = m["swiatlo"]
@@ -1824,46 +1919,56 @@ def zbuduj(slug, opcje=None, los=None):
     ruch = KAMERY[kamera][2].format(t1=t1)
     ukryta = kamera in KAMERY_UKRYTE
 
-    # --- glos komentarza: model wideo (opcjonalnie zapis fonetyczny ą/ę) albo cisza zza kamery + ElevenLabs po generacji ---
-    glos = (o.get("glos") or "model").strip()
-    if glos not in GLOSY:
+    # --- glos komentarza (3.1): model wideo NIGDY nie mowi - wideo z samym otoczeniem, komentarz dogrywa ElevenLabs po generacji ---
+    glos = (o.get("glos") or "auto").strip()
+    if glos not in GLOSY and glos != "model":
         raise ValueError(f"Nieznany glos komentarza '{glos}'.")
-    glos = "model" if glos == "auto" else glos           # "auto" rozstrzyga fabryka (klucz ElevenLabs) przed zbuduj()
+    if glos == "model":
+        ostrzezenia.append("Mowa z modelu wideo jest wylaczona - komentarz zza kamery dogra ElevenLabs po generacji.")
+    glos = "tts"
     wymowa = (o.get("wymowa") or "zwykla").strip()
     if wymowa not in WYMOWY:
         raise ValueError(f"Nieznana wymowa '{wymowa}'.")
-    mowi_model = bool(kom_tekst) and glos == "model"
-    w_klamrach = fonetycznie(kom_tekst) if wymowa == "fonetyczna" else kom_tekst
-    ton = "half-whispering in disbelief" if zdziwienie else "amused"
-    po = "Then a quiet, stunned exhale" if zdziwienie else "Then a short stifled laugh"
     subtelnie = SUBTELNE_REAKCJE if zdziwienie else ""
     napisy = szyldy(miejsce_id, nazwy, obiekt)
+    kamera_blok = ((KAMERA_Z_UKRYCIA if ukryta else KAMERA_KLASYCZNA) if mi["szablon"] == "pelny"
+                   else (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA)).format(OPERATOR=operator, RUCH=ruch)
 
-    if mi["szablon"] == "pelny":
-        komentarz = (f"At about {t_kom} s the person filming says quietly off-screen ({ton}, native Polish accent): "
-                     f"{{{w_klamrach}}} {po}; {imie} does not react. ") if mowi_model else ""
-        dzwiek = (DZWIEK_Z_MODELEM if glos == "model" or not kom_tekst else DZWIEK_BEZ_MOWY).format(
-            DZWIEKI=m["dzwieki"], KOMENTARZ=komentarz)
-        kamera_blok = (KAMERA_Z_UKRYCIA if ukryta else KAMERA_KLASYCZNA).format(OPERATOR=operator, RUCH=ruch)
-        prompt = SZABLON_PELNY.format(
-            SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
-            REF=_lista_tokenow(obrazy_n), IMIE=imie, WLOSY_REF="" if wlosy_zmienione else "hair, ",
-            LINIA_STROJU=linia_stroju, TOZ=toz.rstrip("."), WLOSY=wlosy, WZROST=(wzrost + " ") if wzrost else "",
-            STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], SZYLDY=napisy, POGODA=pogoda, UBRANIA=sz["ubrania"], AKCJA=akcja,
-            REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=dzwiek)
-    else:
-        komentarz = (f"At about {t_kom} s the person filming says quietly off-screen ({ton}): {{{w_klamrach}}} "
-                     if mowi_model else "")
-        dzwiek = (DZWIEK_KROTKI_Z_MODELEM if glos == "model" or not kom_tekst else DZWIEK_KROTKI_BEZ_MOWY).format(
-            DZWIEKI=m["dzwieki"], KOMENTARZ=komentarz)
-        kamera_blok = (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA).format(OPERATOR=operator, RUCH=ruch)
-        toz_k = _WZORZEC_TOKENU.sub("the reference photos", toz)
-        prompt = SZABLON_KROTKI.format(
-            IMIE=imie, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], TOZ=toz_k.rstrip("."),
-            WLOSY=wlosy, WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "", STROJ=stroj, OPIS=_pierwsze_zdanie(m["opis"]),
-            SZYLDY=napisy, AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo,
-            DZWIEK=dzwiek)
-    prompt = re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", prompt)).strip()
+    def skladaj(syl):
+        blok_syl = f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""
+        if mi["szablon"] == "pelny":
+            tekst_p = SZABLON_PELNY.format(
+                SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
+                REF=_lista_tokenow(obrazy_n), IMIE=imie, WLOSY_REF="" if wlosy_zmienione else "hair, ",
+                LINIA_STROJU=linia_stroju, TOZ=toz.rstrip("."), WLOSY=wlosy, WZROST=(wzrost + " ") if wzrost else "",
+                SYLWETKA=blok_syl, STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], SZYLDY=napisy, POGODA=pogoda,
+                UBRANIA=sz["ubrania"], AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo,
+                DZWIEK=DZWIEK_BEZ_MOWY.format(DZWIEKI=m["dzwieki"], IMIE=imie))
+        else:
+            # zdjecie stroju jest ostatnim "reference photo" - twarz, wlosy i cialo tylko z pierwszych N (ref_k)
+            tekst_p = SZABLON_KROTKI.format(
+                IMIE=imie, REF_K=ref_k, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"],
+                TOZ=_WZORZEC_TOKENU.sub(ref_k, toz).rstrip("."), WLOSY=wlosy.replace("the reference photos", ref_k),
+                WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "",
+                SYLWETKA=blok_syl.replace("the reference photos", ref_k), STROJ=stroj,
+                OPIS=_pierwsze_zdanie(m["opis"]), SZYLDY=napisy, AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie,
+                KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=DZWIEK_KROTKI_BEZ_MOWY.format(DZWIEKI=m["dzwieki"]))
+        return re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", tekst_p)).strip()
+
+    # sylwetka: pelna; gdy prompt nie miesci sie w limicie modelu - pierwsze zdanie; gdy i to nie - bez niej (z ostrzezeniem)
+    sylwetka_wersja = "brak"
+    prompt = skladaj("")
+    if sylwetka:
+        for wersja, syl in (("pelna", sylwetka), ("krotka", _pierwsze_zdanie(sylwetka))):
+            kandydat = skladaj(syl)
+            if len(kandydat) <= mi["limit_znakow"]:
+                prompt, sylwetka_wersja = kandydat, wersja
+                break
+        else:
+            sylwetka_wersja = "pominieta"
+        if sylwetka_wersja != "pelna":
+            ostrzezenia.append(f"Sylwetka persony nie zmiescila sie w limicie {mi['nazwa']} ({mi['limit_znakow']} znakow) - "
+                               + ("poszlo tylko pierwsze zdanie." if sylwetka_wersja == "krotka" else "prompt jest bez niej."))
 
     obrazy = obrazy_rolki(slug, stroj_plik)
     if not obrazy:
@@ -1891,7 +1996,8 @@ def zbuduj(slug, opcje=None, los=None):
         "wlosy_zmienione": wlosy_zmienione, "stroj_plik": stroj_plik, "komentarz": kom_tekst,
         "sezon": sezon, "pora": pora, "kamera": kamera, "glos": glos if kom_tekst else "bez", "wymowa": wymowa,
         "komentarz_t": t_kom if kom_tekst else None, "obiekt": obiekt, "obiekt_nazwa": obiekt_nazwa, "nazwy": nazwy,
-        "stroj_id": stroj_id, "stroj_tryb": stroj_wybor.split(":")[0], "reakcja": rk,
+        "stroj_id": stroj_id, "stroj_tryb": stroj_wybor.split(":")[0], "reakcja": rk, "stroj_nazwa": stroj_nazwa,
+        "nagrywa": nagrywa, "sylwetka": sylwetka_wersja,
     }
 
 
@@ -1954,10 +2060,16 @@ def katalog(slug=None):
                   "grzywki": [[k, v[0]] for k, v in WLOSY_GRZYWKI.items()]},
         "stroje": [[k, v] for k, v in STROJE_TRYBY.items()],
         "stroje_odwazne": [[k, v[0], list(v[2])] for k, v in STROJE_ODWAZNE.items()],
+        # biblioteka strojow: ulubione na gorze (panel oznacza je gwiazdka); "plik" = nazwa zdjecia albo None (sam opis)
+        "stroje_biblioteka": [{"id": s["id"], "nazwa": s["nazwa"], "ulubiony": s["ulubiony"],
+                               "plik": os.path.basename(s["plik"]) if s["plik"] else None, "sciezka": s["plik"]}
+                              for s in sorted(baza.stroje_biblioteki(), key=lambda s: (not s["ulubiony"], -s["waga"]))],
         "reakcje": [[k, v[0]] for k, v in REAKCJE.items()],
         "reakcje_zdziwienie": list(REAKCJE_ZDZIWIENIE),
         "linie_reakcji": LINIE_REAKCJI,
         "komentarze": KOMENTARZE,
+        "komentarze_plec": KOMENTARZE_PLEC,
+        "nagrywa": [[k, v] for k, v in NAGRYWA.items()],
         "kamery": [[k, v[0]] for k, v in KAMERY.items()],
         "kamery_ukryte": list(KAMERY_UKRYTE),
         "glosy": [[k, v] for k, v in GLOSY.items()],
@@ -1969,8 +2081,11 @@ def katalog(slug=None):
     }
     if slug:
         prof = baza.profil_modelki(slug)
+        ust = baza.ustawienia_modelki(slug)
         kat["persona"] = {"slug": slug, "imie": prof.get("nazwa") or slug, "wzrost_cm": prof.get("wzrost_cm") or "",
                           "wlosy": wlosy_wlasne(slug), "zdjec": len(baza.sciezki_referencji(slug)),
+                          "sylwetka": prof.get("sylwetka") or "",
+                          "nagrywa": ust.get("nagrywa") if ust.get("nagrywa") in NAGRYWA else NAGRYWA_DOMYSLNIE,
                           "stroje": [n for n in sorted(os.listdir(baza.folder_strojow(slug)))
                                      if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]}
     return kat
