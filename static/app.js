@@ -686,6 +686,10 @@ function pillSalda(id, s, aktywny, minKr) {
       else if (minKr) tytul.push(`Bezpiecznik zostawia na koncie co najmniej ${kwotaKrotko(minKr, s.jednostka)}.`);
     }
     if (s.czas) tytul.push(`Stan z ${formatCzas(s.czas)}.`);
+  } else if (s.dziala) {
+    klasa = 'ok';
+    tresc = '<small>działa</small>';
+    tytul.push(`${nazwa}: klucz działa. Ile znaków zostało, widać tylko na stronie ElevenLabs – ten klucz nie ma prawa podglądu konta.`);
   } else if (s.blad) {
     klasa = 'zle';
     tresc = `<small>nie widzę ${id === 'elevenlabs' ? 'znaków' : (dolary ? 'salda' : 'kredytów')}</small>`;

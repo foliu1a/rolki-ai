@@ -563,3 +563,31 @@ def test_api_akcja_dograj_glos(klient, slug, cli, monkeypatch):
     assert klient.post("/api/akcja", json={"typ": "dograj_glos", "id": pid}).get_json()["ok"]
     panel.konsola.watek.join(10)
     assert baza.pomysl(slug, pid)["glos_dograny"] is True and len(cli.generacje) == 1
+
+
+def test_saldo_elevenlabs_bez_prawa_odczytu_konta_to_dziala_nie_blad(monkeypatch):
+    """Klucz ElevenLabs z ograniczonymi uprawnieniami (bez user_read): saldo znakow niewidoczne, ale TTS dziala ->
+    pastylka w panelu "dziala" (zielona), a nie czerwone "nie widze znakow". Zly klucz dalej jest bledem."""
+    import app as panel
+    import dostawcy
+    import sekrety
+
+    class D:
+        JEDNOSTKA = "zn"
+        stan = ("ok", "klucz dziala (bez uprawnienia do odczytu konta)")
+
+        def saldo_szczegoly(self):
+            raise dostawcy.BladDostawcy("ElevenLabs: missing_permissions (user_read)")
+
+        def stan_klucza(self, odswiez=False):
+            return self.stan
+
+    d = D()
+    monkeypatch.setattr(panel, "_saldo", {})
+    monkeypatch.setattr(dostawcy, "dostawca", lambda n: d)
+    monkeypatch.setattr(sekrety, "klucz", lambda n: "sk_test")
+    w = panel._pobierz_saldo("elevenlabs")
+    assert w.get("dziala") is True and w["blad"] is None and w["kredyty"] is None
+    D.stan = ("zly", "zly klucz")
+    w = panel._pobierz_saldo("elevenlabs")
+    assert not w.get("dziala") and w["blad"]

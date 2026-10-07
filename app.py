@@ -187,6 +187,7 @@ NAZWY_KONT_Z_KLUCZEM = {"yapper": "yapper.so", "wavespeed": "WaveSpeed", "eleven
 
 
 def _pobierz_saldo(nazwa):
+    d = None
     try:
         d = dostawcy.dostawca(nazwa)
         if nazwa in NAZWY_KONT_Z_KLUCZEM and not sekrety.klucz(nazwa):
@@ -198,6 +199,9 @@ def _pobierz_saldo(nazwa):
         wpis.setdefault("jednostka", getattr(d, "JEDNOSTKA", "kr"))
     except dostawcy.BladDostawcy as e:
         wpis = {"kredyty": None, "blad": str(e), "czas": time.time(), "jednostka": getattr(dostawcy.dostawca(nazwa), "JEDNOSTKA", "kr")}
+        # klucz ElevenLabs bez prawa odczytu konta: salda nie widac, ale TTS dziala - to nie blad (pastylka zielona "dziala")
+        if nazwa == "elevenlabs" and hasattr(d, "stan_klucza") and d.stan_klucza()[0] == "ok":
+            wpis.update(blad=None, dziala=True)
     except Exception as e:
         wpis = {"kredyty": None, "blad": f"{type(e).__name__}: {e}", "czas": time.time()}
     with _saldo_lock:
