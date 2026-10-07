@@ -497,7 +497,7 @@ def _wstaw(klient, w=1080, h=1920, nazwa="Moje zdjęcie.jpg"):
 def test_api_wstaw_zdjecie_i_katalog(klient, persona, cli, biblioteka):
     d = _wstaw(klient).get_json()
     assert d["ok"] and d["szer"] == 1080 and d["wys"] == 1920 and d["url"].startswith("/api/plik?s=")
-    assert d["proporcje"] == {"seedream_v5_pro": "9:16", "nano_banana_pro": "9:16", "gpt_image_2_5": "9:16"}
+    assert d["proporcje"] == {m: "9:16" for m in zs.MODELE}          # kazdy model z listy (od 2026-10-08 tez GPT Image 2)
     assert os.path.isfile(os.path.join(baza.folder_swap_zrodel(persona), d["zrodlo"])) and cli.uploady == []
     assert klient.get(d["url"]).status_code == 200
     r = klient.post("/api/swap/zdjecie", data={"plik": (io.BytesIO(b"nie obraz"), "x.jpg")}, content_type="multipart/form-data")
