@@ -30,6 +30,9 @@ def _naglowki():
 
 
 def _opis_bledu(e):
+    if "key id used as api key" in (e.tekst or "").lower():
+        return ("ElevenLabs: wklejone jest ID klucza, a nie sam klucz - prawdziwy klucz zaczyna sie od sk_ i ElevenLabs pokazuje go "
+                "tylko raz, przy tworzeniu (elevenlabs.io -> Developers -> API Keys -> Create, skopiuj od razu)")
     try:
         d = json.loads(e.tekst)
         det = d.get("detail") if isinstance(d, dict) else None
@@ -108,7 +111,7 @@ def stan_klucza(odswiez=False):
     except http.BladHTTP as e:
         if e.status == 401 and _status_401(e) == "missing_permissions":
             wynik = ("ok", "klucz dziala (bez uprawnienia do odczytu konta)")
-        elif e.status in (401, 403):
+        elif e.status in (401, 403) or (e.status == 400 and "api key" in (e.tekst or "").lower()):
             wynik = ("zly", _opis_bledu(e) + ("" if klucz_wyglada_dobrze(klucz) else PODPOWIEDZ_FORMATU))
         else:
             return "nie_wiem", _opis_bledu(e)

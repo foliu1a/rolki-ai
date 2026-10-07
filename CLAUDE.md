@@ -174,7 +174,8 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   (gotowa bez komentarza, `glos_blad`); "Dograj glos" w karcie / akcja `dograj_glos` / `python fabryka.py --modelka x
   dograj-glos <id>` (tylko rolki z glosem tts - przy "model" odmawia, zdublowalby glos). Voice ID: ustawienie `z_promptu_glos`
   ("" = `elevenlabs.wybierz_glos`: polski, kobiecy, NIE o imieniu persony). Klucz ElevenLabs zaczyna sie od `sk_` - panel
-  odrzuca inne wklejki (`sekrety.PREFIKSY`). Klucz w panelu (2026-10-07) jest ZLY - user musi wkleic dobry.
+  odrzuca inne wklejki (`sekrety.PREFIKSY`). Klucz w panelu (2026-10-07) to ID klucza, nie klucz (ElevenLabs: "API key ID used
+  as API key", HTTP 400 - `stan_klucza` traktuje to jak zly klucz) - user musi wkleic prawdziwy `sk_...`.
 - **Asystent** (`asystent.py`, `POST /api/z-promptu/asystent`, CLI `z-promptu --asystent`): krotki pomysl -> opcje (miejsce,
   obiekt, nazwy, stroj, kamera, reakcja, komentarz, glos auto, wymowa fonetyczna, wlosy, dlugosc, model) + jedno zdanie
   "dlaczego". Darmowy OpenRouter (klucz `openrouter`, `sk-or-`, Konta; `MODELE_LLM` jak w tg-glosowki, filtr GET /models, max 3
@@ -182,6 +183,19 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   Nauka z pomysly.json + `modelki/<slug>/asystent_archiwum.json` (usuniete): ocena "dobra" +3 / gotowa +1 / "slaba" -3 (usuniecie
   gotowej = slaba), NSFW -> ten stroj odpada, IP z prawdziwymi nazwami -> ten obiekt odpada, miejsce idzie na "opisowe", 2x IP =
   wszedzie "opisowe" (IP liczone ze WSZYSTKICH person). `POST /api/pomysly/<id>/ocena`.
+- **Porownanie na zywo (2026-10-07, Noemi #4-#6, te same opcje i `ustalone`: galeria_fastfood w Posnanii, stroj krata_futerko,
+  kamera zza_filaru, reakcja para_kreci_glowa, komentarz {Widziałaś to? Jak ona wyglonda…} - glos model, bo klucz ElevenLabs
+  w panelu to ID klucza, nie klucz; 10 s 720p)**: filtr IP PRZEPUSCIL prawdziwa nazwe galerii we wszystkich 3, filtr NSFW
+  przepuscil odwazny stroj we wszystkich 3.
+  * Wan 3.0 Prime (#4, 30 kr, generacja ~2,2 min): jedno ujecie zza filaru, stroj idealny, mowa z offu poprawna ("wygląda" -
+    zapis fonetyczny zadzialal); twarz slabiej podobna, przesadzone proporcje ciala, napis "Posnania" LUSTRZANY.
+  * Gemini Omni Flash 1.1 (#5, 30 kr, ~1,5 min): najlepsze polskie napisy (logo Posnania, ZAMÓW TUTAJ, ODBIÓR ZAMÓWIEŃ, 19,99 zł),
+    twarz niezla; ALE ciecia/kilka ujec (wyglada jak reklama, nie nagranie z ukrycia), w kadr wchodzi reka z telefonem, persona
+    sama wypowiada czesc komentarza (ruch ust).
+  * Seedance 2.5 (#6, 70 kr, ~3,8 min): najlepsza twarz i najbardziej prawdziwe nagranie z ukrycia (krawedz filaru, dystans, zoom,
+    jedno ujecie); napisy pseudo-polskie ("ZAMÓD TTTCAC", "WYJŚCCE"), a mowa dalej zla ("wyglana") mimo zapisu fonetycznego ->
+    dla Seedance komentarz TYLKO przez ElevenLabs (glos tts).
+  * Wniosek: jakosc = Seedance 2.5 720p + komentarz ElevenLabs; tanio/ilosc = Wan 3.0 Prime; Gemini nie do rolek "z ukrycia".
 - **Panel 3.0**: widok prosty = persona, "Napisz krotko, co ma sie dziac" + Losuj, linijka "Asystent dobral: ..." + "Dlaczego",
   cena (auto po dobraniu, darmowa), jeden duzy "Zrob rolke" (bez swiezej ceny najpierw ja sprawdza, potem pyta "Zrobic za N
   kr?"); wszystko inne w "Zmien szczegoly" (reczne zmiany = `state.zp.reczne`, asystent ich nie nadpisuje; "Oddaj wszystko

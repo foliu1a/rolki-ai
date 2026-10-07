@@ -286,6 +286,10 @@ def test_elevenlabs_stan_klucza_i_tts(dane, monkeypatch):
         http.BladHTTP(401, json.dumps({"detail": {"status": "invalid_api_key", "message": "Invalid API key"}}), "u")))
     stan, kom = elevenlabs.stan_klucza(odswiez=True)
     assert stan == "zly" and "Invalid API key" in kom
+    monkeypatch.setattr(http, "zapytanie", lambda *a, **k: (_ for _ in ()).throw(http.BladHTTP(400, json.dumps({"detail": {
+        "status": "invalid_api_key", "message": "API key ID used as API key - only valid API keys can be used."}}), "u")))
+    stan, kom = elevenlabs.stan_klucza(odswiez=True)
+    assert stan == "zly" and "ID klucza" in kom                      # user wkleil ID klucza zamiast klucza (2026-10-07)
     sekrety.zapisz_klucz("elevenlabs", "zly-klucz-123")
     stan, kom = elevenlabs.stan_klucza(odswiez=True)
     assert stan == "zly" and "sk_" in kom
