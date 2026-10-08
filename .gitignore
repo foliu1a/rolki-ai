@@ -13,6 +13,7 @@ klucze.json
 dziennik.jsonl*
 uploady_yapper.json
 uploady_wavespeed.json
+instagram_widziane.json
 
 # Pliki robocze panelu/fabryki (zmieniaja sie same przy pracy - w gicie psulyby `git pull` w aktualizuj.bat)
 budzet.json

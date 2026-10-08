@@ -23,6 +23,8 @@ DOSTAWCY = {
     "telegram": {"env": "TELEGRAM_BOT_TOKEN", "nazwa": "Telegram", "opis": "token bota od @BotFather - telefon jako pilot fabryki"},
     "openrouter": {"env": "OPENROUTER_API_KEY", "nazwa": "OpenRouter",
                    "opis": "darmowe modele AI - asystent w zakladce Z promptu (bez klucza dobiera regulami)"},
+    "apify": {"env": "APIFY_API_KEY", "nazwa": "Apify",
+              "opis": "pobieranie najnowszych rolek z publicznych profili IG do swapa (scrape po stronie Apify, bez logowania)"},
 }
 # poczatek prawdziwego klucza - panel odrzuca wklejke, ktora na pewno nie jest kluczem (np. Voice ID zamiast klucza ElevenLabs)
 PREFIKSY = {"elevenlabs": "sk_", "openrouter": "sk-or-"}

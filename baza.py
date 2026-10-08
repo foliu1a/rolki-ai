@@ -616,6 +616,15 @@ USTAWIENIA_GLOBALNE_DOMYSLNE = {
         "persony": [],              # na zmiane po kolei; [] = wszystkie, ktore maja zdjecia w referencje/
         "od_godziny": "10:00",      # nie wczesniej niz o (czas lokalny)
     },
+    "autopilot_rolki_ig": {         # autopilot pobiera najnowsze rolki z publicznych profili IG przez Apify (zrodlo do swapa)
+        "wlaczone": False,          # domyslnie WYL. (brak klucza Apify) - user wlacza po wklejeniu klucza w Konta
+        "profile": [],              # @ profile tworczyn (bez @), z ktorych bierzemy najnowsze rolki
+        "konto_obserwowanych": "",  # opcjonalnie @ konto - sprobuj odczytac jego obserwowanych (zwykle ukryte -> wklej recznie)
+        "dziennie": 3,              # ile rolek dziennie MAX pobrac (laczne dla wszystkich person); 0 = nie pobieraj
+        "kandydatow_na_profil": 5,  # ile najnowszych postow na profil sciagnac do oceny
+        "do_person": "round-robin", # round-robin (po kolei po personach z referencjami) albo slug konkretnej persony
+        "pobieranie_przez_apify": False,  # HACZYK: pobieraj plik przez Apify (gdy CDN IG blokuje Mullvada) - NIESPRAWDZONE
+    },
 }
 
 

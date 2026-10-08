@@ -320,6 +320,41 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - Testy: tests/test_zdjecia_rownolegle.py, tests/test_autopilot_z_promptu.py. conftest: UdawaneCLI pod blokada (watki), autouse
   `bez_kolejki_zdjec_w_tle` konczy dyspozytora PRZED cofnieciem monkeypatcha, `dane` ustawia rolki z promptu na 0 dziennie.
 
+## 3.4 (2026-10-08): zrodlo klipow z IG przez Apify (bez logowania)
+
+- **Po co**: user nie chce codziennie szukac filmikow do swapa. Autopilot sam pobiera NAJNOWSZE rolki z publicznych profili
+  tworczyn przez Apify (scrape po stronie Apify - OMIJA Mullvada, NIE loguje sie na konto usera: zero bana/hasla/CDN z tej maszyny),
+  AI odsiewa slabe, dobre laduja we wrzutni persony (`tu wrzucasz rolki\<Persona>`) -> stamtad bierze je istniejacy character swap
+  (skanuj -> generuj). Zrodlo klipow, NIE nowy generator. Domyslnie WYL. (brak klucza Apify).
+- **Dostawca** `dostawcy/instagram.py` (klucz `sekrety.klucz("apify")`, panel Konta -> Apify albo env APIFY_API_KEY; NIE jest w
+  `dostawcy.NAZWY` - to zrodlo, nie generator; do paska sald nie wchodzi, "dziala" pokazuje Konta przez `gotowy()` jak ElevenLabs):
+  `POST https://api.apify.com/v2/acts/<actor>/run-sync-get-dataset-items` (run + dataset w jednym; token w naglowku Bearer, NIGDY
+  w URL). Actor w stalej `ACTOR_ROLKI` (domyslnie `apify~instagram-scraper`, resultsType=posts - reele tez; podmienialny na dedykowany
+  reel-scraper). `rolki_z_profili(handles, na_profil=5)` -> [{shortcode, url, video_url (CDN), autor, opis, czas_s, polubienia, data}]
+  (tylko wideo z adresem pliku, najnowsze pierwsze). `obserwowani(handle)` -> IG pokazuje liste obserwowanych TYLKO po zalogowaniu,
+  wiec domyslnie rzuca BladDostawcy "wklej profile recznie" (haczyk `ACTOR_OBSERWOWANI`). `gotowy()`/`stan_klucza()` jak wzorzec.
+- **Pobranie pliku** `instagram.pobierz(video_url, cel)`: sciaga z CDN IG (scontent/fbcdn) do `<cel>.part`, potem os.replace -
+  blad sieci/403/timeout => jasny `BladDostawcy` "nie moge pobrac z CDN IG (moze blokowac VPN) - ustaw pobieranie przez Apify",
+  BEZ polpliku. HACZYK `pobierz_przez_apify(rolka, cel)` (flaga `autopilot_rolki_ig.pobieranie_przez_apify`, domyslnie wyl.) -
+  NIESPRAWDZONE na zywo (CDN moze blokowac Mullvad; user wlacza swiadomie). **Niepewne do sprawdzenia po wklejeniu klucza: czy CDN
+  IG w ogole przepusci pobieranie mimo Mullvada.**
+- **AI filtr + dedup** (`instagram_rolki.py`): dla kazdego kandydata dedup po shortcode (`<dane>/instagram_widziane.json`, poza
+  gitem - i dzienny licznik) -> wstepnie po metadanych (dlugosc) -> pobranie -> heurystyki z ffprobe (`klatki.info`: kadr pionowy,
+  3-60 s, krotki bok >= 360 px) -> gdy jest klucz OpenRouter: arkusz 2 klatek (`klatki.arkusz`) do DARMOWEGO modelu multimodalnego
+  (`MODELE_VISION`, GET /models filtruje po modalnosci image, wzor asystent.py) z pytaniem po polsku {ok, powod} (jedna kobieta,
+  pion, bez napisow, dlonie nie zaslaniaja twarzy, ruch). Bez OpenRouter -> same heurystyki + log "AI-ocena wylaczona". Zaakceptowane
+  do `baza.folder_zrodel(slug)` round-robin po personach z referencjami (albo konkretna). Staging: `modelki/_ig_staging` (lista_modelek
+  pomija `_`).
+- **Autopilot** (`autopilot.krok_rolki_ig`, w `przebieg_wszystkich` PRZED personami, zeby skanuj od razu je podjal; tylko gdy
+  `not tylko`): `ustawienia_globalne.autopilot_rolki_ig` {wlaczone False, profile [], konto_obserwowanych "", dziennie 3 (0 = nie
+  pobieraj), kandydatow_na_profil 5, do_person "round-robin"|<slug>, pobieranie_przez_apify False}. Dzienny licznik `pobrane_z_dnia`
+  (dzien lokalny, OSOBNY od generacji). STOP/wylaczenie autopilota konczy krok. Bez klucza Apify = nie pobiera + jasny wpis raz
+  dziennie. `STAN["opis"]` dla widgetu ("pobieram rolki z IG: N nowych" / "IG: nic nowego"), `stan_rolki_ig` -> `/api/stan.rolki_ig`
+  i linijka na Starcie. Panel: Ustawienia -> Autopilot -> "Rolki z Instagrama" (wlacz, profile w textarea po jednym, dziennie,
+  kandydatow, do person, pobieranie przez Apify w trybie pelnym); konto Apify w Ustawienia -> Konta.
+- Testy: tests/test_instagram.py (parsowanie Apify, dedup, heurystyki, AI z/bez OpenRouter, krok: round-robin/limit/0/brak klucza/
+  blad CDN/konkretna persona, pobieranie bez polpliku, endpointy + konto). Wszystko na mockach, zero sieci.
+
 ## Postprodukcja
 
 - Wideo: `mediatool.py` odpala worker Media Tool headless (`ELECTRON_RUN_AS_NODE=1 "Media Tool.exe" worker.cjs <json>`,
@@ -355,6 +390,8 @@ autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dz
 zdjecia.py          zdjecia persony z OPISU (autopilot): zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt
 zdjecia_swap.py     zdjecia 3.2: podmiana postaci na wstawionym zdjeciu (strona Zdjecia, CLI zdjecie-swap) - modele, chipy, prompt,
                     wycena bez mediow, generacja z w_toku/job_id/wznawianiem jak rolki; 3.3: kolejka + KOLEJKA (kilka naraz), STOP
+instagram_rolki.py  3.4: zrodlo klipow z IG (orkiestracja): dedup (instagram_widziane.json) + dzienny licznik, heurystyki (ffprobe),
+                    AI filtr (OpenRouter multimodalny, fallback heurystyki), pobierz_filtruj_zapisz -> wrzutnia person round-robin
 lipsync.py          zrob(slug, wideo, audio, styl=) -> przygotuj_glos (ffmpeg: styl telefon = pasmo mikrofonu + krotkie odbicia pokoju +
                     kompresja + szum + loudnorm -16 LUFS; czysty = loudnorm; brak = bez zmian; ogg z Telegrama -> mp3) -> sync.so
                     (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield -> wyniki/<n>_lipsync.raw.mp4 -> Media Tool
@@ -370,7 +407,8 @@ dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobier
                     sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
                     telegram.json obok stan.json: chat_id = czat glowny (pierwszy, ktory napisal), `czaty` = sparowane konta person
                     (tylko te z ustawien telegram_czat; obce ignorowane); `czat_dla(konto)`; limity 20 MB pobieranie / 50 MB
-                    wysylka), http.py (urllib: JSON, multipart, PUT, pobierz, powtorki)
+                    wysylka), instagram.py (3.4: Apify - rolki_z_profili/obserwowani/pobierz/pobierz_przez_apify; zrodlo klipow do
+                    swapa, NIE generator - poza NAZWY, poza paskiem sald), http.py (urllib: JSON, multipart, PUT, pobierz, powtorki)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
                     env (YAPPER_API_KEY, WAVESPEED_API_KEY, SYNC_API_KEY, TELEGRAM_BOT_TOKEN...) albo klucze.json (.gitignore, chmod 600)
 mediatool.py        most do Media Tool (C:\claude programy\Media Tool) - pranie wideo bez GUI
@@ -542,7 +580,9 @@ tests/test_wavespeed.py.
 
 ## Granice
 
-- Nie scrapuj Instagrama; zrodla i referencje dostarcza uzytkownik.
+- NIE scrapuj Instagrama z tej maszyny i NIE loguj sie na konto usera (ban + Mullvad). Jedyne zrodlo rolek z IG to Apify
+  (3.4, scrape po stronie Apify) z PUBLICZNYCH profili, ktore wskaze user - do swapa, nie do podszywania sie. Referencje person
+  dostarcza uzytkownik.
 - Wizerunek realnych osob tylko za ich zgoda. Content jest AI - nie pomagaj udawac, ze jest inaczej.
 - Bezpiecznik budzetu (min_kredyty, max_kredyty_na_rolke, limity dzienne, yapper.*, wavespeed.*) zmienia tylko user.
 - Publikacja jest reczna. Fabryka konczy na pliku w folderze gotowych.

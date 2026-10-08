@@ -42,7 +42,9 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
  "zdjecia_kolejka": {"w_toku": 2, "w_kolejce": 1, "limit": 4, "dziala": true, "zatrzymane": false,
                      "persona": {"w_toku": 2, "w_kolejce": 1}},           // 3.3: zdjęcia (wszystkie persony + aktywna)
  "autopilot_z_promptu": {"dziennie": 1, "dzis": 0, "nieudane": 0, "model": "seedance_2_5", "od_godziny": "10:00", "persony": ["noemi"],
-                         "stan": "przed_godzina", "tekst": "Rolki z promptu: dziś 0 z 1 (następna po 10:00)"}}
+                         "stan": "przed_godzina", "tekst": "Rolki z promptu: dziś 0 z 1 (następna po 10:00)"},
+ "rolki_ig": {"wlaczone": false, "dziennie": 3, "dzis": 0, "profile": [], "persony": ["noemi"], "do_person": "round-robin",
+              "ma_klucz": false, "stan": "wylaczone", "tekst": "Rolki z Instagrama: wyłączone (…)"}}   // 3.4: źródło klipów z IG
 ```
 - Foldery na pulpicie (2.1): panel przy starcie (i `POST /api/modelki`) tworzy `Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>`,
   `...\tu rolki zrobione\<Persona>`, `...\tu zdjecia zrobione\<Persona>` i wpisuje je w `zrodla_dir` / `wyniki_dir` / `zdjecia_dir`
@@ -318,15 +320,26 @@ sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Hi
 - `POST /api/autopilot` `{"wlacz": true}` → `{"autopilot": {...jak w /api/stan...}}` (pętla w tle; `wlacz: false` zatrzymuje).
   `autopilot.etap` może być `z_promptu`, a `autopilot.opis` = np. „robię rolkę z promptu: Noemi, Galeria Posnania” (3.3).
 - Ustawienia wspólne dla person (3.3, `ustawienia_globalne.json`): `GET /api/ustawienia/globalne` → `{"ustawienia":
-  {"zdjecia_rownolegle": 4, "autopilot_z_promptu": {"dziennie": 1, "model": "seedance_2_5", "persony": [], "od_godziny": "10:00"}},
+  {"zdjecia_rownolegle": 4, "autopilot_z_promptu": {"dziennie": 1, "model": "seedance_2_5", "persony": [], "od_godziny": "10:00"},
+  "autopilot_rolki_ig": {"wlaczone": false, "profile": [], "konto_obserwowanych": "", "dziennie": 3, "kandydatow_na_profil": 5,
+  "do_person": "round-robin", "pobieranie_przez_apify": false}},
   "domyslne", "modele_z_promptu": [{id, nazwa}], "persony": [{slug, nazwa, referencje}], "z_promptu": {...jak w /api/stan...},
-  "max_rownolegle": 8}`; `POST /api/ustawienia/globalne` `{"zdjecia_rownolegle": 1-8}` albo `{"autopilot_z_promptu": {dowolne z pól}}`
-  (dziennie 0-20, 0 = wyłączone, ŁĄCZNIE dla person; model `seedance_2_5` | `wan3_0_prime`; persony = istniejące slugi; od_godziny
-  GG:MM) – złe wartości → 400. Limitów budżetu tu nie ma.
+  "rolki_ig": {...jak w /api/stan...}, "ma_klucz_apify": bool, "max_rownolegle": 8}`; `POST /api/ustawienia/globalne`
+  `{"zdjecia_rownolegle": 1-8}` / `{"autopilot_z_promptu": {dowolne z pól}}` (dziennie 0-20, 0 = wyłączone, ŁĄCZNIE dla person;
+  model `seedance_2_5` | `wan3_0_prime`; persony = istniejące slugi; od_godziny GG:MM) / `{"autopilot_rolki_ig": {dowolne z pól}}`
+  (3.4: `profile` = lista albo tekst po @ w linii/przecinku; dziennie 0-50; kandydatow_na_profil 1-50; do_person `round-robin`|slug)
+  – złe wartości → 400. Limitów budżetu tu nie ma.
 - Autopilot rolek z promptu (3.3): co przebieg (po rolkach ze swapu), od `od_godziny`, aż `dziennie` rolek z promptu autopilota
   dziś (dzień lokalny, osobny licznik od swapu): persony na zmianę → losowy pomysł + asystent → darmowa wycena i bezpieczniki →
   ta sama ścieżka co „Zrób rolkę” → ElevenLabs, Media Tool, Telegram. Max 2 nieudane dziennie; pominięcie (limit/saldo) = wpis
   „uwaga” w dzienniku. Pomysł ma `autopilot_z_promptu: true` (karta: „autopilot · ...”).
+- Rolki z Instagrama (3.4, źródło klipów do swapa): `/api/stan.rolki_ig` = `{"wlaczone", "dziennie", "dzis", "profile", "persony",
+  "do_person", "ma_klucz", "stan": wylaczone|brak_klucza|brak_profili|brak_person|gotowe|czeka, "tekst": "Rolki z Instagrama: dziś
+  X z N (…)"}`. Autopilot (`krok_rolki_ig`, w `przebieg_wszystkich` PRZED personami): przez Apify (`dostawcy/instagram.py`, klucz
+  `apify`) pobiera najnowsze rolki z `profile`, AI/heurystyki odsiewają słabe, dobre lądują w `tu wrzucasz rolki\<Persona>` (round-robin
+  po personach z referencjami albo `do_person`) – skanuj je potem podejmie. Dzienny licznik `dziennie` (osobny od generacji),
+  dedup po shortcode (`instagram_widziane.json`, poza gitem). Bez klucza Apify = nie pobiera + „uwaga” w dzienniku. Konto Apify:
+  `POST /api/konta {"dostawca": "apify", "klucz": "apify_api_…"}`, test = `GET /v2/users/me` (zielone „działa” gdy klucz dobry).
 
 ## Teksty i szablony (bez zmian)
 - `GET /api/teksty`, `POST /api/teksty` `{"teksty": "linia\nlinia", "zrodlo": ""}` → `{"dodano": n}`, `POST /api/teksty/losuj` → `{"tekst", "nieuzyte", "wszystkie"}`

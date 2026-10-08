@@ -573,6 +573,7 @@ async function odswiez(wymusSaldo = false) {
     state.wersja = d.wersja || '';
     state.zdjeciaKolejka = d.zdjecia_kolejka || null;          // 3.3: zdjęcia w toku / w kolejce (wszystkie persony + aktywna)
     state.autopilotZPromptu = d.autopilot_z_promptu || null;   // 3.3: „Rolki z promptu: dziś X z N (…)”
+    state.rolkiIg = d.rolki_ig || null;                        // 3.4: „Rolki z Instagrama: dziś X z N (…)”
     renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan(); renderHamulecRolek();
     const wer = $('#wersja');
     const werHtml = state.wersja ? `<span class="ikona">${ikona('ksiezyc')}</span><span>Rolki AI v${esc(state.wersja)}</span>` : '';
@@ -1187,6 +1188,17 @@ function renderAutopilot() {
       elz.innerHTML = zp.tekst ? `${ikona('bolt')}<span>${esc(zp.tekst)}</span><a href="#ustawienia/autopilot">zmień</a>` : '';
     }
     elz.className = 'autopilot-z-promptu' + (zp.stan === 'w_toku' ? ' praca' : (zp.stan === 'gotowe' ? ' ok' : ''));
+  }
+  // 3.4: rolki z Instagrama (źródło klipów do swapa) – „Rolki z Instagrama: dziś X z N (…)”
+  const ig = state.rolkiIg || {};
+  const eli = $('#autopilot-rolki-ig');
+  if (eli) {
+    const pokaz = ig.tekst && ig.stan !== 'wylaczone';
+    if (eli.dataset.tekst !== (pokaz ? ig.tekst : '')) {
+      eli.dataset.tekst = pokaz ? ig.tekst : '';
+      eli.innerHTML = pokaz ? `${ikona('bolt')}<span>${esc(ig.tekst)}</span><a href="#ustawienia/autopilot">zmień</a>` : '';
+    }
+    eli.className = 'autopilot-z-promptu' + (ig.stan === 'gotowe' ? ' ok' : (['brak_klucza', 'brak_profili', 'brak_person'].includes(ig.stan) ? ' uwaga' : ''));
   }
   // telefon (Telegram): podłączony / czeka na /start / nie podłączony
   const t = state.telegram || {};
@@ -3389,6 +3401,23 @@ function renderGlobalne() {
     || '<span class="muted">Brak person.</span>';
   const s = d.z_promptu || {};
   $('#g-zp-stan').textContent = s.tekst ? `${s.tekst}${(s.persony || []).length ? ` Persony: ${s.persony.map(x => nazwaPersony(x) || x).join(', ')}.` : ''}` : '';
+  // 3.4: rolki z Instagrama (profile w textarea - po jednym w linii; select „do której persony”)
+  const ig = u.autopilot_rolki_ig || {};
+  const ta = $('#g-ig-profile');
+  if (ta) ta.value = (ig.profile || []).join('\n');
+  const konto = $('#g-ig-konto');
+  if (konto) konto.value = ig.konto_obserwowanych || '';
+  const selIg = $('#g-ig-do-person');
+  if (selIg) {
+    selIg.innerHTML = '<option value="round-robin">Po kolei – równo po personach</option>'
+      + (d.persony || []).filter(p => p.referencje).map(p => `<option value="${esc(p.slug)}">${esc(p.nazwa || p.slug)}</option>`).join('');
+    ustawSelectWartosc(selIg, ig.do_person || 'round-robin');
+  }
+  const sig = d.rolki_ig || {};
+  const sigEl = $('#g-ig-stan');
+  if (sigEl) sigEl.textContent = (sig.tekst || '')
+    + (sig.wlaczone && (sig.persony || []).length ? ` Do person: ${sig.persony.map(x => nazwaPersony(x) || x).join(', ')}.` : '')
+    + (sig.wlaczone && !d.ma_klucz_apify ? ' Najpierw wklej klucz Apify w Konta.' : '');
 }
 
 async function zapiszUstawieniaGlobalne(f) {
@@ -3484,7 +3513,7 @@ async function ladujKonta() {
 
 function renderKonta() {
   const k = state.kontaPelne || {};
-  const kolejnosc = ['higgsfield', 'telegram', 'wavespeed', 'yapper', 'sync', 'elevenlabs'];
+  const kolejnosc = ['higgsfield', 'telegram', 'apify', 'wavespeed', 'yapper', 'sync', 'elevenlabs'];
   const ids = kolejnosc.filter(x => k[x]).concat(Object.keys(k).filter(x => !kolejnosc.includes(x)));
   $('#konta-lista').innerHTML = ids.length ? ids.map(id => kartaKonta(id, k[id])).join('') : '<div class="pusto"><b>Brak danych o kontach</b></div>';
 }
@@ -3496,6 +3525,7 @@ const OPISY_KONT = {
   sync: 'Dopasowanie ust do głosu (lipsync) i głos z tekstu.',
   elevenlabs: 'Opcjonalnie: głos z tekstu.',
   telegram: 'Wysyłasz botowi filmik → fabryka robi rolkę → bot odsyła gotową z podpisem. Komendy: /status, /raport, /stop, /wznow.',
+  apify: 'Pobiera za Ciebie najnowsze rolki z publicznych profili IG (źródło klipów do swapa) – scrape po stronie Apify, bez logowania na Twoje konto. Profile ustawiasz w Ustawienia → Autopilot → Rolki z Instagrama.',
 };
 
 function prostyWynikTestu(w, id = '') {

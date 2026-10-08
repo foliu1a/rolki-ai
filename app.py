@@ -34,7 +34,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.3"
+WERSJA = "3.4"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -394,12 +394,16 @@ def api_stan():
         z_promptu = autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony())
     except Exception as e:
         z_promptu = {"tekst": "", "blad": str(e)}
+    try:
+        rolki_ig = autopilot.stan_rolki_ig(wlaczony=_autopilot_wlaczony())
+    except Exception as e:
+        rolki_ig = {"tekst": "", "blad": str(e)}
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
                dzis=dzis, zadanie=konsola.opis(), konta=_konta_skrot(salda), jakosc=jakosc,
                foldery=_foldery(aktywna) if aktywna else None, pulpit=baza.pulpit(),
                dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA,
-               zdjecia_kolejka=zdjecia_kolejka, autopilot_z_promptu=z_promptu)
+               zdjecia_kolejka=zdjecia_kolejka, autopilot_z_promptu=z_promptu, rolki_ig=rolki_ig)
 
 
 @app.route("/api/ustawienia/preset", methods=["POST"])
@@ -1167,7 +1171,8 @@ def _globalne_dla_panelu():
             "modele_z_promptu": [{"id": k, "nazwa": v["nazwa"]} for k, v in autopilot.MODELE_Z_PROMPTU.items()],
             "persony": [{"slug": s, "nazwa": baza.profil_modelki(s).get("nazwa") or s, "referencje": len(baza.sciezki_referencji(s))}
                         for s in baza.lista_modelek()],
-            "z_promptu": autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony()), "max_rownolegle": zdjecia_swap.ROWNOLEGLE_MAX}
+            "z_promptu": autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony()), "max_rownolegle": zdjecia_swap.ROWNOLEGLE_MAX,
+            "rolki_ig": autopilot.stan_rolki_ig(wlaczony=_autopilot_wlaczony()), "ma_klucz_apify": bool(sekrety.klucz("apify"))}
 
 
 @app.route("/api/ustawienia/globalne")
@@ -1192,6 +1197,8 @@ def api_zapisz_ustawienia_globalne():
                 zmiany[k] = n
             elif k == "autopilot_z_promptu":
                 zmiany[k] = autopilot.sprawdz_ustawienia_z_promptu(v)
+            elif k == "autopilot_rolki_ig":
+                zmiany[k] = autopilot.sprawdz_ustawienia_rolki_ig(v)
             else:
                 return _blad(f"Nieznane ustawienie: {k}")
     except (TypeError, ValueError) as e:
@@ -1275,6 +1282,9 @@ JAK_LOGOWAC = {
                   "asystent uzywa tylko darmowych modeli). Klucz zaczyna sie od sk-or-",
     "telegram": "W Telegramie napisz do @BotFather: /newbot, nadaj nazwe -> dostaniesz token. Wklej go tu. "
                 "Potem napisz do swojego bota /start - od tej chwili wysylasz mu filmiki, a on odsyla gotowe rolki.",
+    "apify": "console.apify.com -> zaloz darmowe konto (Google/GitHub, bez karty) -> Settings -> Integrations/API -> "
+             "Personal API tokens -> skopiuj token. Apify pobiera za Ciebie najnowsze rolki z publicznych profili IG "
+             "(scrape po ich stronie - omija Twoj VPN, nie dotyka Twojego konta). Darmowy limit wystarcza na kilka rolek dziennie.",
 }
 
 
@@ -1393,6 +1403,10 @@ def api_test_konta():
             _saldo.pop("elevenlabs", None)
         elif d == "openrouter":
             dziala, komunikat = asystent.test_klucza()
+        elif d == "apify":
+            from dostawcy import instagram
+            dziala, komunikat = instagram.gotowy()      # GET /users/me - nic nie kosztuje
+            instagram._stan_klucza.clear()
         elif d == "telegram":
             from dostawcy import telegram
             dziala, komunikat = telegram.gotowy()

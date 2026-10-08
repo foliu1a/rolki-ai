@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 import baza
 import dostawcy
 import fabryka
+import sekrety
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
@@ -481,6 +482,9 @@ MAX_DZIENNIE_Z_PROMPTU = 20
 PONOW_PO_POMINIECIU_S = 15 * 60     # pominieta (limit dnia, saldo): nastepne sprawdzenie najwczesniej po tylu s (bez spamu CLI/dziennika)
 _Z_PROMPTU = {"pominiete_do": 0.0, "powod": "", "dzien": "", "wpisy": set()}
 
+# rolki z Instagrama (zrodlo klipow do swapa przez Apify, 3.4)
+MAX_DZIENNIE_IG = 50
+
 
 def _godzina(t):
     """'10:00' / '9.30' -> '10:00' / '09:30'; zla -> None."""
@@ -767,6 +771,168 @@ def stan_z_promptu(wlaczony=None, teraz=None):
     return wynik
 
 
+# ---------------- rolki z Instagrama (zrodlo klipow do swapa, 3.4) ----------------
+
+def _handle_ig(h):
+    """'@Noemi' / 'instagram.com/noemi/' / 'noemi' -> 'noemi'."""
+    s = str(h or "").strip()
+    m = re.search(r"instagram\.com/([^/?#]+)", s, re.I)
+    if m:
+        s = m.group(1)
+    return s.lstrip("@").strip().strip("/").lower()
+
+
+def ustawienia_rolki_ig():
+    """Ustawienia pobierania rolek z IG (globalne, Ustawienia -> Autopilot -> Rolki z Instagrama)."""
+    u = dict(baza.ustawienia_globalne().get("autopilot_rolki_ig") or {})
+    dom = baza.USTAWIENIA_GLOBALNE_DOMYSLNE["autopilot_rolki_ig"]
+    def _int(klucz, mini, maxi):
+        try:
+            v = int(u[klucz]) if u.get(klucz) not in (None, "") else dom[klucz]
+        except (TypeError, ValueError):
+            v = dom[klucz]
+        return max(mini, min(maxi, v))
+    profile = [_handle_ig(p) for p in (u.get("profile") if isinstance(u.get("profile"), list) else [])]
+    do_person = str(u.get("do_person") or dom["do_person"]).strip() or dom["do_person"]
+    return {"wlaczone": bool(u.get("wlaczone")),
+            "profile": [p for p in dict.fromkeys(profile) if p],
+            "konto_obserwowanych": _handle_ig(u.get("konto_obserwowanych") or ""),
+            "dziennie": _int("dziennie", 0, MAX_DZIENNIE_IG),
+            "kandydatow_na_profil": _int("kandydatow_na_profil", 1, 50),
+            "do_person": do_person,
+            "pobieranie_przez_apify": bool(u.get("pobieranie_przez_apify"))}
+
+
+def sprawdz_ustawienia_rolki_ig(v):
+    """Zmiany z panelu (dowolne pola) -> sprawdzone wartosci. ValueError po polsku. `profile` przyjmuje liste albo tekst
+    (po jednym @ w linii / po przecinku)."""
+    if not isinstance(v, dict):
+        raise ValueError("autopilot_rolki_ig musi byc slownikiem.")
+    wynik = {}
+    for k, x in v.items():
+        if k in ("wlaczone", "pobieranie_przez_apify"):
+            wynik[k] = bool(x)
+        elif k == "dziennie":
+            try:
+                n = int(x)
+            except (TypeError, ValueError):
+                raise ValueError("Rolek z IG dziennie: podaj liczbe (0 = nie pobieraj).")
+            if not 0 <= n <= MAX_DZIENNIE_IG:
+                raise ValueError(f"Rolek z IG dziennie: od 0 do {MAX_DZIENNIE_IG}.")
+            wynik[k] = n
+        elif k == "kandydatow_na_profil":
+            try:
+                n = int(x)
+            except (TypeError, ValueError):
+                raise ValueError("Kandydatow na profil: podaj liczbe.")
+            if not 1 <= n <= 50:
+                raise ValueError("Kandydatow na profil: od 1 do 50.")
+            wynik[k] = n
+        elif k == "profile":
+            lista = x if isinstance(x, list) else re.split(r"[\n,]+", str(x or ""))
+            wynik[k] = [h for h in dict.fromkeys(_handle_ig(s) for s in lista) if h]
+        elif k == "konto_obserwowanych":
+            wynik[k] = _handle_ig(x)
+        elif k == "do_person":
+            s = str(x or "round-robin").strip() or "round-robin"
+            if s != "round-robin" and s not in baza.lista_modelek():
+                raise ValueError(f"Nie ma persony '{s}'.")
+            wynik[k] = s
+        else:
+            raise ValueError(f"Nieznane ustawienie autopilot_rolki_ig.{k}.")
+    return wynik
+
+
+def persony_ig(u=None):
+    """Persony, do ktorych lecą pobrane rolki: 'round-robin' = wszystkie z referencjami; konkretny slug = tylko ta (gdy ma zdjecia)."""
+    u = u or ustawienia_rolki_ig()
+    wszystkie = baza.lista_modelek()
+    kand = [u["do_person"]] if (u["do_person"] != "round-robin" and u["do_person"] in wszystkie) else list(wszystkie)
+    return [s for s in kand if baza.sciezki_referencji(s)]
+
+
+def krok_rolki_ig(log=None, stop=None, teraz=None):
+    """Jeden krok autopilota: pobierz najnowsze rolki z profili IG (Apify), odsiej AI/heurystykami, dobre zapisz do
+    wrzutni person (skanuj je potem podejmie). Dzienny limit `dziennie` (osobny od generacji). STOP/wylaczenie konczy krok.
+    Zwraca {"stan": wylaczone|brak_klucza|gotowe|brak_person|brak_profili|pobrane|nic_nowego|blad, ...}."""
+    log = log or _log
+    u = ustawienia_rolki_ig()
+    if not u["wlaczone"] or u["dziennie"] <= 0:
+        return {"stan": "wylaczone"}
+    if not sekrety.klucz("apify"):
+        _wpis_raz("ig_brak_klucza", "uwaga", "Autopilot IG: pobieranie rolek wlaczone, ale brak klucza Apify - "
+                  "wklej go w Ustawienia -> Konta -> Apify.")
+        return {"stan": "brak_klucza"}
+    import instagram_rolki
+    pobrane = instagram_rolki.pobrane_z_dnia()
+    zostalo = u["dziennie"] - pobrane
+    if zostalo <= 0:
+        return {"stan": "gotowe", "pobrane": pobrane}
+    persony = persony_ig(u)
+    if not persony:
+        _wpis_raz("ig_brak_person", "uwaga", "Autopilot IG: nie ma do kogo zapisac rolek - zadna persona nie ma zdjec w referencje/.")
+        return {"stan": "brak_person"}
+    profile = list(u["profile"])
+    if u["konto_obserwowanych"]:
+        try:
+            from dostawcy import instagram
+            profile = list(dict.fromkeys(profile + instagram.obserwowani(u["konto_obserwowanych"])))
+        except Exception as e:
+            _wpis_raz("ig_obserwowani", "uwaga", f"Autopilot IG: {e}")
+    if not profile:
+        _wpis_raz("ig_brak_profili", "uwaga", "Autopilot IG: wklej @ profile tworczyn (Ustawienia -> Autopilot -> Rolki z Instagrama).")
+        return {"stan": "brak_profili"}
+    STAN["etap"], STAN["modelka"], STAN["opis"] = "rolki_ig", None, "pobieram rolki z IG"
+    try:
+        w = instagram_rolki.pobierz_filtruj_zapisz(profile, persony, limit=zostalo, na_profil=u["kandydatow_na_profil"],
+                                                   przez_apify=u["pobieranie_przez_apify"], uzyj_ai=True, log=log, stop=stop)
+    except dostawcy.BrakKlucza:
+        _wpis_raz("ig_brak_klucza", "uwaga", "Autopilot IG: brak klucza Apify.")
+        return {"stan": "brak_klucza"}
+    except dostawcy.BladDostawcy as e:
+        STAN["opis"] = ""
+        _wpis_raz("ig_blad", "uwaga", f"Autopilot IG: {e}")
+        return {"stan": "blad", "blad": str(e)}
+    n = len(w["zapisane"])
+    if n:
+        per = {}
+        for slug, _, _ in w["zapisane"]:
+            per[slug] = per.get(slug, 0) + 1
+        baza.dziennik_zapisz("ok", f"Autopilot IG: pobrano {n} nowych rolek ({', '.join(f'{_nazwa(s)}: {c}' for s, c in per.items())}); "
+                             f"odrzucone {len(w['odrzucone'])} z {w['kandydaci']} kandydatow. "
+                             f"AI: {'tak' if w['ai'] else 'tylko heurystyki'}.")
+    else:
+        log(f"Autopilot IG: nic nowego (kandydaci {w['kandydaci']}, odrzucone {len(w['odrzucone'])}, pominiete {w['pominiete']})")
+    STAN["opis"] = ""
+    return {"stan": "pobrane" if n else "nic_nowego", "nowe": n, "odrzucone": len(w["odrzucone"]),
+            "kandydaci": w["kandydaci"], "pominiete": w["pominiete"], "ai": w["ai"]}
+
+
+def stan_rolki_ig(wlaczony=None):
+    """Dla panelu (Start / Ustawienia -> Autopilot) i widgetu: {wlaczone, dziennie, dzis, profile, persony, stan, tekst}."""
+    u = ustawienia_rolki_ig()
+    import instagram_rolki
+    pobrane = instagram_rolki.pobrane_z_dnia()
+    persony = persony_ig(u)
+    wynik = {"wlaczone": u["wlaczone"], "dziennie": u["dziennie"], "dzis": pobrane, "profile": u["profile"],
+             "konto_obserwowanych": u["konto_obserwowanych"], "do_person": u["do_person"], "persony": persony,
+             "kandydatow_na_profil": u["kandydatow_na_profil"], "ma_klucz": bool(sekrety.klucz("apify")),
+             "pobieranie_przez_apify": u["pobieranie_przez_apify"]}
+    if not u["wlaczone"] or u["dziennie"] <= 0:
+        wynik.update(stan="wylaczone", tekst="Rolki z Instagrama: wyłączone (Ustawienia → Autopilot).")
+    elif not sekrety.klucz("apify"):
+        wynik.update(stan="brak_klucza", tekst="Rolki z Instagrama: wklej klucz Apify (Ustawienia → Konta).")
+    elif not u["profile"] and not u["konto_obserwowanych"]:
+        wynik.update(stan="brak_profili", tekst="Rolki z Instagrama: wklej @ profile twórczyń.")
+    elif not persony:
+        wynik.update(stan="brak_person", tekst="Rolki z Instagrama: żadna persona nie ma zdjęć.")
+    elif pobrane >= u["dziennie"]:
+        wynik.update(stan="gotowe", tekst=f"Rolki z Instagrama: dziś {pobrane} z {u['dziennie']} (gotowe)")
+    else:
+        wynik.update(stan="czeka", tekst=f"Rolki z Instagrama: dziś {pobrane} z {u['dziennie']}")
+    return wynik
+
+
 # ---------------- przebieg ----------------
 
 def przebieg(slug, log=None, stop=None):
@@ -901,6 +1067,15 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
     try:
         STAN["etap"] = "telefon"
         z_telefonu = obsluz_telegram(log)
+        if not tylko and not (stop is not None and stop.is_set()):
+            # rolki z IG (3.4): pobierz NAJPIERW, zeby skanuj w ponizszym przebiegu od razu je podjal; osobny dzienny licznik
+            try:
+                STAN["ig"] = krok_rolki_ig(log=log or _log, stop=stop)
+            except fabryka.Przerwano:
+                raise
+            except Exception as e:
+                (log or _log)(f"rolki z IG: {e}")
+                baza.dziennik_zapisz("blad", f"autopilot rolki z IG: {type(e).__name__}: {e}")
         do_zrobienia = list(modelki_z_autopilotem(tylko))
         # filmik przyslany z telefonu = "zrob to", nawet gdy ta persona nie ma wlaczonego autopilota
         for z in z_telefonu:
@@ -959,7 +1134,9 @@ def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
     while not stop.is_set():
         modelki = modelki_z_autopilotem(tylko)
         z_promptu = not tylko and ustawienia_z_promptu()["dziennie"] > 0      # rolki z promptu nie potrzebuja filmikow ani person z autopilot
-        if not modelki and not _telegram() and not z_promptu:
+        u_ig = ustawienia_rolki_ig()
+        ig = not tylko and u_ig["wlaczone"] and u_ig["dziennie"] > 0          # pobieranie rolek z IG tez nie potrzebuje person z autopilot
+        if not modelki and not _telegram() and not z_promptu and not ig:
             log("zadna modelka nie ma autopilot=true - czekam 5 min")
         else:
             try:

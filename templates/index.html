@@ -178,6 +178,7 @@
               </div>
               <div class="autopilot-status" id="autopilot-status">—</div>
               <div class="autopilot-z-promptu" id="autopilot-z-promptu"></div>
+              <div class="autopilot-z-promptu" id="autopilot-rolki-ig"></div>
               <div class="autopilot-telefon" id="autopilot-telefon"></div>
               <div class="rzad" data-zaawansowane>
                 <button class="btn btn-maly" type="button" data-akcja="autopilot-raz">Jeden przebieg autopilota teraz</button>
@@ -804,6 +805,24 @@
                 </div>
                 <div class="pole"><span class="etykieta-pola">Persony – na zmianę, po kolei</span><div class="g-zp-persony" id="g-zp-persony"></div><small class="pole-info">Nic nie zaznaczone = wszystkie, które mają zdjęcia. Robi tylko wtedy, gdy autopilot jest włączony (Start).</small></div>
                 <p class="muted" id="g-zp-stan"></p>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </div>
+            </form>
+            <!-- rolki z Instagrama jako źródło klipów do swapa (3.4) - wspólne dla wszystkich person (ustawienia_globalne.json) -->
+            <form class="sekcja-tresc" data-ustawienia-globalne novalidate id="form-rolki-ig">
+              <div class="podsekcja">
+                <h3>Rolki z Instagrama – źródło klipów do podmiany</h3>
+                <p class="muted">Autopilot sam ściąga <b>najnowsze rolki z publicznych profili twórczyń</b> (przez Apify – scrape po ich stronie, <b>bez logowania na Twoje konto</b>, omija VPN). AI odsiewa słabe (ma być jedna kobieta, kadr pionowy, bez napisów, widać ruch), dobre lądują w „tu wrzucasz rolki” danej persony – i stamtąd robi się z nich zwykły character swap. Klucz Apify wklejasz w <a href="#ustawienia/konta">Konta</a>.</p>
+                <label class="check"><input type="checkbox" name="autopilot_rolki_ig.wlaczone"><span>Pobieraj rolki z Instagrama<small>Domyślnie wyłączone. Włącz dopiero po wklejeniu klucza Apify.</small></span></label>
+                <div class="pole szerokie"><label for="g-ig-profile">Profile twórczyń (@, po jednym w linii)</label><textarea id="g-ig-profile" name="autopilot_rolki_ig.profile" rows="4" placeholder="np.&#10;ktosik&#10;@innaosoba"></textarea><small class="pole-info">Publiczne profile, z których bierzemy najnowsze rolki. Bierzemy tylko filmy (reele), nie zdjęcia.</small></div>
+                <div class="pola-siatka">
+                  <div class="pole"><label for="g-ig-dziennie">Ile rolek dziennie (łącznie)</label><input type="number" id="g-ig-dziennie" name="autopilot_rolki_ig.dziennie" min="0" max="50" data-domyslne="3"><small class="pole-info">Razem dla wszystkich person. 0 = nie pobieraj.</small></div>
+                  <div class="pole"><label for="g-ig-kand">Kandydatów na profil</label><input type="number" id="g-ig-kand" name="autopilot_rolki_ig.kandydatow_na_profil" min="1" max="50" data-domyslne="5"><small class="pole-info">Ile najnowszych postów z profilu sprawdzić (przed odsianiem).</small></div>
+                  <div class="pole"><label for="g-ig-do-person">Do której persony</label><select id="g-ig-do-person" name="autopilot_rolki_ig.do_person"></select><small class="pole-info">„Po kolei” = rozkłada równo po personach, które mają zdjęcia.</small></div>
+                </div>
+                <div class="pole szerokie" data-zaawansowane><label for="g-ig-konto">Albo @ konto – odczytam, kogo obserwuje</label><input type="text" id="g-ig-konto" name="autopilot_rolki_ig.konto_obserwowanych" placeholder="np. @twojekonto"><small class="pole-info">Instagram pokazuje listę obserwowanych tylko po zalogowaniu, więc zwykle to nie zadziała – wtedy po prostu wklej profile wyżej ręcznie.</small></div>
+                <label class="check" data-zaawansowane><input type="checkbox" name="autopilot_rolki_ig.pobieranie_przez_apify"><span>Pobieraj sam plik przez Apify (gdy CDN Instagrama nie działa przez VPN)<small>Rozwiązanie awaryjne – NIESPRAWDZONE. Domyślnie wyłączone. Włącz, jeśli w logu widzisz „nie mogę pobrać pliku z CDN IG”.</small></span></label>
+                <p class="muted" id="g-ig-stan"></p>
                 <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
               </div>
             </form>
