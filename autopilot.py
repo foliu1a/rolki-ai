@@ -903,7 +903,7 @@ def krok_rolki_ig(log=None, stop=None, teraz=None):
                              f"AI: {'tak' if w['ai'] else 'tylko heurystyki'}.")
     else:
         log(f"Autopilot IG: nic nowego (kandydaci {w['kandydaci']}, odrzucone {len(w['odrzucone'])}, pominiete {w['pominiete']})")
-    STAN["opis"] = ""
+    STAN["opis"] = f"pobieram rolki z IG: {n} nowych" if n else "IG: nic nowego"    # dla widgetu (claudzik/jarvis/widget.py)
     return {"stan": "pobrane" if n else "nic_nowego", "nowe": n, "odrzucone": len(w["odrzucone"]),
             "kandydaci": w["kandydaci"], "pominiete": w["pominiete"], "ai": w["ai"]}
 
