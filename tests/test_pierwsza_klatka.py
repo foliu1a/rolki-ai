@@ -2,8 +2,9 @@
 """3.5: pierwsza klatka (start frame) rolek z promptu - udawane CLI Higgsfield i udawany OpenRouter, zero kredytow i sieci.
 Prompt klatki (persona daleko, polskie realia, ceny z przecinkiem, bez marek i slow ryzykownych, tla usera jako baza),
 wycena laczna (wideo + klatka), klatka -> wideo ze start_image + zdjecia persony, kontrola AI (max 2 dodatkowe klatki) i bez
-OpenRouter, wznowienie bierze TE SAMA klatke, klatka wylaczona = stary sposob, Wan = sama klatka, NSFW klatki = bez wideo,
-bezpieczniki, autopilot dokancza w_toku person bez autopilota, panel."""
+OpenRouter, wznowienie bierze TE SAMA klatke, klatka wylaczona = stary sposob, NSFW klatki = bez wideo,
+bezpieczniki, autopilot dokancza w_toku person bez autopilota, panel. 3.5.2: Wan/Gemini = tlo (zdjecie samego miejsca) jako
+ostatnia referencja + zdjecia persony, bez start_image; prompt tla bez bohaterki; kontrola tla; Seedance 480p."""
 import os
 import re
 
@@ -63,10 +64,11 @@ def ai(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.setattr(instagram_rolki, "modele_vision", lambda: ["darmowy/vision:free"])
     monkeypatch.setattr(pierwsza_klatka, "_jpg_data_url", lambda plik: "data:image/jpeg;base64,AAAA")
-    stan = {"oceny": [], "pytania": []}
+    stan = {"oceny": [], "pytania": [], "tresci": []}
 
-    def zapytaj(model, data_url):
+    def zapytaj(model, data_url, pytanie=None):
         stan["pytania"].append(model)
+        stan["tresci"].append(pytanie)          # 3.5.2: None = pytanie o klatke, PYTANIE_TLA = zdjecie samego miejsca
         return stan["oceny"].pop(0) if stan["oceny"] else {"ok": True, "powod": "daleko, napisy po polsku"}
     monkeypatch.setattr(pierwsza_klatka, "_zapytaj_vision", zapytaj)
     return stan
@@ -345,14 +347,167 @@ def test_klatka_wylaczona_stary_sposob(slug, ceny, cli):
     assert fabryka.wycena_z_promptu(slug, dict(OPCJE, klatka="wyl"))["klatka"] is None
 
 
-def test_wan_z_klatka_sama_klatka_bez_zdjec(slug, ceny, cli):
+def test_wan_tlo_jako_ostatnia_referencja_bez_start_image(slug, ceny, cli):
+    # 3.5.2 (platny test #9: "w ogole nie podobna"): Wan ze start_image nie dostawal zdjec persony -> teraz zdjecie SAMEGO
+    # miejsca (tlo) jako OSTATNI obraz w image_references, przed nim zdjecia persony; start_image nie idzie wcale
     opcje = dict(OPCJE, model="wan3_0_prime")
     w, pid = _zrob(slug, opcje)
-    assert w["kr"] == 33 and any("twarz w wideo bierze tylko z klatki" in u for u in w["ostrzezenia"])
+    assert w["kr"] == 33 and w["kr_wideo"] == 30 and w["kr_klatka"] == 2.75 and w["klatka"]["tryb"] == "tlo"
+    assert w["klatka"]["obrazy"] == [] and not any("tylko z klatki" in u for u in w["ostrzezenia"])
+    assert any("najpierw zdjecie samego miejsca" in u for u in w["ostrzezenia"])
+    zatwierdzone = []
+    wynik = fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: zatwierdzone.append(k) or k <= 33)
+    assert wynik["wygenerowane"] == 1 and zatwierdzone == [33]
+    (m_kl, par_kl, med_kl), = _obrazy(cli)
+    assert m_kl == "gpt_image_2_5" and "image" not in med_kl and "Noemi" not in par_kl["prompt"]
+    assert "nobody stands there yet" in par_kl["prompt"] and "'4,99 zł'" in par_kl["prompt"]
+    p = baza.pomysl(slug, pid)
+    plik_tla = p["klatka"]["plik"]
+    assert os.path.basename(plik_tla) == f"{pid:03d}_prompt_sklep_osiedlowy.tlo.png" and os.path.isfile(plik_tla)
+    (m, par, med), = _wideo(cli)
+    assert m == "wan3_0_prime" and "start_image" not in med and par.get("mode") is None
+    assert med["image"] == ["uuid-01_twarz.png", "uuid-02_sylwetka.jpg", "uuid-" + os.path.basename(plik_tla)]
+    pr = par["prompt"]
+    assert "Noemi is the young woman shown in reference images 1 and 2" in pr
+    assert "the last reference image (image 3)" in pr and "Take only the place from image 3" in pr
+    assert "continues EXACTLY from the start" not in pr and "6-10 m away" in pr and "do not invent new signs" in pr
+    assert p["status"] == "gotowe" and p["koszt"] == 33 and baza.wydano_dzis("higgsfield") == 33
+    assert p["klatka"]["proby"][0]["job_id"] == "job1" and p["job_id"] == "job2"
+
+
+@pytest.mark.parametrize("miejsce", sorted(scenariusz.MIEJSCA))
+def test_prompt_tla_bez_bohaterki_kazde_miejsce(slug, miejsce):
+    sc = scenariusz.zbuduj(slug, dict(OPCJE, model="wan3_0_prime", miejsce=miejsce, stroj="odwazny"))
+    kl = sc["klatka"]
+    t = kl["prompt"]
+    assert kl["tryb"] == "tlo" and kl["obrazy"] == [] and kl["refy_w_wideo"] and kl["mode_wideo"] is None
+    assert "Noemi" not in t and "young woman" not in t and "her hair" not in t and "m behind her" not in t
+    assert "It shows only the place itself" in t and "nobody stands there yet" in t and "never with a dot" in t
+    assert zdjecia_swap.slowa_ryzykowne(t) == [], (miejsce, zdjecia_swap.slowa_ryzykowne(t))
+    norm = scenariusz._bez_ogonkow(t).lower()
+    assert [m for m in scenariusz.MARKI if re.search(r"(?<![a-z])" + re.escape(m), norm)] == []
+    napisy = scenariusz.KLATKA_MIEJSC[miejsce][1]
+    assert napisy[0] in t                                           # polskie napisy miejsca jak w klatce
+
+
+def test_prompt_wan_tla_bez_slow_ryzykownych(slug):
+    # sylwetka persony w fixturze ma "butt" (lista SLOWA_RYZYKOWNE) - prompt Wan w trybie tla zamienia je jak klatka
+    for kamera in ("kolejka", "idzie_za", "zza_filaru"):
+        sc = scenariusz.zbuduj(slug, dict(OPCJE, model="wan3_0_prime", kamera=kamera, stroj="odwazny",
+                                          pomysl_id="sklep_osiedlowy"))
+        assert zdjecia_swap.slowa_ryzykowne(sc["prompt"]) == [], (kamera, zdjecia_swap.slowa_ryzykowne(sc["prompt"]))
+        assert any("W prompcie wideo zamienilem slowa" in u and "butt" in u for u in sc["ostrzezenia"])
+        assert "big round bottom" in sc["prompt"] and scenariusz.AKCJA_JEDNO_UJECIE.strip() in sc["prompt"]
+    for tekst in (scenariusz.KAMERA_TLO_KROTKA, scenariusz.SZABLON_KROTKI_TLO, scenariusz.TLO_SCENA,
+                  pierwsza_klatka.PYTANIE_TLA):
+        assert zdjecia_swap.slowa_ryzykowne(tekst) == [], tekst[:60]
+
+
+def test_kontrola_tla_osobne_pytanie_zla_robi_nowe_tlo(slug, ceny, cli, ai):
+    ai["oceny"] = [{"ok": False, "powod": "na srodku stoi dziewczyna"}]
+    w, pid = _zrob(slug, dict(OPCJE, model="wan3_0_prime"))
+    assert w["kr"] == 33 and w["kr_max"] == 30 + 3 * 3
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
+    assert len(_obrazy(cli)) == 2 and len(_wideo(cli)) == 1
+    assert ai["tresci"] == [pierwsza_klatka.PYTANIE_TLA] * 2           # pytanie o tlo, nie o klatke z persona
+    for musi in ("NIE ma na nim głównej bohaterki", "w tle", "prawdziwe miejsce w Polsce", "„4,99 zł”", "zdjęcie z telefonu"):
+        assert musi in pierwsza_klatka.PYTANIE_TLA, musi
+    st = baza.pomysl(slug, pid)["klatka"]
+    assert st["plik"].endswith(".tlo-2.png") and st["ok"] is True and st["kr"] == 6
+    assert _wideo(cli)[0][2]["image"][-1] == "uuid-" + os.path.basename(st["plik"])
+    assert baza.pomysl(slug, pid)["koszt"] == 36 and baza.wydano_dzis("higgsfield") == 36
+
+
+def test_wan_wideo_przerwane_i_ponow_biora_to_samo_tlo(slug, ceny, cli):
+    w, pid = _zrob(slug, dict(OPCJE, model="wan3_0_prime"))
+    cli.wyniki = [None, {"status": "in_progress"}]          # tlo OK, wideo sie robi dluzej niz czekamy
+    wynik = fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True, timeout="0s")
+    p = baza.pomysl(slug, pid)
+    plik_tla = p["klatka"]["plik"]
+    assert wynik["w_toku"] == [pid] and p["w_toku"]["job_id"] == "job2" and p["w_toku"].get("faza") is None
+    assert p["w_toku"]["klatka_id"] == "uuid-" + os.path.basename(plik_tla) and p["w_toku"]["koszt"] == 30
+    cli.serwer["job2"] = {"id": "job2", "status": "failed", "error": "server", "job_type": "wan3_0_prime"}
+    fabryka.wznow_w_toku(slug)
+    assert baza.pomysl(slug, pid)["status"] == "blad" and len(cli.generacje) == 2      # TEN job, bez nowego wysylania
+    # "Sprobuj jeszcze raz": to samo tlo (bez nowego zdjecia i bez oplaty za nie), wideo jeszcze raz za 30 kr
+    klient = panel.app.test_client()
+    panel.konsola.__init__()
+    assert klient.post(f"/api/pomysly/{pid}/ponow").get_json()["ok"]
+    zatwierdzone = []
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: zatwierdzone.append(k) or True)
+    assert zatwierdzone == [30] and len(_obrazy(cli)) == 1 and len(_wideo(cli)) == 2
+    assert _wideo(cli)[1][2]["image"][-1] == "uuid-" + os.path.basename(plik_tla) and "start_image" not in _wideo(cli)[1][2]
+    assert baza.pomysl(slug, pid)["status"] == "gotowe" and baza.pomysl(slug, pid)["klatka"]["plik"] == plik_tla
+
+
+def test_wan_przerwane_wysylanie_tla_i_wideo_szuka_joba_nie_wysyla_drugi_raz(slug, ceny, cli, monkeypatch):
+    w, pid = _zrob(slug, dict(OPCJE, model="wan3_0_prime"))
+    prawdziwe, listy = cli.generuj, []
+
+    def z_bledem(model, params=None, media=None, wait=True, **k):
+        prawdziwe(model, params, media, wait=wait)          # job POWSTAL...
+        raise higgsfield_cli.HiggsfieldBlad("timeout po wyslaniu")     # ...a CLI zwrocilo blad
+    monkeypatch.setattr(higgsfield_cli, "generuj", z_bledem)
+    monkeypatch.setattr(higgsfield_cli, "joby", lambda typ=None, ile=20: listy.append(typ) or cli.joby(typ, ile))
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True, timeout="0s")
+    # tlo bez zadnych zdjec (brak obraz_id) odnalezione po prompcie na liscie obrazow, wideo po id swiezo wgranego tla
+    assert len(_obrazy(cli)) == 1 and len(_wideo(cli)) == 1 and baza.pomysl(slug, pid)["status"] == "gotowe"
+    assert "image" in listy and "video" in listy
+
+
+def test_wan_twoje_zdjecie_miejsca_jako_tlo_bez_generowania(slug, ceny, cli):
+    from PIL import Image
+    folder = os.path.join(pierwsza_klatka.folder_tel(), "sklep_osiedlowy")
+    os.makedirs(folder)
+    tlo = os.path.join(folder, "IMG_0002.jpg")
+    Image.new("RGB", (60, 100), (200, 200, 200)).save(tlo, "JPEG")
+    w, pid = _zrob(slug, dict(OPCJE, model="wan3_0_prime"))
+    assert w["kr"] == 30 and w["kr_klatka"] == 0 and w["klatka"]["tlo"] == "IMG_0002.jpg" and w["klatka"]["obrazy"] == []
+    zp = baza.pomysl(slug, pid)["z_promptu"]
+    assert zp["klatka"]["tlo"] != tlo and zp["klatka"]["obrazy"] == [] and zp["wycena_wideo"] == 30
+    zatwierdzone = []
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: zatwierdzone.append(k) or True)
+    assert zatwierdzone == [30] and _obrazy(cli) == []                 # kopia zdjecia usera = tlo, nic do generowania
+    (m, par, med), = _wideo(cli)
+    assert "start_image" not in med and med["image"][-1] == "uuid-" + os.path.basename(zp["klatka"]["tlo"])
+    assert baza.pomysl(slug, pid)["status"] == "gotowe" and baza.wydano_dzis("higgsfield") == 30
+
+
+def test_gemini_tez_tlo_jako_referencja(slug, ceny, cli):
+    w, pid = _zrob(slug, dict(OPCJE, model="gemini_omni_flash_1_1"))
+    assert w["klatka"]["tryb"] == "tlo" and w["kr"] == 33
     fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
     (m, par, med), = _wideo(cli)
-    assert m == "wan3_0_prime" and "image" not in med and ".klatka" in med["start_image"] and par.get("mode") is None
-    assert "continues EXACTLY from the start image" in par["prompt"]
+    assert m == "gemini_omni_flash_1_1" and par["mode"] == "reference-to-video" and "start_image" not in med
+    assert len(med["image"]) == 3 and med["image"][-1].endswith(".tlo.png")
+
+
+def test_seedance_480p_wariant_wycena_listy_i_start_image(slug, cli, monkeypatch):
+    # 3.5.2: "Seedance 2.5 · 480p · 10 s" - twarz pewna (start_image + zdjecia persony jak Seedance 720p), tanio, mniej ostre
+    def koszt(model, params=None, media=None):
+        if model == "seedance_2_5":
+            return {"480p": 30, "720p": 70, "1080p": 120}[params["resolution"]]
+        return CENY.get(model, 45)
+    monkeypatch.setattr(higgsfield_cli, "koszt", lambda m, p=None, me=None: int(koszt(m, p, me)))
+    monkeypatch.setattr(higgsfield_cli, "koszt_dokladny", koszt)
+    w, pid = _zrob(slug, dict(OPCJE, model="seedance_2_5_480p", dlugosc=15, rozdzielczosc="720p"))
+    assert w["model"] == "seedance_2_5" and w["rozdzielczosc"] == "480p" and w["dlugosc"] == 10
+    assert w["kr_wideo"] == 30 and w["kr"] == 33 and w["klatka"]["tryb"] == "start"
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: k <= 33)
+    (m, par, med), = _wideo(cli)
+    assert m == "seedance_2_5" and par["resolution"] == "480p" and par["duration"] == 10 and par["mode"] == "omni_reference"
+    assert ".klatka" in med["start_image"] and len(med["image"]) == 2 and baza.pomysl(slug, pid)["status"] == "gotowe"
+    # listy: Z promptu (katalog), autopilot (Start/Ustawienia), panel; asystent przyjmuje wariant jako reczny wybor
+    kat = scenariusz.katalog(slug)
+    assert [x["id"] for x in kat["modele"]][:2] == ["seedance_2_5", "seedance_2_5_480p"]
+    m480 = kat["modele"][1]
+    assert m480["rozdzielczosci"] == ["480p"] and m480["dlugosci"] == [10] and "mniej ostre" in m480["opis"]
+    assert autopilot.MODELE_Z_PROMPTU["seedance_2_5_480p"]["model"] == "seedance_2_5"
+    folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert 'value="seedance_2_5_480p"' in open(os.path.join(folder, "templates", "index.html"), encoding="utf-8").read()
+    import asystent
+    a = asystent.dobierz(slug, "Noemi kupuje hot-doga", zablokowane={"model": "seedance_2_5_480p"}, uzyj_llm=False)
+    assert a["opcje"]["model"] == "seedance_2_5_480p" and a["opcje"]["dlugosc"] == 10 and "Seedance 2.5 · 480p" in a["podsumowanie"]
 
 
 def test_model_klatki_do_wyboru_i_zly_model(slug, ceny):

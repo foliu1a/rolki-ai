@@ -12,7 +12,10 @@ sie w DWOCH krokach:
      Opcjonalna kontrola klatki darmowym modelem wizyjnym OpenRouter (wzor instagram_rolki.py) -> {ok, powod}; zla = nowa klatka,
      max `max_dodatkowych` (2) dodatkowe proby, kazda platna (~3 kr) i liczona w budzecie. Bez klucza OpenRouter - bez kontroli.
   2) wideo (fabryka._rolka) = Seedance 2.5 omni_reference + start_image (klatka) + image_references (zdjecia persony - tozsamosc).
-     Wan 3.0 Prime / Gemini: start_image NIE laczy sie z referencjami (regula `model get`) - twarz tylko z klatki.
+     Wan 3.0 Prime / Gemini: start_image NIE laczy sie z referencjami (regula `model get`), wiec (3.5.2, platny test #9 "w ogole
+     nie podobna") tryb "tlo": krok 1 robi ZDJECIE SAMEGO MIEJSCA bez persony (scenariusz.prompt_tla, bez zdjec, plik
+     NNN_<nazwa>.tlo.png; zdjecie usera z tla/<miejsce> = gotowe tlo, 0 kr), krok 2 = image_references: zdjecia persony (+ stroj)
+     + tlo jako OSTATNI obraz, bez start_image. Kontrola AI tla: osobne pytanie (PYTANIE_TLA - brak bohaterki, ludzie w tle ok).
 
 Pieniadze jak wszedzie: znacznik w_toku (faza "klatka") PRZED wyslaniem, wszystko wgrane przed 'wysylam' (pierwszy obraz swiezym
 uploadem = obraz_id do odnalezienia joba na `generate list --image`), create bez --wait, job_id zapisany od razu, NIGDY drugi
@@ -61,6 +64,18 @@ PYTANIE_OCENY = (
     "(2) jest dokładnie JEDNA wyraźna postać tej kobiety (nie dwie takie same); (3) napisy, które da się przeczytać, są poprawnym "
     "polskim (bez bełkotu, literówek i wymyślonych słów), ceny z przecinkiem jak „4,99 zł” – drobne, nieczytelne z daleka napisy "
     "są w porządku; (4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama. "
+    'Odpowiedz TYLKO obiektem JSON: {"ok": true/false, "powod": "krótko po polsku, max 100 znaków"}.'
+)
+# 3.5.2: kontrola zdjecia SAMEGO miejsca (tryb tla, Wan/Gemini) - bohaterki ma NIE byc, ludzie w tle sa w porzadku
+SYSTEM_OCENY_TLA = ("You check a background photo (only the place, before the main person is added) used as a reference for an "
+                    "expensive hidden-camera phone video. Answer in Polish.")
+PYTANIE_TLA = (
+    "To zdjęcie samego miejsca (tło), z którego zrobimy wideo z ukrycia – bohaterkę dodamy dopiero w wideo. Oceń je. DOBRE tło: "
+    "(1) wygląda jak prawdziwe miejsce w Polsce (polskie realia, nie wymyślone wnętrze ani render); (2) NIE ma na nim głównej "
+    "bohaterki – nikt nie stoi na pierwszym planie ani w centrum uwagi, nikt nie pozuje i nie jest wyeksponowany; zwykli ludzie "
+    "w tle, przy bokach albo za ladą są w porządku; (3) napisy, które da się przeczytać, są poprawnym polskim (bez bełkotu, "
+    "literówek i wymyślonych słów), ceny z przecinkiem jak „4,99 zł” – drobne, nieczytelne z daleka napisy są w porządku; "
+    "(4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama. "
     'Odpowiedz TYLKO obiektem JSON: {"ok": true/false, "powod": "krótko po polsku, max 100 znaków"}.'
 )
 
@@ -200,12 +215,26 @@ def stan(p):
     return dict(p.get("klatka")) if isinstance((p or {}).get("klatka"), dict) else {}
 
 
+def tryb_tla(kl):
+    """3.5.2: konfiguracja klatki w trybie "tlo" (Wan/Gemini): zdjecie SAMEGO miejsca jako ostatnia referencja wideo."""
+    return isinstance(kl, dict) and kl.get("tryb") == "tlo"
+
+
+def co_to(kl):
+    """Nazwa kroku do dziennika: 'zdjecie tla' (tryb tla) albo 'pierwsza klatka'."""
+    return "zdjecie tla" if tryb_tla(kl) else "pierwsza klatka"
+
+
 def gotowa(p):
-    """Sciezka klatki, ktora moze isc do wideo (przeszla kontrole, bez kontroli albo user ja zaakceptowal) - albo None."""
+    """Sciezka klatki, ktora moze isc do wideo (przeszla kontrole, bez kontroli albo user ja zaakceptowal) - albo None.
+    3.5.2: w trybie tla zdjecie usera z tla/<miejsce> (kopia bez EXIF) jest gotowym tlem - nic do generowania (0 kr)."""
     st = stan(p)
     plik = st.get("plik")
     if plik and os.path.isfile(plik) and (st.get("ok") is not False or st.get("zaakceptowana")):
         return plik
+    kl = konfiguracja(p)
+    if tryb_tla(kl) and kl.get("tlo") and os.path.isfile(kl["tlo"]):
+        return kl["tlo"]
     return None
 
 
@@ -240,6 +269,7 @@ def wycena_rolki(p, k_wideo, swieza=False):
 
 
 def _plik_klatki(slug, p, nr, url):
+    """NNN_<nazwa>.klatka.png - albo (3.5.2, tryb tla) NNN_<nazwa>.tlo.png; kolejne proby z -2, -3."""
     import fabryka
     rozsz = os.path.splitext(str(url or "").split("?")[0])[1].lower()
     if rozsz == ".jpeg":
@@ -247,7 +277,8 @@ def _plik_klatki(slug, p, nr, url):
     if rozsz not in (".png", ".jpg", ".webp"):
         rozsz = ".png"
     dopisek = "" if nr <= 1 else f"-{nr}"
-    return os.path.join(baza.folder_wynikow(slug), f"{int(p['id']):03d}_{fabryka._nazwa_wyniku(p)}.klatka{dopisek}{rozsz}")
+    rodzaj = "tlo" if tryb_tla(konfiguracja(p)) else "klatka"
+    return os.path.join(baza.folder_wynikow(slug), f"{int(p['id']):03d}_{fabryka._nazwa_wyniku(p)}.{rodzaj}{dopisek}{rozsz}")
 
 
 def _zapisz_stan(slug, pid, **pola):
@@ -315,13 +346,15 @@ def _jpg_data_url(plik):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _zapytaj_vision(model, data_url):
-    """Jedno zapytanie do OpenRouter -> {"ok", "powod"} (seam do podmiany w testach). Wzor: instagram_rolki._zapytaj_vision."""
+def _zapytaj_vision(model, data_url, pytanie=None):
+    """Jedno zapytanie do OpenRouter -> {"ok", "powod"} (seam do podmiany w testach). Wzor: instagram_rolki._zapytaj_vision.
+    pytanie = PYTANIE_TLA (3.5.2, zdjecie samego miejsca) albo None = pytanie o pierwsza klatke."""
     import instagram_rolki as ig
+    tla = pytanie == PYTANIE_TLA
     odp = ig._http_json("POST", ig.LLM_API + "/chat/completions", {
         "model": model,
-        "messages": [{"role": "system", "content": SYSTEM_OCENY},
-                     {"role": "user", "content": [{"type": "text", "text": PYTANIE_OCENY},
+        "messages": [{"role": "system", "content": SYSTEM_OCENY_TLA if tla else SYSTEM_OCENY},
+                     {"role": "user", "content": [{"type": "text", "text": pytanie or PYTANIE_OCENY},
                                                   {"type": "image_url", "image_url": {"url": data_url}}]}],
         "temperature": 0.1, "max_tokens": ig.MAX_TOKENOW_VISION})
     if isinstance(odp, dict) and odp.get("error"):
@@ -336,9 +369,10 @@ def _zapytaj_vision(model, data_url):
     return {"ok": bool(w["ok"]), "powod": str(w.get("powod") or "")[:200]}
 
 
-def ocen(plik, log=None):
+def ocen(plik, log=None, tlo=False):
     """Kontrola klatki: ({"ok", "powod", "zrodlo"}, "") albo (None, czemu bez kontroli) - brak klucza OpenRouter, blad AI, plik
-    nie do otwarcia. 0 kr (darmowe modele)."""
+    nie do otwarcia. 0 kr (darmowe modele). tlo=True (3.5.2): zdjecie SAMEGO miejsca - prawdziwe polskie miejsce, napisy po
+    polsku, BRAK glownej bohaterki (ludzie w tle ok), ujecie z telefonu."""
     if not sekrety.klucz("openrouter"):
         return None, "brak klucza OpenRouter (Ustawienia -> Konta)"
     try:
@@ -347,7 +381,8 @@ def ocen(plik, log=None):
         return None, f"nie umiem otworzyc klatki ({e})"
     import instagram_rolki as ig
     # 3.5.1: ta sama dynamiczna lista darmowych modeli wizyjnych co filtr rolek z IG (404 "unavailable for free" = nastepny)
-    w, bledy = ig.ocen_vision(lambda m, d: _zapytaj_vision(m, d), data_url, log=log)
+    zapytaj = (lambda m, d: _zapytaj_vision(m, d, PYTANIE_TLA)) if tlo else (lambda m, d: _zapytaj_vision(m, d))
+    w, bledy = ig.ocen_vision(zapytaj, data_url, log=log)
     if w is None:
         return None, "AI niedostepne (" + bledy[:200] + ")"
     return w, ""
@@ -422,11 +457,11 @@ def _wyslij(slug, pid, d, kl, nr, k_wideo, log):
             if powod_odrz in fabryka.POWODY_ZAPASU:
                 raise NieWyszla(f"pierwsza klatka odrzucona przez filtr Higgsfield ({powod_odrz}): {blad}", powod_odrz)
             if marker.get("wysylam") and not fabryka._blad_trwaly(blad):
-                job = _szukaj(slug, pid, d, marker, blad, log)
+                job = _szukaj(slug, pid, d, marker, blad, log, prompt=kl.get("prompt"))
             else:
                 raise NieWyszla(f"pierwsza klatka nie poszla ({str(blad)[:200]}) - nic nie zeszlo")
         baza.ustaw_w_toku(slug, pid, job_id=job["job_id"], etap="czeka", wyslano=fabryka._teraz_iso())
-        _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka nr {nr} wyslana ({MODELE.get(kl['model'], {}).get('nazwa', kl['model'])}, "
+        _zdarzenie(log, slug, "info", f"#{pid}: {co_to(kl)} nr {nr} {'wyslane' if tryb_tla(kl) else 'wyslana'} ({MODELE.get(kl['model'], {}).get('nazwa', kl['model'])}, "
                    f"~{k} kr), job {job['job_id']}", pomysl=pid)
         return job, kl_lim
     finally:
@@ -434,14 +469,25 @@ def _wyslij(slug, pid, d, kl, nr, k_wideo, log):
             fabryka._WYSYLANIE.discard((slug, pid))
 
 
-def _szukaj(slug, pid, d, marker, blad, log):
-    """Create zwrocil blad po 'wysylam' - job MOGL powstac: szukamy go po obraz_id (po 5 s i 15 s). Nie ma -> JobTrwa (NIGDY
-    drugie wysylanie)."""
+def _znajdz_job(d, marker, prompt=None):
+    """Job klatki z przerwanego wysylania: po obraz_id (swiezo wgrany 1. obraz) albo - 3.5.2, zdjecie tla bez zadnych zdjec - po
+    prompcie i czasie na liscie jobow obrazu, z pominieciem jobow znanych fabryce. None = nie widac. Rzuca BladDostawcy."""
+    if marker.get("obraz_id"):
+        return d.znajdz(marker.get("model") or "", obraz_id=marker["obraz_id"])
+    if prompt:
+        return d.znajdz(marker.get("model") or "", prompt=prompt, od=marker.get("wysylam_od") or marker.get("od"),
+                        pomin=baza.znane_job_id(d.NAZWA), typ="image")
+    return None
+
+
+def _szukaj(slug, pid, d, marker, blad, log, prompt=None):
+    """Create zwrocil blad po 'wysylam' - job MOGL powstac: szukamy go po obraz_id albo prompcie (po 5 s i 15 s). Nie ma ->
+    JobTrwa (NIGDY drugie wysylanie)."""
     import fabryka
     for pauza in (5, 15):
         time.sleep(pauza)
         try:
-            znaleziony = d.znajdz(marker.get("model") or "", obraz_id=marker.get("obraz_id")) if marker.get("obraz_id") else None
+            znaleziony = _znajdz_job(d, marker, prompt)
         except dostawcy.BladDostawcy as e:
             log(f"#{pid}: nie moge sprawdzic listy jobow ({e})")
             break
@@ -454,9 +500,10 @@ def _szukaj(slug, pid, d, marker, blad, log):
     raise fabryka.JobTrwa("nie wiadomo, czy job klatki powstal")
 
 
-def _wznow(slug, pid, d, marker, log):
+def _wznow(slug, pid, d, marker, log, prompt=None):
     """Znacznik faza 'klatka' sprzed restartu/STOP/limitu czasu: TEN job (albo szukanie go). Zwraca (gotowy job | None, job_id).
-    Rzuca WrocDoKolejki (nic nie poszlo), fabryka.JobTrwa (czekamy dalej), NieWyszla (niepewne po 60 min - 'sprawdz w apce')."""
+    Rzuca WrocDoKolejki (nic nie poszlo), fabryka.JobTrwa (czekamy dalej), NieWyszla (niepewne po 60 min - 'sprawdz w apce').
+    prompt (3.5.2): zdjecie tla bez zadnych zdjec nie ma obraz_id - szukamy joba po prompcie."""
     import fabryka
     jid = marker.get("job_id")
     kl_lim = int(marker.get("koszt_klatki") or 0)
@@ -482,7 +529,7 @@ def _wznow(slug, pid, d, marker, log):
         raise WrocDoKolejki()
     wiek = fabryka._wiek_s(marker.get("wysylam_od") or marker.get("od"))
     try:
-        znaleziony = d.znajdz(marker.get("model") or "", obraz_id=marker["obraz_id"]) if marker.get("obraz_id") else None
+        znaleziony = _znajdz_job(d, marker, prompt)
     except dostawcy.BladDostawcy as e:
         if wiek is not None and wiek > fabryka.MAX_GODZIN_W_TOKU * 3600:
             _niepewne(slug, pid, marker, f"od {fabryka.MAX_GODZIN_W_TOKU} h nie da sie sprawdzic listy jobow: {e}")
@@ -627,7 +674,7 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
         st = stan(baza.pomysl(slug, pid))
         if marker:
             kl_akt = _wariant(kl, marker.get("model") or kl["model"])      # wznowienie: TEN job (takze klatki z zapasu)
-            gotowy_job, jid = _wznow(slug, pid, d, marker, log)
+            gotowy_job, jid = _wznow(slug, pid, d, marker, log, prompt=kl_akt.get("prompt"))
             kl_lim = int(marker.get("koszt_klatki") or 0) or do_limitu(kl_akt.get("wycena") or 0)
             nr = int(marker.get("nr") or len(st.get("proby") or []) + 1)
             marker = None
@@ -672,7 +719,7 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
                 powod, f"nie wyszla (status {status or '?'}{', bez URL' if d.udany(status) else ''})")
             modele = list(dict.fromkeys(_odrzucone_filtrem(stan(baza.pomysl(slug, pid))))) if powod == "nsfw" else []
             gdzie = f" w {len(modele)} modelach ({', '.join(_nazwa(m) for m in modele)})" if len(modele) > 1 else ""
-            raise NieWyszla(f"pierwsza klatka {co}{gdzie} - wideo NIE poszlo, nic nie wysylam drugi raz. {w.get('blad') or ''}".strip(),
+            raise NieWyszla(f"{co_to(kl)}: {co}{gdzie} - wideo NIE poszlo, nic nie wysylam drugi raz. {w.get('blad') or ''}".strip(),
                             powod, job_id=jid, status=status)
         cel = _plik_klatki(slug, baza.pomysl(slug, pid), nr, w["urls"][0])
         try:
@@ -685,7 +732,7 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
         if (baza.pomysl(slug, pid).get("w_toku") or {}).get("faza") == "klatka":
             baza.ustaw_w_toku(slug, pid, koszt=int(k_wideo or 0))   # klatka juz w wydatkach - w rezerwie zostaje tylko wideo
         if kl.get("kontrola"):
-            ocena, czemu = ocen(cel, log)
+            ocena, czemu = ocen(cel, log, tlo=tryb_tla(kl))
         else:
             ocena, czemu = None, "kontrola wylaczona w ustawieniach"
         wpis = {"nr": nr, "job_id": jid, "status": status, "kr": kr, "plik": cel, "ok": (ocena or {}).get("ok"),
@@ -693,22 +740,22 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
         _dopisz_probe(slug, pid, wpis)
         z_zapasu = "" if kl_akt["model"] == kl["model"] else f", zapas {_nazwa(kl_akt['model'])}"
         if ocena is None:
-            _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka gotowa ({os.path.basename(cel)}, {kr} kr{z_zapasu}) - bez "
+            _zdarzenie(log, slug, "info", f"#{pid}: {'zdjecie tla gotowe' if tryb_tla(kl) else 'pierwsza klatka gotowa'} ({os.path.basename(cel)}, {kr} kr{z_zapasu}) - bez "
                        f"kontroli AI: {czemu}", pomysl=pid)
             _zapisz_stan(slug, pid, plik=cel, ok=None, powod="", zrodlo="bez kontroli: " + czemu, model=kl_akt["model"])
             return cel
         if ocena["ok"]:
-            _zdarzenie(log, slug, "ok", f"#{pid}: pierwsza klatka OK ({os.path.basename(cel)}, {kr} kr{z_zapasu}; kontrola: "
+            _zdarzenie(log, slug, "ok", f"#{pid}: {co_to(kl)} OK ({os.path.basename(cel)}, {kr} kr{z_zapasu}; kontrola: "
                        f"{ocena['powod'] or 'w porzadku'})", pomysl=pid)
             _zapisz_stan(slug, pid, plik=cel, ok=True, powod=ocena["powod"], zrodlo=ocena["zrodlo"], model=kl_akt["model"])
             return cel
         _zapisz_stan(slug, pid, plik=cel, ok=False, powod=ocena["powod"], zrodlo=ocena["zrodlo"], model=kl_akt["model"])
         zrobione = len(_proby_kontroli(stan(baza.pomysl(slug, pid))))
         if zrobione >= 1 + max_dod:
-            raise NieWyszla(f"kontrola odrzucila pierwsza klatke {zrobione}x (ostatnio: {ocena['powod'] or 'bez powodu'}) - wideo "
+            raise NieWyszla(f"kontrola odrzucila {'zdjecie tla' if tryb_tla(kl) else 'pierwsza klatke'} {zrobione}x (ostatnio: {ocena['powod'] or 'bez powodu'}) - wideo "
                             f"NIE poszlo (0 kr na wideo). Zobacz klatke; 'Zrob wideo z tej klatki' albo 'Sprobuj jeszcze raz'.",
                             "klatka", job_id=jid, status=status)
-        _zdarzenie(log, slug, "uwaga", f"#{pid}: kontrola odrzucila klatke nr {nr} ({ocena['powod'] or 'bez powodu'}) - robie nowa "
+        _zdarzenie(log, slug, "uwaga", f"#{pid}: kontrola odrzucila {'zdjecie tla' if tryb_tla(kl) else 'klatke'} nr {nr} ({ocena['powod'] or 'bez powodu'}) - robie nowa "
                    f"(proba {zrobione + 1} z {1 + max_dod})", pomysl=pid)
         if kl_akt is not kl:
             nastepny = kl_akt           # nastepna klatka tym samym modelem z zapasu (wybrany odpadl na filtrze)

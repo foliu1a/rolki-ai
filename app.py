@@ -35,7 +35,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.5.1"
+WERSJA = "3.5.2"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -581,8 +581,11 @@ def _pomysl_dla_panelu(p):
         p["ma_klatke"] = bool(kl_cfg)
         if kl_cfg:
             plik = st.get("plik") if st.get("plik") and os.path.isfile(st.get("plik") or "") else None
-            p["klatka_url"] = _url_pliku(plik) if plik else None
+            tla = pierwsza_klatka.tryb_tla(kl_cfg)      # 3.5.2: Wan/Gemini - zdjecie samego miejsca (ostatnia referencja)
+            tlo_usera = kl_cfg.get("tlo") if tla and kl_cfg.get("tlo") and os.path.isfile(kl_cfg["tlo"]) else None
+            p["klatka_url"] = _url_pliku(plik or tlo_usera) if (plik or tlo_usera) else None
             p["klatka_info"] = {"ok": st.get("ok"), "powod": st.get("powod") or "", "zaakceptowana": bool(st.get("zaakceptowana")),
+                                "tryb": "tlo" if tla else "start",
                                 "proby": len([x for x in st.get("proby") or [] if x.get("job_id")]), "kr": st.get("kr") or 0,
                                 # 3.5.1: model, ktory naprawde zrobil klatke (zapas po NSFW) - inaczej wybrany
                                 "model": (pierwsza_klatka.MODELE.get(st.get("model"), {}).get("nazwa") if st.get("model")
@@ -599,7 +602,8 @@ def _pomysl_dla_panelu(p):
         p["resolution"] = fabryka.rozdzielczosc_dla_czasu(fabryka.czas_klipu(p))
     marker = p.get("w_toku") if p.get("status") == "w_toku" else None
     if marker:
-        p["w_toku_opis"] = (("pierwsza klatka: " if marker.get("faza") == "klatka" else "")
+        faza_kl = ("zdjecie tla: " if pierwsza_klatka.tryb_tla(((p.get("z_promptu") or {}).get("klatka"))) else "pierwsza klatka: ")
+        p["w_toku_opis"] = ((faza_kl if marker.get("faza") == "klatka" else "")
                             + f"{marker.get('dostawca')} {marker.get('model') or ''}".strip()
                             + (f", job {marker['job_id']}" if marker.get("job_id") else ", wysylanie"))
     if p.get("zapas") and p.get("model"):

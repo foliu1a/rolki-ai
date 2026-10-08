@@ -781,8 +781,10 @@ def z_promptu(p):
 def _zlecenie_z_promptu(slug, p, do_wyceny=False):
     """Zlecenie rolki z promptu: model/tryb/dlugosc/rozdzielczosc/zdjecia z pomyslu (p['z_promptu']), nie z ustawien persony.
     3.5: z pierwsza klatka (z_promptu.klatka) - start_image = gotowa klatka (p['klatka']['plik']), tryb wideo z klatka (Seedance
-    omni_reference + zdjecia persony; Wan/Gemini - sama klatka, bez zdjec). do_wyceny=True: bez klatki (cena ta sama - `generate
-    cost` 2026-10-08: 70 kr z start_image i bez; Gemini image-to-video bez klatki by nie przeszedl walidacji)."""
+    omni_reference + zdjecia persony; stare rolki Wan/Gemini - sama klatka, bez zdjec). 3.5.2 tryb tla (Wan/Gemini): BEZ
+    start_image - image_references = zdjecia persony (+ stroj) + gotowe zdjecie tla jako OSTATNI obraz (swiezy upload, jego id
+    = klatka_id do odnalezienia joba). do_wyceny=True: bez klatki/tla (cena ta sama - `generate cost` 2026-10-08: 70 kr z
+    start_image i bez, Wan 30 kr z tlem i bez; Gemini image-to-video bez klatki by nie przeszedl walidacji)."""
     zp = p.get("z_promptu") or {}
     z = {
         "slug": slug, "pomysl": p.get("id"), "prompt": p.get("prompt_higgsfield") or "", "video": None, "video_czas": None,
@@ -795,7 +797,11 @@ def _zlecenie_z_promptu(slug, p, do_wyceny=False):
     if kl and not do_wyceny:
         import pierwsza_klatka
         plik = pierwsza_klatka.gotowa(p)
-        if plik:
+        if plik and pierwsza_klatka.tryb_tla(kl):
+            z["images"] = z["images"] + [plik]          # tlo = ostatni obraz (prompt: "the last reference image")
+            z["tlo_swieze"] = plik
+            z["mode"] = kl.get("mode_wideo")
+        elif plik:
             z["start_image"] = plik
             z["mode"] = kl.get("mode_wideo")
             if not kl.get("refy_w_wideo"):
@@ -2063,6 +2069,12 @@ def _dane_z_promptu(sc):
                                    "stroj_nazwa", "nagrywa", "sylwetka", "klatka")}
 
 
+def pierwsza_klatka_potrzebna(p):
+    """Rolka z promptu musi najpierw zrobic (i zaplacic) klatke albo zdjecie tla (3.5.2: zdjecie usera = nie)."""
+    import pierwsza_klatka
+    return pierwsza_klatka.potrzebna(p)
+
+
 def _rozstrzygnij_glos(opcje):
     """Od 3.1 model wideo NIGDY nie mowi komentarza: "auto" (i stare "model") -> "tts" = wideo z samym otoczeniem, komentarz osoby
     nagrywajacej dogrywa ElevenLabs po generacji. Gdy ElevenLabs nie dziala, rolka wychodzi bez komentarza (wpis w dzienniku,
@@ -2114,7 +2126,8 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
         import pierwsza_klatka
         import sekrety
         kontrola = bool(kl.get("kontrola")) and bool(sekrety.klucz("openrouter"))
-        wynik["klatka"] = {"model": kl["model"], "nazwa_modelu": kl.get("nazwa_modelu"), "prompt": kl["prompt"],
+        wynik["klatka"] = {"tryb": kl.get("tryb") or "start", "model": kl["model"], "nazwa_modelu": kl.get("nazwa_modelu"),
+                           "prompt": kl["prompt"],
                            "znaki": kl.get("znaki"), "obrazy": [os.path.basename(o) for o in kl["obrazy"]],
                            "tlo": os.path.basename(kl["tlo"]) if kl.get("tlo") else None,
                            "folder_tel": os.path.join(pierwsza_klatka.folder_tel(), sc["miejsce"]),
@@ -2130,7 +2143,9 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
         wynik["powody"].append(f"Higgsfield nie podal ceny: {e}")
         return wynik
     wynik["kr_wideo"] = k
-    if kl and k is not None:
+    if kl and k is not None and not pierwsza_klatka_potrzebna(p):
+        wynik["kr_klatka"], wynik["kr_max"] = 0, k      # 3.5.2: tlo = zdjecie usera - nic do generowania (0 kr)
+    elif kl and k is not None:
         # 3.5: cena = wideo + JEDNA klatka (w gore: 2,75 -> 3); z kontrola AI moze dojsc do max_dodatkowych klatek (kr_max)
         import pierwsza_klatka
         try:
@@ -2183,16 +2198,20 @@ def dodaj_z_promptu(slug, opcje, prompt=None, kr=None, **pola):
         # cena jeszcze raz - wyzsza = nic nie idzie); cena samego wideo do wznowienia po restarcie
         import pierwsza_klatka
         kl = dict(zp["klatka"])
+        tlo_usera = pierwsza_klatka.tryb_tla(kl) and bool(kl.get("tlo"))
         if kl.get("tlo"):
             kopia = pierwsza_klatka.kopia_tla(slug, kl["tlo"])
             kl["tlo_oryginal"], kl["tlo"] = kl["tlo"], kopia
-            kl["obrazy"] = [kopia] + list(kl["obrazy"][1:])
+            if not pierwsza_klatka.tryb_tla(kl):
+                kl["obrazy"] = [kopia] + list(kl["obrazy"][1:])
         try:
             kl["wycena"] = pierwsza_klatka.cena(kl)
         except dostawcy.BladDostawcy:
             kl["wycena"] = None
         zp["klatka"] = kl
-        if kr is not None and kl["wycena"] is not None:
+        if kr is not None and tlo_usera:
+            zp["wycena_wideo"] = int(kr)        # 3.5.2: tlo = zdjecie usera (0 kr) - cala wycena to wideo
+        elif kr is not None and kl["wycena"] is not None:
             zp["wycena_wideo"] = int(kr) - pierwsza_klatka.do_limitu(kl["wycena"])
     zp["opcje"] = {k: v for k, v in (opcje or {}).items() if k not in ("ustalone", "asystent")}
     if isinstance((opcje or {}).get("asystent"), dict):
@@ -2242,7 +2261,8 @@ def cmd_z_promptu(args):
         print(f"[UWAGA] {u}")
     if w.get("klatka"):
         kl = w["klatka"]
-        print(f"\n--- pierwsza klatka ({kl['nazwa_modelu']}, {kl['znaki']} znakow, zdjecia: {', '.join(kl['obrazy'])}; tlo: "
+        jak = ("zdjecie tla - samo miejsce, ostatnia referencja wideo" if kl.get("tryb") == "tlo" else "pierwsza klatka")
+        print(f"\n--- {jak} ({kl['nazwa_modelu']}, {kl['znaki']} znakow, zdjecia: {', '.join(kl['obrazy']) or 'brak'}; tlo: "
               f"{kl['tlo'] or 'generowane (brak zdjec w ' + kl['folder_tel'] + ')'}; kontrola AI: "
               f"{'tak' if kl['kontrola'] else 'nie'}):\n{kl['prompt']}")
         print(f"cena: wideo {w['kr_wideo']} kr + klatka {w['kr_klatka']} kr" + (f" (z dodatkowymi klatkami max {w['kr_max']} kr)"
@@ -2642,7 +2662,9 @@ def main(argv=None):
     s.add_argument("tekst", nargs="?", help="pomysl po polsku (puste = --gotowy albo losowy)")
     s.add_argument("--gotowy", help="id gotowego pomyslu (scenariusz.POMYSLY), np. galeria_fastfood")
     s.add_argument("--miejsce", help="id miejsca (scenariusz.MIEJSCA) albo 'losowe'")
-    s.add_argument("--model", default="seedance_2_5"); s.add_argument("--dlugosc", type=int, default=10)
+    s.add_argument("--model", default="seedance_2_5",
+                   help="seedance_2_5 | seedance_2_5_480p (480p 10 s, ok. 30 kr) | wan3_0_prime (tlo jako referencja) | "
+                        "gemini_omni_flash_1_1"); s.add_argument("--dlugosc", type=int, default=10)
     s.add_argument("--rozdzielczosc", default="auto")
     s.add_argument("--stroj", default="biblioteka", help="biblioteka | biblioteka:<id> | odwazny[:<id>] | zdjecia | codzienny | cosplay | plik:<nazwa>")
     s.add_argument("--komentarz", default="losowy"); s.add_argument("--reakcja", default="losowa")

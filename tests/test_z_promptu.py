@@ -219,7 +219,9 @@ def _czekaj():
 def test_api_katalog(klient, slug):
     d = klient.get("/api/z-promptu").get_json()
     assert d["ok"] and len(d["miejsca"]) >= 40 and d["persona"]["slug"] == slug and d["persona"]["wzrost_cm"] == "158-160"
-    assert {m["id"] for m in d["modele"]} == set(scenariusz.MODELE) and d["domyslne"]["model"] == "seedance_2_5"
+    # 3.5.2: + gotowy wariant Seedance 480p 10 s zaraz za Seedance
+    assert [m["id"] for m in d["modele"]] == ["seedance_2_5", "seedance_2_5_480p", "wan3_0_prime", "gemini_omni_flash_1_1"]
+    assert d["domyslne"]["model"] == "seedance_2_5"
     assert ["miku", "Turkusowe długie kucyki z grzywką (jak Miku)"] in d["wlosy"]["kolory"]
     assert klient.get("/api/z-promptu?slug=nie_ma").status_code == 404
 

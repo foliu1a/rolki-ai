@@ -306,9 +306,15 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
         linie = sc.LINIE_REAKCJI.get(reakcja) or ["Widziałaś to?", "No ja nie mogę…"]
         komentarz = _wybierz(los, linie)
 
-    model = zab.get("model") if zab.get("model") in sc.MODELE else (
+    # 3.5.2: tez gotowy wariant (seedance_2_5_480p = Seedance 480p 10 s) - zbuduj() wymusza jego rozdzielczosc i dlugosc
+    model = zab.get("model") if zab.get("model") in sc.MODELE or zab.get("model") in sc.WARIANTY_MODELI else (
         (ust.get("z_promptu") or {}).get("model") or sc.MODEL_DOMYSLNY)
-    mi = sc.MODELE.get(model, sc.MODELE[sc.MODEL_DOMYSLNY])
+    try:
+        mi = sc.model_info(model)
+    except ValueError:
+        model, mi = sc.MODEL_DOMYSLNY, sc.MODELE[sc.MODEL_DOMYSLNY]
+    if model in sc.WARIANTY_MODELI:
+        mi = dict(mi, dlugosci=(sc.WARIANTY_MODELI[model]["dlugosc"],))
     dl = zab.get("dlugosc")
     try:
         dl = int(dl) if dl else 10
@@ -488,7 +494,8 @@ def _zastosuj_llm(opcje, wynik, n, sezon, zab, miejsce_z_tekstu):
         dl = int(wynik.get("dlugosc"))
     except (TypeError, ValueError):
         dl = None
-    if dl and dl in sc.MODELE.get(opcje["model"], sc.MODELE[sc.MODEL_DOMYSLNY])["dlugosci"] and not zab.get("dlugosc"):
+    if (dl and opcje["model"] not in sc.WARIANTY_MODELI and dl in sc.MODELE.get(opcje["model"], sc.MODELE[sc.MODEL_DOMYSLNY])["dlugosci"]
+            and not zab.get("dlugosc")):
         opcje["dlugosc"] = dl
     return przyjete
 
@@ -517,7 +524,7 @@ def podsumowanie(opcje, glos_efektywny=None):
     kto = "dziewczyna" if opcje.get("nagrywa") == "dziewczyna" else "chłopak"
     glos_txt = (f"mówi {kto} zza kamery, ElevenLabs" if glos in ("tts", "auto", None)
                 else f"ElevenLabs nie działa – rolka bez komentarza")
-    model = sc.MODELE.get(opcje.get("model"), {}).get("nazwa", "").split(" –")[0]
+    model = (sc.MODELE.get(opcje.get("model")) or sc.WARIANTY_MODELI.get(opcje.get("model")) or {}).get("nazwa", "").split(" –")[0]
     czesci = [gdzie, f"strój: {stroj}", f"kamera: {kamera.lower()}", f"reakcja: {reakcja.lower()}"]
     if opcje.get("komentarz") and opcje.get("komentarz") != "bez":
         czesci.append(f"„{opcje['komentarz']}” ({glos_txt})")

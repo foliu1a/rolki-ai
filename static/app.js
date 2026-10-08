@@ -1924,10 +1924,15 @@ function kartaRolki(p) {
   let klatkaBlok = '';
   if (zPromptu && p.ma_klatke && (p.klatka_url || (p.klatka_info || {}).proby)) {
     const ki = p.klatka_info || {};
-    const ocena = ki.zaakceptowana ? 'zaakceptowana ręcznie' : (ki.ok === true ? 'sprawdzona – OK'
-      : (ki.ok === false ? `odrzucona przy sprawdzaniu: ${ki.powod || 'bez powodu'}` : 'bez sprawdzania AI'));
-    const img = p.klatka_url ? `<a href="${esc(p.klatka_url)}" target="_blank" rel="noopener" title="Otwórz pierwszą klatkę"><img class="rolka-klatka-mini" src="${esc(p.klatka_url)}" alt="Pierwsza klatka" loading="lazy"></a>` : '';
-    klatkaBlok = `<div class="rolka-klatka">${img}<span>Pierwsza klatka${ki.model ? ` (${esc(ki.model)})` : ''}: <b>${esc(ocena)}</b>`
+    // 3.5.2: Wan/Gemini – zdjęcie samego miejsca (tło jako ostatnia referencja wideo), twarz ze zdjęć persony
+    const tlo = ki.tryb === 'tlo';
+    const ocena = ki.zaakceptowana ? (tlo ? 'zaakceptowane ręcznie' : 'zaakceptowana ręcznie')
+      : (ki.ok === true ? (tlo ? 'sprawdzone – OK' : 'sprawdzona – OK')
+        : (ki.ok === false ? `${tlo ? 'odrzucone' : 'odrzucona'} przy sprawdzaniu: ${ki.powod || 'bez powodu'}`
+          : (tlo && ki.tlo && !ki.proby ? 'Twoje zdjęcie' : 'bez sprawdzania AI')));
+    const etykieta = tlo ? 'Tło (samo miejsce)' : 'Pierwsza klatka';
+    const img = p.klatka_url ? `<a href="${esc(p.klatka_url)}" target="_blank" rel="noopener" title="Otwórz: ${esc(etykieta.toLowerCase())}"><img class="rolka-klatka-mini" src="${esc(p.klatka_url)}" alt="${esc(etykieta)}" loading="lazy"></a>` : '';
+    klatkaBlok = `<div class="rolka-klatka">${img}<span>${esc(etykieta)}${ki.model && !(tlo && ki.tlo && !ki.proby) ? ` (${esc(ki.model)})` : ''}: <b>${esc(ocena)}</b>`
       + `${ki.proby > 1 ? ` · ${esc(String(ki.proby))} ${odmiana(ki.proby, 'próba', 'próby', 'prób')}` : ''}${ki.kr ? ` · ${esc(liczba(ki.kr))} kr` : ''}`
       + `${ki.tlo ? ` · tło: Twoje zdjęcie ${esc(ki.tlo)}` : ''}</span></div>`;
   }
@@ -2503,7 +2508,14 @@ function renderZpWynik(w, zCena) {
   const d = w.dzis || {};
   const saldo = w.saldo !== null && w.saldo !== undefined ? ` Masz ${esc(liczba(w.saldo))} kr.` : '';
   const limit = d.limit ? ` Dziś wydane ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))}.` : '';
-  const zKlatka = kl && w.kr_klatka !== null && w.kr_klatka !== undefined
+  // 3.5.2: Wan/Gemini – zamiast pierwszej klatki zdjęcie samego miejsca (tło = ostatnia referencja, twarz ze zdjęć persony)
+  const zKlatka = kl && kl.tryb === 'tlo' && w.kr_klatka !== null && w.kr_klatka !== undefined
+    ? (kl.tlo
+      ? ` Wideo ${esc(liczba(w.kr_wideo))} kr; tło = Twoje zdjęcie ${esc(kl.tlo)} (0 kr), twarz ze zdjęć persony.`
+      : ` Wideo ${esc(liczba(w.kr_wideo))} kr + zdjęcie samego miejsca (tło, ${esc(kl.nazwa_modelu || kl.model)}) ${esc(String(w.kr_klatka).replace('.', ','))} kr`
+        + (w.kr_max && w.kr_max !== w.kr ? `; jeśli sprawdzanie odrzuci zdjęcie – najwyżej ${esc(liczba(w.kr_max))} kr` : '')
+        + '. Twarz ze zdjęć persony, tło z tego zdjęcia.')
+    : kl && w.kr_klatka !== null && w.kr_klatka !== undefined
     ? ` Wideo ${esc(liczba(w.kr_wideo))} kr + zdjęcie (pierwsza klatka, ${esc(kl.nazwa_modelu || kl.model)}) ${esc(String(w.kr_klatka).replace('.', ','))} kr`
       + (w.kr_max && w.kr_max !== w.kr ? `; jeśli sprawdzanie odrzuci zdjęcie – najwyżej ${esc(liczba(w.kr_max))} kr` : '')
       + `. Tło: ${kl.tlo ? 'Twoje zdjęcie ' + esc(kl.tlo) : 'wygenerowane'}.`
@@ -2555,7 +2567,7 @@ async function zpZrob() {
   const tresc = `<p><b>${esc(w.tytul || w.miejsce_nazwa || '')}</b></p>`
     + `<p class="muted">${esc(zpPodsumowanie())}</p>`
     + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b> (Higgsfield, ${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}`
-    + (w.klatka ? `: najpierw zdjęcie – pierwsza klatka, potem wideo od niego${w.kr_max && w.kr_max !== w.kr ? `; gdy sprawdzanie odrzuci zdjęcie, zrobię nowe – razem najwyżej ${esc(liczba(w.kr_max))} kr` : ''}` : '') + ').'
+    + (w.klatka ? (w.klatka.tryb === 'tlo' ? `: najpierw zdjęcie samego miejsca (tło), potem wideo ze zdjęć persony + tego tła` : `: najpierw zdjęcie – pierwsza klatka, potem wideo od niego`) + `${w.kr_max && w.kr_max !== w.kr ? `; gdy sprawdzanie odrzuci zdjęcie, zrobię nowe – razem najwyżej ${esc(liczba(w.kr_max))} kr` : ''}` : '') + ').'
     + (w.saldo !== null && w.saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(w.saldo - w.kr))} kr</b>.` : '') + '</p>'
     + (d.limit ? `<p>Dziś wydano ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))} dozwolonych.</p>` : '')
     + '<p class="dialog-uwaga">To wyda kredyty. Jeśli tuż przed wysłaniem cena wyjdzie wyższa – nic nie wyślę.</p>';

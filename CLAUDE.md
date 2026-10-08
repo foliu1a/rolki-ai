@@ -308,7 +308,8 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   nastepnego sprawdzenia (Generuj, przebieg autopilota, restart, `fabryka.py wznow`). Restart: przejete bez `wysylam` wracaja do kolejki.
   DELETE w kolejce = wyjecie (atomowo), w toku 409. Windows: odczyt JSON w chwili `os.replace` = PermissionError -> do 20 prob.
 - **Autopilot rolek z promptu** (`autopilot.krok_z_promptu`, "opcja A" usera): `ustawienia_globalne.json` (obok stan.json, poza gitem)
-  `autopilot_z_promptu` {dziennie 1 (0 = wyl., LACZNIE dla person), model seedance_2_5 (720p 10 s ~70 kr) | wan3_0_prime (~30 kr),
+  `autopilot_z_promptu` {dziennie 1 (0 = wyl., LACZNIE dla person), model seedance_2_5 (720p 10 s ~70 kr) | seedance_2_5_480p
+  (3.5.2, ~30 kr) | wan3_0_prime (~30 kr),
   persony [] = wszystkie ze zdjeciami, od_godziny "10:00"}; panel: Ustawienia -> Autopilot -> "Rolki z promptu". Krok w
   `przebieg_wszystkich` (bez --modelka) po swapie; petla kreci sie tez bez person z autopilot=true. Licznik: pomysly
   `autopilot_z_promptu: true` z dnia LOKALNEGO (utworzono), osobny od swapu (`autopilot_max_rolek_dziennie` ich nie liczy). Jedna naraz
@@ -382,7 +383,7 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - **Wideo**: `fabryka._zlecenie_z_promptu`: gotowa klatka (`pierwsza_klatka.gotowa(p)`) -> `start_image` (CLI `--start-image <plik>`,
   zlec wgrywa ja swiezo, id = `w_toku.klatka_id`, `znajdz(klatka_id=)` szuka po nim, potem po prompcie) + `mode` z klatka:
   Seedance `omni_reference` + image_references (persona); Wan 3.0 Prime / Gemini (`image-to-video`): start_image NIE laczy sie z
-  referencjami (regula `model get` 2026-10-08) -> sama klatka, ostrzezenie. Prompt `SZABLON_PELNY_KLATKA` / `SZABLON_KROTKI_KLATKA`:
+  referencjami (regula `model get` 2026-10-08) -> sama klatka, ostrzezenie (od 3.5.2 zamiast tego tryb "tlo" - patrz 3.5.2). Prompt `SZABLON_PELNY_KLATKA` / `SZABLON_KROTKI_KLATKA`:
   "continues EXACTLY from the start frame", nie zmieniac/dodawac/animowac tekstu, kamera zostaje daleko, trzesie sie, czasem cos
   zaslania; akcja/reakcje ze scenariusza; dzwiek bez mowy (3.1).
 - **Pieniadze**: wycena (`wycena_z_promptu`) = `kr_wideo` (generate cost BEZ klatki - `do_wyceny=True`; cena ta sama) + klatka w gore
@@ -447,6 +448,53 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - Testy: test_pierwsza_klatka.py (zapas NSFW: seedream, bez powtorek, drozszy pominiety, odmowa przy create + kontrola na zapasie,
   zapas wylaczony, wszystkie odrzucone; CLI --asystent --klatka-model; prompt jednego ujecia dla 2 modeli x 4 kamer), test_instagram.py
   (lista z /models, 404/403/429/dzienny limit, kontrola klatki ta sama lista), test_autopilot_z_promptu.py (modele z cena na Starcie).
+
+## 3.5.2 (2026-10-08): Wan/Gemini = "tlo jako referencja" + Seedance 480p
+
+- **Po co** (platny test #9 Noemi, Wan 3.0 Prime + start_image, 33 kr): "w ogole nie podobna, doslownie jak nie ona". Regula
+  `model get wan3_0_prime`: "start_image/end_image cannot be combined with reference media" - z klatka Wan NIE dostawal zdjec
+  persony i wymyslal twarz. Gemini ma to samo (image-to-video bez referencji; reference-to-video bez start_image, max 8 mediow).
+- **Tryb "tlo"** (`scenariusz.MODELE[...]["klatka"]["tryb"] == "tlo"` dla wan3_0_prime i gemini_omni_flash_1_1; Seedance zostaje
+  "start" = start_image + referencje): krok 1 = ZDJECIE SAMEGO MIEJSCA bez persony (`scenariusz.prompt_tla` / `TLO_SCENA`: ten sam
+  opis miejsca, `KLATKA_MIEJSC` - polskie detale i napisy, ceny "4,99 zł", ujecie z telefonu z konca kolejki / zza filaru, ludzie
+  tylko w tle i przy bokach, miejsce, gdzie stanie (`GDZIE_W_KLATCE`), WOLNE; operator i swiatlo bez "her"), BEZ zadnych zdjec,
+  model klatki jak w ustawieniach (GPT Image 2.5, zapas NSFW jak 3.5.1), plik `NNN_<nazwa>.tlo.png`. Ta sama maszyneria co klatka
+  (`pierwsza_klatka.przygotuj`: cena przed kazdym, bezpieczniki, znacznik `faza: "klatka"`, job_id od razu, zapas NSFW, max
+  dodatkowe). Zgubione id (brak obraz_id - nie ma zdjec) = `znajdz(prompt=..., typ="image")` po prompcie i czasie z pominieciem
+  znanych jobow. Zdjecie usera z `tla/<miejsce>` = gotowe tlo (kopia bez EXIF, `gotowa(p)`), 0 kr, nic sie nie generuje.
+- **Wideo** (`fabryka._zlecenie_z_promptu`): image_references = WSZYSTKIE zdjecia persony (+ zdjecie stroju) + tlo jako OSTATNI
+  obraz, BEZ start_image; Gemini `mode reference-to-video`, Wan bez mode. Tlo idzie swiezym uploadem (`z["tlo_swieze"]` ->
+  `klatka_id` w znaczniku -> `znajdz(klatka_id=)` jak przy start_image). Prompt `SZABLON_KROTKI_TLO` + `KAMERA_TLO_KROTKA`: bohaterka =
+  kobieta z "reference images 1-N" (twarz, oczy, skora, piercing, cialo; wlosy z opisu), stroj = "reference image N+1", miejsce/kadr/
+  kat/swiatlo/ludzie/napisy dokladnie jak na ostatnim obrazie ("image K"), kamera stoi tam, skad zrobiono zdjecie tla, ona 6-10 m
+  dalej (`GDZIE_W_KLATCE`), jedno ujecie bez ciec, lekkie drganie, nie podchodzi/zoomuje/goni, nie zmieniac i nie dodawac tekstu,
+  "Take only the place from image K, never her look". Caly prompt Wan w trybie tla przez `zdjecia_swap.bez_slow_ryzykownych`
+  (sylwetka/stroj/prompt A - np. "butt" -> "bottom", ostrzezenie). Limit zdjec: schemat Wan nie ma reguly, `generate cost` przyjal 19
+  bez bledu -> `max_obrazow_tla` 10 (persona max 6 + stroj + tlo miesci sie); Gemini 8 (regula "at most 8 media items", cost z 9 =
+  blad). Gdy persona+stroj+tlo za duzo - zdjecie stroju odpada (sam opis), a gdy i to za malo - ValueError.
+- **Kontrola AI tla** (`pierwsza_klatka.ocen(tlo=True)`, `PYTANIE_TLA` + `SYSTEM_OCENY_TLA`): prawdziwe polskie miejsce, napisy po
+  polsku (ceny z przecinkiem), BRAK glownej bohaterki (ludzie w tle/przy bokach/za lada ok), zdjecie z telefonu. Te same zasady
+  powtorek i kosztow co klatka (zla = nowe tlo, max 2 dodatkowe, kazde platne; "Zrob wideo z tej klatki" dziala tak samo).
+- **Pieniadze**: wycena jak dzis = wideo + tlo (w gore) - Wan 10 s 720p 30 + 2,75 -> 33 kr (`kr_max` 39 z kontrola); ze zdjeciem
+  usera = 30. Wznowienie / "Sprobuj jeszcze raz" po bledzie wideo = TO SAMO tlo (`p.klatka.plik`), cena juz bez tla.
+- **Seedance 2.5 · 480p · 10 s** (`scenariusz.WARIANTY_MODELI["seedance_2_5_480p"]` -> zbuduj: model seedance_2_5 + 480p + 10 s,
+  start_image + referencje jak 720p): Z promptu (katalog, zaraz za Seedance), asystent (wariant jako reczny wybor),
+  `autopilot.MODELE_Z_PROMPTU` (+ pola `model`, `rozdzielczosc`; Start - chipy "Seedance 2.5 · 720p" / "· 480p" / "Wan 3.0 Premium",
+  Ustawienia -> Autopilot, CLI `--model seedance_2_5_480p`). Opisy: Seedance 720p = twarz pewna, najlepsza jakosc; 480p = twarz
+  pewna, taniej, mniej ostre; Wan Premium = tanio, twarz ze zdjec persony, tlo z referencji (napisy mniej dokladne niz Seedance).
+- **Ceny `generate cost` 2026-10-08 (darmowe)**: Seedance 2.5 omni 10 s 480p ze start_image + 5 refow = 30 kr (720p = 70); Wan 3.0
+  Prime 10 s 720p z 5 refami + tlo = 30 (bez mediow tez 30, liczba zdjec nie zmienia ceny); GPT Image 2.5 high 2K bez zdjec = 2,75.
+- Panel: karta "Tlo (samo miejsce)" z miniatura (tez zdjecie usera), cena "Wideo 30 kr + zdjecie samego miejsca (tlo, GPT Image 2.5)
+  2,75 kr. Twarz ze zdjec persony...", `w_toku_opis` "zdjecie tla: ...". Wersja 3.5.2.
+- NIESPRAWDZONE do platnego testu: czy Wan naprawde trzyma twarz z 5-6 referencji i bierze miejsce/kadr z ostatniego obrazu (zamiast
+  wkleic tlo jak plakat albo pomieszac); czy rozumie numery "reference images 1-5" / "image 7"; jak wyjda polskie napisy (tlo jest
+  tylko referencja, nie klatka - beda mniej wierne niz przy Seedance); czy Wan nie ma ukrytego limitu zdjec po stronie serwera (cost
+  przyjmuje 19); czy GPT Image 2.5 z samego tekstu nie dorysuje kobiety na srodku (kontrola AI to lapie); czy `generate list` dla
+  obrazow ma `params.prompt` (szukanie zgubionego tla po prompcie).
+- Testy: test_pierwsza_klatka.py (Wan: refy + tlo ostatnie, bez start_image, plik .tlo.png, koszt 33; prompt tla bez bohaterki dla
+  wszystkich 41 miejsc; prompt Wan bez slow ryzykownych; kontrola tla osobnym pytaniem + nowe tlo; przerwane wideo i "Ponow" = to
+  samo tlo; zgubione id tla po prompcie; zdjecie usera = tlo bez generowania; Gemini reference-to-video; Seedance 480p: wycena,
+  start_image + refy, katalog, panel, asystent), test_autopilot_z_promptu.py (autopilot Seedance 480p, 3 modele na Starcie).
 
 ## Postprodukcja
 

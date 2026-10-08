@@ -115,6 +115,18 @@ def test_model_wan_tanszy(slug, cli):
     assert zp["model"] == "wan3_0_prime" and zp["rozdzielczosc"] == "720p" and zp["dlugosc"] == 10
 
 
+def test_model_seedance_480p_tanszy(slug, cli):
+    # 3.5.2: "Seedance 2.5 · 480p · 10 s" = ten sam model Seedance, tylko 480p (twarz pewna, taniej, mniej ostre)
+    _wlacz(model="seedance_2_5_480p")
+    assert autopilot.ustawienia_z_promptu()["model"] == "seedance_2_5_480p"
+    w = autopilot.krok_z_promptu(teraz=_poludnie())
+    (m, par, _med), = cli.generacje
+    assert w["stan"] == "zrobiona" and m == "seedance_2_5" and par["resolution"] == "480p" and par["duration"] == 10
+    zp = baza.pomysl(slug, w["pid"])["z_promptu"]
+    assert zp["model"] == "seedance_2_5" and zp["rozdzielczosc"] == "480p" and zp["dlugosc"] == 10
+    assert autopilot.stan_z_promptu()["model_nazwa"].startswith("Seedance 2.5 · 480p · 10 s")
+
+
 # ---------------- kwota, rotacja, pauza ----------------
 
 def test_kwota_dzienna_lacznie_i_persony_na_zmiane(slug, cli):
@@ -287,7 +299,7 @@ def klient(slug, cli):
 def test_api_ustawienia_rolek_z_promptu_i_linijka_na_starcie(klient, slug):
     _wlacz()
     d = klient.get("/api/ustawienia/globalne").get_json()
-    assert d["ok"] and [m["id"] for m in d["modele_z_promptu"]] == ["seedance_2_5", "wan3_0_prime"]
+    assert d["ok"] and [m["id"] for m in d["modele_z_promptu"]] == ["seedance_2_5", "seedance_2_5_480p", "wan3_0_prime"]
     assert d["persony"] == [{"slug": slug, "nazwa": "Noemi", "referencje": 2}]
     for zle in ({"dziennie": -1}, {"dziennie": 99}, {"model": "gemini_omni_flash_1_1"}, {"od_godziny": "25:00"},
                 {"persony": ["nie_ma"]}, {"cos": 1}):
@@ -308,9 +320,12 @@ def test_start_wybor_modelu_z_cena_i_zapis_od_razu(klient, slug):
     _wlacz()
     baza.zapisz_ustawienia_globalne(pierwsza_klatka={"wlaczona": True})
     s = klient.get("/api/stan").get_json()["autopilot_z_promptu"]
-    assert [(m["id"], m["nazwa"], m["kr"]) for m in s["modele"]] == [("seedance_2_5", "Seedance 2.5", 73),
+    assert [(m["id"], m["nazwa"], m["kr"]) for m in s["modele"]] == [("seedance_2_5", "Seedance 2.5 · 720p", 73),
+                                                                        ("seedance_2_5_480p", "Seedance 2.5 · 480p", 33),
                                                                         ("wan3_0_prime", "Wan 3.0 Premium", 33)]
-    assert "twarz tylko z pierwszej klatki" in s["modele"][1]["opis"] and "zdjęcia persony" in s["modele"][0]["opis"]
+    # 3.5.2: opisy - Seedance 720p twarz pewna i najlepsza jakosc, 480p tanio i mniej ostre, Wan twarz ze zdjec + tlo z referencji
+    assert "Twarz pewna, najlepsza jakość" in s["modele"][0]["opis"] and "mniej ostre (480p)" in s["modele"][1]["opis"]
+    assert "twarz ze zdjęć persony" in s["modele"][2]["opis"] and "tło z referencji" in s["modele"][2]["opis"]
     assert s["kr_rolki"] == 73 and s["limit_dzienny"] == baza.limit_dzienny("higgsfield")
     # chip "Wan 3.0 Premium" na Starcie = ten sam zapis co Ustawienia -> Autopilot; odpowiedz niesie nowy stan dla Startu
     d = klient.post("/api/ustawienia/globalne", json={"autopilot_z_promptu": {"model": "wan3_0_prime"}}).get_json()
@@ -319,7 +334,7 @@ def test_start_wybor_modelu_z_cena_i_zapis_od_razu(klient, slug):
     # bez pierwszej klatki - sama cena wideo
     baza.zapisz_ustawienia_globalne(pierwsza_klatka={"wlaczona": False})
     s = klient.get("/api/stan").get_json()["autopilot_z_promptu"]
-    assert [m["kr"] for m in s["modele"]] == [70, 30] and s["kr_rolki"] == 30
+    assert [m["kr"] for m in s["modele"]] == [70, 30, 30] and s["kr_rolki"] == 30
 
 
 def test_panel_ma_potwierdzenie_wlaczenia_autopilota_bez_confirm():

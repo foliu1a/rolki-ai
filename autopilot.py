@@ -472,13 +472,20 @@ def wyslij_zdjecia(slug, log=None):
 # komentarz ElevenLabs, Media Tool, folder "tu rolki zrobione", Telegram. Jedna rolka naraz; w toku = czekamy (wznowienie 0 kr).
 
 # 3.5.1: "krotko" + "opis" - wybor modelu na Starcie przy przelaczniku autopilota (user mowi "Wan 3.0 Premium" - w CLI to Prime)
+# 3.5.2: "model" + "rozdzielczosc" = co naprawde idzie do Higgsfielda (Seedance 480p to ten sam model, tylko 480p); ceny z
+# `generate cost` 2026-10-08: Seedance 10 s 720p 70 / 480p 30 kr (ze start_image i zdjeciami persony), Wan 10 s 720p 30 kr (z
+# referencjami persony + tlem); do tego klatka/zdjecie tla ok. 3 kr.
 MODELE_Z_PROMPTU = {
     "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)", "szacunek": 70,
-                     "krotko": "Seedance 2.5",
-                     "opis": "Twarz persony pewna – bierze zdjęcia persony i pierwszą klatkę."},
-    "wan3_0_prime": {"nazwa": "Wan 3.0 Premium (Prime) · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)", "szacunek": 30,
-                     "krotko": "Wan 3.0 Premium",
-                     "opis": "Ok. 2× taniej, tło tak samo realistyczne, ale twarz tylko z pierwszej klatki (może wyjść ogólna)."},
+                     "krotko": "Seedance 2.5 · 720p", "model": "seedance_2_5", "rozdzielczosc": "720p",
+                     "opis": "Twarz pewna, najlepsza jakość (zdjęcia persony + pierwsza klatka)."},
+    "seedance_2_5_480p": {"nazwa": "Seedance 2.5 · 480p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)", "szacunek": 30,
+                          "krotko": "Seedance 2.5 · 480p", "model": "seedance_2_5", "rozdzielczosc": "480p",
+                          "opis": "Twarz pewna, taniej, ale mniej ostre (480p)."},
+    "wan3_0_prime": {"nazwa": "Wan 3.0 Premium (Prime) · 720p · 10 s (ok. 30 kr + tło ok. 3 kr)", "szacunek": 30,
+                     "krotko": "Wan 3.0 Premium", "model": "wan3_0_prime", "rozdzielczosc": "720p",
+                     "opis": "Tanio; twarz ze zdjęć persony, tło z referencji (zdjęcie samego miejsca) – napisy mniej dokładne "
+                             "niż przy Seedance."},
 }
 KR_KLATKI_SZACUNEK = 3              # pierwsza klatka (GPT Image 2.5 ok. 2,75 kr -> 3 w limicie), gdy wlaczona
 DLUGOSC_Z_PROMPTU = 10
@@ -673,10 +680,12 @@ def krok_z_promptu(log=None, stop=None, teraz=None):
         tts = komentarz_glos.tts_dostepne()[0]
     except Exception:
         tts = False
+    wybor = MODELE_Z_PROMPTU[u["model"]]       # 3.5.2: Seedance 480p = ten sam model, tylko rozdzielczosc 480p
+    model, rozdz = wybor.get("model") or u["model"], wybor.get("rozdzielczosc") or ROZDZIELCZOSC_Z_PROMPTU
     a = asystent.dobierz(slug, pomysl["pl"], pomysl_id=pomysl["id"], zablokowane={
-        "model": u["model"], "dlugosc": DLUGOSC_Z_PROMPTU, "rozdzielczosc": ROZDZIELCZOSC_Z_PROMPTU},
+        "model": model, "dlugosc": DLUGOSC_Z_PROMPTU, "rozdzielczosc": rozdz},
         glos_efektywny="tts" if tts else "brak")
-    opcje = dict(a["opcje"], model=u["model"], dlugosc=DLUGOSC_Z_PROMPTU, rozdzielczosc=ROZDZIELCZOSC_Z_PROMPTU)
+    opcje = dict(a["opcje"], model=model, dlugosc=DLUGOSC_Z_PROMPTU, rozdzielczosc=rozdz)
     try:
         w = fabryka.wycena_z_promptu(slug, opcje, z_cena=True)
     except ValueError as e:

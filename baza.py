@@ -612,7 +612,8 @@ USTAWIENIA_GLOBALNE_DOMYSLNE = {
     "zdjecia_rownolegle": 4,        # ile zdjec (podmiana postaci) moze sie robic naraz (1-8); nadmiar czeka w kolejce panelu
     "autopilot_z_promptu": {        # autopilot sam robi rolki z zakladki "Z promptu" (bez filmikow zrodlowych)
         "dziennie": 1,              # ile rolek dziennie LACZNIE dla wszystkich person (0 = wylaczone)
-        "model": "seedance_2_5",    # seedance_2_5 (720p, 10 s, ok. 70 kr) | wan3_0_prime (720p, 10 s, ok. 30 kr)
+        "model": "seedance_2_5",    # seedance_2_5 (720p, 10 s, ok. 70 kr) | seedance_2_5_480p (480p, ok. 30 kr) |
+                                    # wan3_0_prime (720p, 10 s, ok. 30 kr) - autopilot.MODELE_Z_PROMPTU
         "persony": [],              # na zmiane po kolei; [] = wszystkie, ktore maja zdjecia w referencje/
         "od_godziny": "10:00",      # nie wczesniej niz o (czas lokalny)
     },

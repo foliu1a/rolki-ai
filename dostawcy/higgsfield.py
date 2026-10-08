@@ -71,9 +71,11 @@ def przygotuj(z):
     if obrazy:
         slug = z.get("slug")
         swiezy = z.get("obraz_swiezy")
-        # UUID z cache zamiast ponownego uploadu - poza `obraz_swiezy` (zdjecie usera w swapie: zawsze swiezy upload)
-        media["image"] = [o if (swiezy and _ten_sam_plik(o, swiezy)) or not slug else (baza.upload_id(slug, o) or o)
-                          for o in obrazy]
+        tlo = z.get("tlo_swieze")
+        # UUID z cache zamiast ponownego uploadu - poza `obraz_swiezy` (zdjecie usera w swapie: zawsze swiezy upload) i
+        # `tlo_swieze` (3.5.2: zdjecie tla rolki z promptu - swiezy upload, jego id = klatka_id do odnalezienia joba)
+        media["image"] = [o if (swiezy and _ten_sam_plik(o, swiezy)) or (tlo and _ten_sam_plik(o, tlo)) or not slug
+                          else (baza.upload_id(slug, o) or o) for o in obrazy]
     for rola in ("audio", "start_image", "end_image"):
         if z.get(rola):
             media[rola] = z[rola]
@@ -143,19 +145,25 @@ def zlec(z, klucz=None, znacznik=None, log=None):
     elif wideo:
         wideo_id = str(wideo)
     obraz_id = None
+    klatka_id = None
+    tlo = z.get("tlo_swieze")
     if media.get("image"):
         wgrane = []
         for o in media["image"]:
             if swiezy and os.path.isfile(str(o)) and _ten_sam_plik(o, swiezy):
                 obraz_id = wgraj(o)                          # swiezy upload = unikalne id tej proby
                 wgrane.append(obraz_id)
+            elif tlo and os.path.isfile(str(o)) and _ten_sam_plik(o, tlo):
+                klatka_id = wgraj(o)                         # 3.5.2: zdjecie tla - swiezy upload, po nim odnajdziemy job wideo
+                wgrane.append(klatka_id)
             else:
                 wgrane.append(wgraj(o, cache=True) if os.path.isfile(str(o)) else o)
         media["image"] = wgrane
     if swiezy and not obraz_id:
         # bez swiezego id nie odnajdziemy joba po przerwaniu - nic nie wysylamy (job na pewno nie powstal)
         raise BladDostawcy(f"brak pliku {os.path.basename(str(swiezy))} - nic nie wyslalem")
-    klatka_id = None
+    if tlo and not klatka_id:
+        raise BladDostawcy(f"brak zdjecia tla {os.path.basename(str(tlo))} - nic nie wyslalem")
     for rola in ("audio", "start_image", "end_image"):
         if media.get(rola) and os.path.isfile(str(media[rola])):
             media[rola] = wgraj(media[rola])            # swiezy upload per proba (bez cache)
@@ -213,17 +221,19 @@ def koszt_joba(wynik, wycena=None):
     return int(wycena or 0)
 
 
-def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, klatka_id=None, **_):
+def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, klatka_id=None, typ=None, **_):
     """Szuka na `generate list` joba wyslanego przez przerwane wysylanie: ten sam model i ten sam wgrany filmik (media
     role=video, data.id == wideo_id - id jest swiezy dla kazdej proby, wiec BEZ filtra czasu: zegar komputera i serwera
     moze sie rozjechac) albo - bez filmiku - ten sam prompt i utworzony nie wczesniej niz `od` - 2 min.
     obraz_id (swap zdjec, 3.2): job obrazu (`generate list --image`), w ktorego mediach jest swiezo wgrane zdjecie usera.
     klatka_id (3.5, rolka z promptu z pierwsza klatka): job wideo, w ktorego mediach jest swiezo wgrana klatka (start_image) -
-    sprawdzane najpierw; gdy lista nie pokazuje takiego medium, zostaje dawne szukanie po prompcie i czasie.
+    sprawdzane najpierw; gdy lista nie pokazuje takiego medium, zostaje dawne szukanie po prompcie i czasie. 3.5.2: tez zdjecie
+    tla wgrane swiezo jako ostatnia referencja (Wan/Gemini, tryb tla) - szukane po id medium w dowolnej roli.
+    typ (3.5.2): "image" = lista jobow obrazu bez obraz_id (zdjecie tla bez zadnych zdjec - szukanie po prompcie i czasie).
     Zwraca znormalizowany job albo None. Rzuca BladDostawcy, gdy listy nie da sie pobrac (wtedy NIE wolno wysylac ponownie)."""
     from datetime import datetime, timedelta, timezone
     try:
-        lista = hf.joby("image" if obraz_id else "video", 50)
+        lista = hf.joby(typ or ("image" if obraz_id else "video"), 50)
     except hf.HiggsfieldBlad as e:
         raise BladDostawcy(f"generate list: {e}")
     granica = None

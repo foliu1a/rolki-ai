@@ -25,6 +25,10 @@ Zasady (sprawdzone na przewodniku Seedance 2.5 i na rolkach usera z 6.10, PROJEK
   prompt wideo z klatka (SZABLON_*_KLATKA) rusza DOKLADNIE od klatki i nie rusza napisow. Kamery z ukrycia daleko (kolejka = koniec
   kolejki 6-8 m, DYSTANS_UKRYTEJ) takze bez klatki. Opcje: klatka "wl"/"wyl" (domyslnie pierwsza_klatka.ustawienia()), klatka_model,
   tlo "auto"/"bez"/<plik>. Pieniadze i generacja klatki: pierwsza_klatka.py.
+- (3.5.2, platny test #9 Noemi na Wan: "w ogole nie podobna") Wan/Gemini nie lacza start_image ze zdjeciami persony -> tryb "tlo":
+  klatka = zdjecie SAMEGO miejsca (prompt_tla, TLO_SCENA: bez bohaterki, ludzie tylko w tle), wideo = SZABLON_KROTKI_TLO
+  (bohaterka z obrazow 1..N, miejsce/kadr/swiatlo/napisy z ostatniego obrazu, kamera stoi tam, skad zrobiono zdjecie tla).
+  WARIANTY_MODELI: "seedance_2_5_480p" = Seedance 2.5 480p 10 s (ok. 30 kr) - twarz pewna, taniej, mniej ostre.
 """
 import os
 import random
@@ -40,29 +44,41 @@ WERSJA_SZABLONU = "zp-4"
 
 MODELE = {
     "seedance_2_5": {
-        "nazwa": "Seedance 2.5 – najlepszy", "opis": "najlepsza twarz i polska mowa; 10 s 720p ≈ 70 kr, 8 s 1080p ≈ 96 kr",
+        "nazwa": "Seedance 2.5 – najlepszy", "opis": "twarz pewna, najlepsza jakość; 10 s 720p ≈ 70 kr, 8 s 1080p ≈ 96 kr",
         "mode": "omni_reference", "szablon": "pelny", "tokeny": True, "max_obrazow": 30,
         "dlugosci": (8, 10, 15), "rozdzielczosci": ("480p", "720p", "1080p"),
         "parametry": {"bitrate_mode": "high"}, "generate_audio": True, "limit_znakow": 8000, "zalecane_znaki": 5000,
-        "klatka": {"mode": "omni_reference", "refy": True},     # start_image + image_references razem (max 30 obrazow)
+        "klatka": {"tryb": "start", "mode": "omni_reference", "refy": True},   # start_image + image_references (max 30 obrazow)
     },
     "wan3_0_prime": {
-        "nazwa": "Wan 3.0 Prime – taniej", "opis": "ok. 2,3× taniej (10 s 720p ≈ 30 kr); twarz i polska mowa do sprawdzenia",
+        "nazwa": "Wan 3.0 Prime – taniej", "opis": "tanio (10 s 720p ≈ 30 kr + tło ok. 3 kr); twarz ze zdjęć persony, tło z "
+                                                    "referencji (napisy mniej dokładne niż przy Seedance)",
         "mode": None, "szablon": "krotki", "tokeny": False, "max_obrazow": 10,
         "dlugosci": (8, 10, 15), "rozdzielczosci": ("480p", "720p", "1080p"),
         "parametry": {}, "generate_audio": True, "limit_znakow": 5000, "zalecane_znaki": 3000,
-        "klatka": {"mode": None, "refy": False},                # regula: start_image NIE laczy sie z referencjami
+        # 3.5.2: regula `model get`: start_image NIE laczy sie z referencjami -> tryb "tlo": zdjecie SAMEGO miejsca (bez persony)
+        # jako OSTATNI obraz w image_references, przed nim zdjecia persony (twarz); bez start_image. Schemat nie ma limitu zdjec
+        # (generate cost przyjal 19), trzymamy sie max_obrazow_tla = 10.
+        "klatka": {"tryb": "tlo", "mode": None, "refy": True, "max_obrazow_tla": 10},
     },
     "gemini_omni_flash_1_1": {
         "nazwa": "Gemini Omni Flash – taniej, max 10 s", "opis": "10 s 720p ≈ 30 kr, najtańsze 1080p; max 7 zdjęć",
         "mode": "reference-to-video", "szablon": "krotki", "tokeny": False, "max_obrazow": 7,
         "dlugosci": (8, 10), "rozdzielczosci": ("720p", "1080p"),
         "parametry": {}, "generate_audio": None, "limit_znakow": 4000, "zalecane_znaki": 2600,
-        "klatka": {"mode": "image-to-video", "refy": False},    # image-to-video: start_image bez referencji
+        # 3.5.2: ta sama regula (image-to-video bez referencji) -> tryb "tlo" w reference-to-video; max 8 mediow razem (regula)
+        "klatka": {"tryb": "tlo", "mode": "reference-to-video", "refy": True, "max_obrazow_tla": 8},
     },
 }
 MODEL_DOMYSLNY = "seedance_2_5"
 DLUGOSC_DOMYSLNA = 10
+# 3.5.2: gotowe warianty modelu do wyboru obok MODELE (Z promptu, Start, Ustawienia, autopilot) - zbuduj() zamienia je na model z
+# MODELE + wymuszona rozdzielczosc i dlugosc (cena `generate cost` 2026-10-08: Seedance 2.5 480p 10 s = 30 kr, takze ze start_image)
+WARIANTY_MODELI = {
+    "seedance_2_5_480p": {"model": "seedance_2_5", "rozdzielczosc": "480p", "dlugosc": 10,
+                          "nazwa": "Seedance 2.5 · 480p · 10 s – tanio",
+                          "opis": "twarz pewna, tanio (10 s 480p ≈ 30 kr + zdjęcie ok. 3 kr), ale mniej ostre (480p)"},
+}
 PROG_1080P_S = 8          # zasada fabryki: <= 8 s -> 1080p, dluzsze -> 720p (fabryka.PROG_1080P_S)
 
 
@@ -1678,6 +1694,35 @@ SZABLON_KROTKI_KLATKA = (
     "No subtitles, captions, text overlays or watermarks."
 )
 
+# 3.5.2 (platny test #9 Noemi, Wan 3.0 Prime + klatka: "w ogole nie podobna, doslownie jak nie ona"): Wan/Gemini ze start_image
+# NIE dostaja zdjec persony (regula `model get`), wiec twarz wymyslaja. Tryb "tlo": krok 1 = zdjecie SAMEGO miejsca bez persony
+# (prompt_tla), krok 2 = wideo z image_references = zdjecia persony 1..N (+ zdjecie stroju) + tlo jako OSTATNI obraz, bez
+# start_image. Prompt: bohaterka = kobieta z obrazow 1..N, miejsce/kadr/swiatlo/napisy = ostatni obraz, kamera stoi tam, skad
+# zrobiono zdjecie tla, ona 6-10 m dalej, jedno ujecie. Bez slow z fabryka.SLOWA_RYZYKOWNE (test).
+KAMERA_TLO_KROTKA = (
+    "one continuous shot with no cuts and no change of framing: the phone, hand-held by someone {OPERATOR}, stays exactly where "
+    "the last reference image was taken from - the same spot, distance, angle and framing for the whole clip; it never moves "
+    "closer, never zooms, never pans and never follows her; only a small hand-held shake. She stays far away; she may walk "
+    "around or out of the frame; the camera does not chase her and she never becomes a close-up."
+)
+SZABLON_KROTKI_TLO = (
+    "Candid vertical 9:16 smartphone video, real footage, not a film: someone secretly films {IMIE} in {KROTKO}, Poland, on an "
+    "ordinary {PORA} in {SEZON}.\n"
+    "Who: {IMIE} is the young woman shown in {REF_K}: keep her face, eyes, skin, piercings and body exactly as in those photos "
+    "- exactly recognizable, never blended with anyone, only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}"
+    "Outfit: {STROJ}.\n"
+    "Where: the last reference image (image {K}) is a phone photo of this exact place without her, taken from the spot where "
+    "the phone stands. The video shows exactly that view: the same place, framing, camera angle, light, people and every sign, "
+    "label and price. Do not change, add, move, translate or animate any text and do not invent new signs or prices. {IMIE} is "
+    "in that place far from the camera, about 6-10 m away, {GDZIE}: a small full-body figure about a quarter to a third of the "
+    "frame height, with correct scale and her feet on the ground. Take only the place from image {K}, never her look.\n"
+    "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.{SUBTELNIE}\n"
+    "Camera: {KAMERA}\n"
+    "Look: the same light and phone look as the last reference image; realistic skin, no beauty filter.\n"
+    "Sound: {DZWIEK}\n"
+    "No subtitles, captions, text overlays or watermarks."
+)
+
 
 def szyldy(miejsce_id, nazwy="prawdziwe", obiekt_id=None):
     """Zdanie o napisach: prawdziwe polskie slowa i ceny w zl (user: wymyslone nazwy sklepow i 'Z6£' zamiast zl)."""
@@ -1871,6 +1916,29 @@ KLATKA_TLO = (
     "captions or watermarks."
 )
 
+# 3.5.2: zdjecie SAMEGO miejsca (tlo) dla Wan/Gemini - ten sam opis miejsca, polskie detale i napisy, ujecie z telefonu co klatka,
+# ale BEZ bohaterki: ludzie tylko w tle i przy bokach, miejsce, gdzie stanie (GDZIE_W_KLATCE), wolne. Opisy pozytywne (model obrazu
+# czesto dorysowuje to, czego "ma nie byc").
+TLO_SCENA = (
+    "A real, unedited vertical 9:16 photo from an ordinary iPhone: the view of {KROTKO}, Poland, on an ordinary {PORA} in "
+    "{SEZON}, just before someone starts secretly filming a short clip there. It shows only the place itself - not a photo "
+    "shoot, not a portrait, not an advert.\n"
+    "[Camera] The phone is held at chest height by someone {OPERATOR}, slightly tilted, framing a bit off-centre. {ZASLONA}\n"
+    "[Place] {OPIS} Real Polish details: {DETALE}; {POLSKIE}. {POGODA}\n"
+    "[People] Only a few ordinary Polish people of all ages in {SEZON} clothes, at the sides and in the background, busy with "
+    "their own things; nobody looks like a model, nobody poses and nobody looks at the camera. The spot where a customer or "
+    "passer-by would stand {GDZIE}, about 6-10 metres from the camera, is clearly visible and free: empty floor, nobody stands "
+    "there yet.\n"
+    "[Text] All text belongs to the place and is small and far from the camera - no big sign close to the lens, only a few short "
+    "signs readable. Every word is correct Polish with Polish letters, like {NAPISY}. {CENY} {BEZ_MAREK}\n"
+    "[Light] {SWIATLO}; just the ordinary light of the place, no studio light.\n"
+    "[Phone look] Deep phone focus (everything as sharp as the background, no bokeh), fine digital noise and grain, slightly "
+    "flat colours, auto exposure with bright windows and sky clipping to white, a touch of hand-shake softness. No colour "
+    "grading, no professional photography look.\n"
+    "[Check] A photo of the place with no main subject: the free spot in the middle distance stays empty and nobody stands "
+    "close to the camera in focus; no captions, overlays or watermarks."
+)
+
 
 def detale_klatki(miejsce_id):
     """(detale EN, napisy PL) dla klatki - konkretne polskie realia miejsca (KLATKA_MIEJSC), bez marek."""
@@ -1934,6 +2002,38 @@ def prompt_klatki(d):
     return re.sub(r"[ \t]+\n", "\n", tekst).strip(), sorted(set(zamienione))
 
 
+def _operator_bez_niej(op):
+    """'standing far back ..., 6-8 m behind her' -> bez odniesien do bohaterki (na zdjeciu tla jej nie ma - model nie dorysuje)."""
+    op = re.sub(r",?\s*\d+\s*[-–]\s*\d+\s*m\s+(?:away\s+)?(?:from|behind|in front of)\s+her\b", "", op or "")
+    op = re.sub(r"\b(below|behind|above|past)\s+her\b", r"\1", op)
+    return re.sub(r"\bher\b", "the free spot", op).strip(" ,") or "standing far away"
+
+
+def prompt_tla(d):
+    """3.5.2: prompt zdjecia SAMEGO miejsca (tlo, bez persony) dla Wan/Gemini - tryb "tlo". d jak w prompt_klatki (bez danych
+    persony): miejsce_id, krotko, pora_en, sezon_en, opis, detale, swiatlo, pogoda, kamera, operator, nazwy, nazwa_obiektu.
+    Zwraca prompt (angielski, bez zdjec - model obrazu robi go z samego tekstu)."""
+    d = dict(d, operator=_operator_bez_niej(OPERATOR_KLATKI if d.get("kamera") in KAMERY_W_RUCHU else d.get("operator")))
+    detale_pl, napisy = detale_klatki(d["miejsce_id"])
+    napisy = list(napisy) or ["OTWARTE", "ZAPRASZAMY"]
+    if d.get("nazwa_obiektu"):
+        napisy = [d["nazwa_obiektu"]] + napisy
+    # swiatlo miejsc bywa opisane na niej ("rim light on her hair") - na zdjeciu tla jej nie ma
+    swiatlo = re.sub(r"\s+behind her\b", "", d.get("swiatlo") or "")
+    swiatlo = ", ".join(c for c in swiatlo.split(", ") if not re.search(r"\bher\b", c)).strip() or "ordinary light"
+    tekst = TLO_SCENA.format(
+        KROTKO=d["krotko"], PORA=d["pora_en"], SEZON=d["sezon_en"], OPERATOR=d.get("operator") or "standing far away",
+        ZASLONA=ZASLONY.get(d.get("kamera"), ZASLONA_DOMYSLNA), OPIS=d.get("opis") or "",
+        DETALE=(d.get("detale") or "").rstrip(". "), POLSKIE=detale_pl or "Polish shop signs and prices",
+        POGODA=d.get("pogoda") or "", GDZIE=GDZIE_W_KLATCE.get(d["miejsce_id"]) or "in the middle distance",
+        NAPISY=", ".join(f"'{x}'" for x in napisy[:5]), CENY=CENY_KLATKI,
+        BEZ_MAREK=BEZ_MAREK_KLATKI if d.get("nazwy") != "prawdziwe" or not d.get("nazwa_obiektu") else
+        BEZ_MAREK_KLATKI.replace("No brand names", "No other brand names"),
+        SWIATLO=swiatlo[:1].upper() + swiatlo[1:])
+    tekst = re.sub(r"[ \t]{2,}", " ", tekst)
+    return re.sub(r"[ \t]+\n", "\n", tekst).strip()
+
+
 def _numery_obrazow_proste(tekst, przesun):
     import zdjecia_swap
     return zdjecia_swap._numery_obrazow(tekst, przesun)
@@ -1978,6 +2078,8 @@ def losuj_pomysl(slug=None, sezon=None, uzyte=None, los=None):
 
 
 def model_info(model):
+    if model in WARIANTY_MODELI:            # 3.5.2: wariant (np. seedance_2_5_480p) = jego model bazowy
+        model = WARIANTY_MODELI[model]["model"]
     if model not in MODELE:
         raise ValueError(f"Nieznany model '{model}'. Znam: {', '.join(MODELE)}")
     return MODELE[model]
@@ -2000,14 +2102,21 @@ def zbuduj(slug, opcje=None, los=None):
     Zwraca {"prompt", "obrazy" (sciezki), "znaki", "limit", "ostrzezenia", "ustalone", "model", "mode", "parametry",
             "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon", "glos", "komentarz",
             "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja",
-            "stroj_nazwa", "nagrywa", "sylwetka" (pelna/krotka/pominieta/brak), "klatka" (None albo {model, nazwa_modelu, parametry,
-            prompt, znaki, obrazy, tlo, mode_wideo, refy_w_wideo, kontrola, max_dodatkowych})}.
+            "stroj_nazwa", "nagrywa", "sylwetka" (pelna/krotka/pominieta/brak), "klatka" (None albo {tryb ("start" | "tlo" -
+            3.5.2 Wan/Gemini: zdjecie samego miejsca jako ostatnia referencja), model, nazwa_modelu, parametry, prompt, znaki,
+            obrazy, tlo, mode_wideo, refy_w_wideo, kontrola, max_dodatkowych})}. model moze byc wariantem z WARIANTY_MODELI
+            (np. seedance_2_5_480p) - wynik ma wtedy model bazowy i wymuszona rozdzielczosc/dlugosc.
     Rzuca ValueError przy zlych opcjach (model, dlugosc, brak zdjec persony, za dlugi prompt...)."""
     o = dict(opcje or {})
     u = dict(o.get("ustalone") or {})
     ziarno = u.get("ziarno") or random.randrange(1, 10 ** 9)
     los = los or random.Random(ziarno)
     model = o.get("model") or MODEL_DOMYSLNY
+    wariant = WARIANTY_MODELI.get(model)
+    if wariant:
+        # 3.5.2: gotowy wariant (np. Seedance 2.5 480p 10 s) = model z MODELE + wymuszona rozdzielczosc i dlugosc
+        model = wariant["model"]
+        o["rozdzielczosc"], o["dlugosc"] = wariant["rozdzielczosc"], wariant["dlugosc"]
     mi = model_info(model)
     try:
         dlugosc = int(o.get("dlugosc") or DLUGOSC_DOMYSLNA)
@@ -2112,6 +2221,22 @@ def zbuduj(slug, opcje=None, los=None):
         reakcje = REAKCJE[rk][1]
     zdziwienie = rk in REAKCJE_ZDZIWIENIE
 
+    # --- 3.5: pierwsza klatka (start frame) - domyslnie wl. (ustawienia globalne `pierwsza_klatka`), per rolka opcje
+    #     klatka "wl"/"wyl" i klatka_model; zdjecie usera z Pulpit/ROLKI AI/tla/<miejsce>/ jako baza (ustalone.tlo).
+    #     3.5.2: Wan/Gemini = tryb "tlo" (zdjecie samego miejsca jako ostatnia referencja, bez start_image) ---
+    import pierwsza_klatka
+    kl_ust = pierwsza_klatka.ustawienia()
+    kl_wybor = (o.get("klatka") or "").strip() or ("wl" if kl_ust["wlaczona"] else "wyl")
+    if kl_wybor not in ("wl", "wyl"):
+        raise ValueError("Pierwsza klatka: wl albo wyl.")
+    klatka_wl = kl_wybor == "wl" and bool(mi.get("klatka"))
+    kl_model = (o.get("klatka_model") or kl_ust["model"]).strip()
+    if klatka_wl and kl_model not in pierwsza_klatka.MODELE:
+        raise ValueError(f"Nieznany model pierwszej klatki '{kl_model}' (mozna: {', '.join(pierwsza_klatka.MODELE)}).")
+    tryb_tla = klatka_wl and mi["klatka"].get("tryb") == "tlo" and mi["szablon"] == "krotki"
+    # w trybie tla zdjecie miejsca jest ostatnim obrazem wideo - stroj (zdjecie) miesci sie, gdy persona + stroj + tlo w limicie
+    max_ze_strojem = (mi["klatka"].get("max_obrazow_tla") or mi["max_obrazow"]) - 1 if tryb_tla else mi["max_obrazow"]
+
     # --- stroj ---
     stroj_wybor = (o.get("stroj") or "zdjecia").strip()
     stroj_plik = None
@@ -2138,7 +2263,7 @@ def zbuduj(slug, opcje=None, los=None):
         stroj_id, stroj_nazwa = bib["id"], bib["nazwa"]
         u["stroj_id"], u["stroj_tryb"] = bib["id"], "biblioteka"
         opis = bib["opis_en"].rstrip(".")
-        if bib["plik"] and obrazy_n + 1 <= mi["max_obrazow"]:
+        if bib["plik"] and obrazy_n + 1 <= max_ze_strojem:
             stroj_plik = bib["plik"]
             k = obrazy_n + 1
             if mi["tokeny"]:
@@ -2152,7 +2277,8 @@ def zbuduj(slug, opcje=None, los=None):
                          f"only the outfit: ignore the hair, face, skin, tattoos and body of the person or mannequin wearing it)")
         else:
             if bib["plik"]:
-                ostrzezenia.append(f"{mi['nazwa']} przyjmuje max {mi['max_obrazow']} zdjec - stroj idzie tylko z opisu, bez zdjecia.")
+                ostrzezenia.append(f"{mi['nazwa']} przyjmuje max {max_ze_strojem + (1 if tryb_tla else 0)} zdjec"
+                                   + (" (z tlem)" if tryb_tla else "") + " - stroj idzie tylko z opisu, bez zdjecia.")
             stroj = f"{opis} - a bold goth street look (not the clothes from the reference photos)"
     elif stroj_wybor == "zdjecia":
         stroj = "the same outfit she wears in the reference photos"
@@ -2193,6 +2319,11 @@ def zbuduj(slug, opcje=None, los=None):
                      "skin, tattoos and body of the person or mannequin wearing it)")
     else:
         raise ValueError(f"Nieznany wybor stroju '{stroj_wybor}'.")
+    if tryb_tla:
+        # 3.5.2: obrazy wideo = persona 1..N, [stroj N+1], tlo ostatnie - numery wprost (ostatnie zdjecie to juz tlo, nie stroj)
+        ref_k = "reference " + _obrazy_klatki_tekst(1, obrazy_n)
+        if stroj_plik:
+            stroj = stroj.replace("the last reference photo", f"reference image {obrazy_n + 1}")
     if stroj_plik:
         stroj_klatki = (bib["opis_en"].rstrip(".") + ", a bold goth street look") if bib else "her outfit"
     else:
@@ -2270,26 +2401,21 @@ def zbuduj(slug, opcje=None, los=None):
                    else (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA)).format(OPERATOR=operator, RUCH=ruch,
                                                                                      DYSTANS=DYSTANS_UKRYTEJ)
 
-    # --- 3.5: pierwsza klatka (start frame) - domyslnie wl. (ustawienia globalne `pierwsza_klatka`), per rolka opcje
-    #     klatka "wl"/"wyl" i klatka_model; zdjecie usera z Pulpit/ROLKI AI/tla/<miejsce>/ jako baza (ustalone.tlo) ---
-    import pierwsza_klatka
-    kl_ust = pierwsza_klatka.ustawienia()
-    kl_wybor = (o.get("klatka") or "").strip() or ("wl" if kl_ust["wlaczona"] else "wyl")
-    if kl_wybor not in ("wl", "wyl"):
-        raise ValueError("Pierwsza klatka: wl albo wyl.")
-    klatka_wl = kl_wybor == "wl" and bool(mi.get("klatka"))
-    kl_model = (o.get("klatka_model") or kl_ust["model"]).strip()
-    if klatka_wl and kl_model not in pierwsza_klatka.MODELE:
-        raise ValueError(f"Nieznany model pierwszej klatki '{kl_model}' (mozna: {', '.join(pierwsza_klatka.MODELE)}).")
     if klatka_wl:
-        # 3.5.1: jedno ciagle ujecie z miejsca klatki (bez ciec, zoomu, podchodzenia i gonienia jej) zamiast ruchu kamery
+        # 3.5.1: jedno ciagle ujecie z miejsca klatki (bez ciec, zoomu, podchodzenia i gonienia jej) zamiast ruchu kamery;
+        # 3.5.2 (tryb tla): kamera stoi tam, skad zrobiono zdjecie tla (ostatni obraz)
         op_kl = OPERATOR_KLATKI if kamera in KAMERY_W_RUCHU else operator
-        kamera_blok = (KAMERA_KLATKA if mi["szablon"] == "pelny" else KAMERA_KLATKA_KROTKA).format(OPERATOR=op_kl, IMIE=imie)
+        if tryb_tla:
+            kamera_blok = KAMERA_TLO_KROTKA.format(OPERATOR=op_kl)
+        else:
+            kamera_blok = (KAMERA_KLATKA if mi["szablon"] == "pelny" else KAMERA_KLATKA_KROTKA).format(OPERATOR=op_kl, IMIE=imie)
         if pomysl:
             akcja = AKCJA_JEDNO_UJECIE + akcja      # beaty z czasami (0-3 s: ...) to NIE osobne ujecia
 
+    zamienione_wideo = set()
+
     def skladaj(syl):
-        blok_syl = f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""
+        blok_syl =f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""
         if mi["szablon"] == "pelny":
             tekst_p = (SZABLON_PELNY_KLATKA if klatka_wl else SZABLON_PELNY).format(
                 SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
@@ -2300,14 +2426,22 @@ def zbuduj(slug, opcje=None, los=None):
                 SWIATLO=(swiatlo[:1].lower() + swiatlo[1:]) if klatka_wl else swiatlo,
                 DZWIEK=DZWIEK_BEZ_MOWY.format(DZWIEKI=m["dzwieki"], IMIE=imie))
         else:
-            # zdjecie stroju jest ostatnim "reference photo" - twarz, wlosy i cialo tylko z pierwszych N (ref_k)
-            tekst_p = (SZABLON_KROTKI_KLATKA if klatka_wl else SZABLON_KROTKI).format(
+            # zdjecie stroju jest ostatnim "reference photo" - twarz, wlosy i cialo tylko z pierwszych N (ref_k);
+            # 3.5.2 tryb tla: persona 1..N, stroj N+1, tlo ostatnie (K)
+            szablon = SZABLON_KROTKI_TLO if tryb_tla else (SZABLON_KROTKI_KLATKA if klatka_wl else SZABLON_KROTKI)
+            tekst_p = szablon.format(
+                K=obrazy_n + (1 if stroj_plik else 0) + 1, GDZIE=GDZIE_W_KLATCE.get(miejsce_id) or "in the middle distance",
                 IMIE=imie, REF_K=ref_k, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"],
                 TOZ=_WZORZEC_TOKENU.sub(ref_k, toz).rstrip("."), WLOSY=wlosy.replace("the reference photos", ref_k),
                 WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "",
                 SYLWETKA=blok_syl.replace("the reference photos", ref_k), STROJ=stroj,
                 OPIS=_pierwsze_zdanie(m["opis"]), SZYLDY=napisy, AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie,
                 KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=DZWIEK_KROTKI_BEZ_MOWY.format(DZWIEKI=m["dzwieki"]))
+            if tryb_tla:
+                # 3.5.2: opisy persony (prompt A, sylwetka, stroj) bez slow, ktore filtr NSFW lubi blokowac - jak w klatce
+                import zdjecia_swap
+                tekst_p, zam = zdjecia_swap.bez_slow_ryzykownych(tekst_p)
+                zamienione_wideo.update(zam)
         return re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", tekst_p)).strip()
 
     # sylwetka: pelna; gdy prompt nie miesci sie w limicie modelu - pierwsze zdanie; gdy i to nie - bez niej (z ostrzezeniem)
@@ -2324,12 +2458,18 @@ def zbuduj(slug, opcje=None, los=None):
         if sylwetka_wersja != "pelna":
             ostrzezenia.append(f"Sylwetka persony nie zmiescila sie w limicie {mi['nazwa']} ({mi['limit_znakow']} znakow) - "
                                + ("poszlo tylko pierwsze zdanie." if sylwetka_wersja == "krotka" else "prompt jest bez niej."))
+    if zamienione_wideo:
+        ostrzezenia.append("W prompcie wideo zamienilem slowa, ktore filtr NSFW lubi blokowac: "
+                           + ", ".join(sorted(zamienione_wideo)) + ".")
 
     obrazy = obrazy_rolki(slug, stroj_plik)
     if not obrazy:
         raise ValueError(f"{imie} nie ma zdjec w referencje/ - bez nich model nie wie, kogo pokazac.")
     if len(obrazy) > mi["max_obrazow"]:
         raise ValueError(f"{mi['nazwa']} przyjmuje max {mi['max_obrazow']} zdjec, a ta rolka ma {len(obrazy)}.")
+    if tryb_tla and len(obrazy) + 1 > max_ze_strojem + 1:
+        raise ValueError(f"{mi['nazwa']} przyjmuje max {max_ze_strojem + 1} zdjec razem z tlem, a ta rolka ma {len(obrazy)} + tlo "
+                         f"- zostaw mniej zdjec w referencje/ albo wylacz pierwsza klatke.")
     bledy, uwagi = sprawdz(prompt, model, len(obrazy))
     if bledy:
         raise ValueError(" ".join(bledy))
@@ -2346,32 +2486,46 @@ def zbuduj(slug, opcje=None, los=None):
             chce = tlo_wybor if tlo_wybor in po_nazwie else (u.get("tlo") if u.get("tlo") in po_nazwie else None)
             tlo = po_nazwie[chce] if chce else _wybierz(los, tla)
         u["tlo"] = os.path.basename(tlo) if tlo else ""
+        nazwa_obiektu = (obiekty_miejsca(miejsce_id)[obiekt][0].split(" (")[0]
+                         if nazwy == "prawdziwe" and obiekt and miejsce_id in ("galeria_foodcourt", "galeria_pasaz", "dworzec",
+                                                                              "peron", "metro") else None)
         refy_kl = list(baza.sciezki_referencji(slug))
         max_kl = pierwsza_klatka.max_obrazow(kl_model)
+        if tryb_tla:
+            # 3.5.2: krok 1 = zdjecie SAMEGO miejsca (bez persony, bez zdjec); zdjecie usera z tla/<miejsce> = gotowe tlo (0 kr)
+            kp = prompt_tla({"miejsce_id": miejsce_id, "krotko": krotko, "pora_en": PORY_DNIA[pora][1], "sezon_en": sz["en"],
+                             "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
+                             "operator": operator, "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
+            refy_kl, max_kl = [], None
         if max_kl:
             miejsce_kl = max_kl - (1 if tlo else 0) - (1 if stroj_plik else 0)
             if len(refy_kl) > miejsce_kl:
                 ostrzezenia.append(f"{pierwsza_klatka.MODELE[kl_model]['nazwa']} przyjmuje max {max_kl} zdjec - do klatki ide z "
                                    f"pierwszymi {miejsce_kl} zdjeciami persony (z {len(refy_kl)}).")
                 refy_kl = refy_kl[:max(1, miejsce_kl)]
-        nazwa_obiektu = (obiekty_miejsca(miejsce_id)[obiekt][0].split(" (")[0]
-                         if nazwy == "prawdziwe" and obiekt and miejsce_id in ("galeria_foodcourt", "galeria_pasaz", "dworzec",
-                                                                              "peron", "metro") else None)
-        kp, zamienione = prompt_klatki({
-            "imie": imie, "miejsce_id": miejsce_id, "krotko": krotko, "pora_en": PORY_DNIA[pora][1], "sezon_en": sz["en"],
-            "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
-            "operator": operator, "czynnosc": czynnosc, "toz": tozsamosc(slug, bez_wlosow=True, limit=700),
-            "wlosy": wlosy, "wzrost": wzrost, "sylwetka": sylwetka, "stroj": stroj_klatki, "stroj_plik": bool(stroj_plik),
-            "n_ref": len(refy_kl), "tlo": bool(tlo), "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
-        if zamienione:
-            ostrzezenia.append("W opisie persony do klatki zamienilem slowa, ktore filtr NSFW lubi blokowac: "
-                               + ", ".join(zamienione) + ".")
-        klatka = {"model": kl_model, "nazwa_modelu": pierwsza_klatka.MODELE[kl_model]["nazwa"],
+        if not tryb_tla:
+            kp, zamienione = prompt_klatki({
+                "imie": imie, "miejsce_id": miejsce_id, "krotko": krotko, "pora_en": PORY_DNIA[pora][1], "sezon_en": sz["en"],
+                "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
+                "operator": operator, "czynnosc": czynnosc, "toz": tozsamosc(slug, bez_wlosow=True, limit=700),
+                "wlosy": wlosy, "wzrost": wzrost, "sylwetka": sylwetka, "stroj": stroj_klatki, "stroj_plik": bool(stroj_plik),
+                "n_ref": len(refy_kl), "tlo": bool(tlo), "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
+            if zamienione:
+                ostrzezenia.append("W opisie persony do klatki zamienilem slowa, ktore filtr NSFW lubi blokowac: "
+                                   + ", ".join(zamienione) + ".")
+        klatka = {"tryb": "tlo" if tryb_tla else "start", "model": kl_model,
+                  "nazwa_modelu": pierwsza_klatka.MODELE[kl_model]["nazwa"],
                   "parametry": dict(pierwsza_klatka.MODELE[kl_model]["parametry"]), "prompt": kp, "znaki": len(kp),
-                  "obrazy": ([tlo] if tlo else []) + refy_kl + ([stroj_plik] if stroj_plik else []), "tlo": tlo,
-                  "mode_wideo": mi["klatka"]["mode"], "refy_w_wideo": bool(mi["klatka"]["refy"]),
+                  # tryb tla: obrazy klatki puste (model obrazu robi miejsce z samego tekstu); zdjecie usera = gotowe tlo
+                  "obrazy": [] if tryb_tla else ([tlo] if tlo else []) + refy_kl + ([stroj_plik] if stroj_plik else []),
+                  "tlo": tlo, "mode_wideo": mi["klatka"]["mode"], "refy_w_wideo": bool(mi["klatka"]["refy"]),
                   "kontrola": bool(kl_ust["kontrola"]), "max_dodatkowych": int(kl_ust["max_dodatkowych"])}
-        if not mi["klatka"]["refy"]:
+        if tryb_tla:
+            ostrzezenia.append(f"{mi['nazwa']}: najpierw zdjecie samego miejsca (bez {imie}"
+                               + (f"; Twoje zdjecie {os.path.basename(tlo)} - bez generowania" if tlo else "")
+                               + f"), potem wideo ze zdjec persony + tego tla jako ostatniego obrazu (model nie laczy pierwszej "
+                               f"klatki ze zdjeciami persony). Napisy moga wyjsc mniej dokladne niz przy Seedance.")
+        elif not mi["klatka"]["refy"]:
             ostrzezenia.append(f"{mi['nazwa']} nie laczy pierwszej klatki ze zdjeciami persony (tak ma model) - twarz w wideo "
                                f"bierze tylko z klatki.")
     elif kl_wybor == "wl" and not mi.get("klatka"):
@@ -2444,11 +2598,22 @@ def sprawdz(prompt, model, n_obrazow):
 
 # ---------------- katalog dla panelu ----------------
 
+def _modele_katalogu():
+    """Modele do listy 'Z promptu': MODELE, a zaraz za modelem jego gotowe warianty (3.5.2: Seedance 2.5 480p 10 s)."""
+    wynik = []
+    for k, v in MODELE.items():
+        wynik.append({"id": k, "nazwa": v["nazwa"], "opis": v["opis"], "dlugosci": list(v["dlugosci"]),
+                      "rozdzielczosci": list(v["rozdzielczosci"]), "max_obrazow": v["max_obrazow"]})
+        wynik += [{"id": wk, "nazwa": w["nazwa"], "opis": w["opis"], "dlugosci": [w["dlugosc"]],
+                   "rozdzielczosci": [w["rozdzielczosc"]], "max_obrazow": v["max_obrazow"], "wariant_od": k}
+                  for wk, w in WARIANTY_MODELI.items() if w["model"] == k]
+    return wynik
+
+
 def katalog(slug=None):
     """Wszystko do formularza 'Z promptu' (bez zapytan do dostawcow)."""
     kat = {
-        "modele": [{"id": k, "nazwa": v["nazwa"], "opis": v["opis"], "dlugosci": list(v["dlugosci"]),
-                    "rozdzielczosci": list(v["rozdzielczosci"]), "max_obrazow": v["max_obrazow"]} for k, v in MODELE.items()],
+        "modele": _modele_katalogu(),
         "model_domyslny": MODEL_DOMYSLNY, "dlugosc_domyslna": DLUGOSC_DOMYSLNA, "prog_1080p_s": PROG_1080P_S,
         "pomysly": [{"id": p["id"], "pl": p["pl"], "miejsce": p["miejsce"]} for p in POMYSLY],
         "miejsca": [{"id": k, "nazwa": v["nazwa"], "kat": v["kat"]} for k, v in MIEJSCA.items()],
