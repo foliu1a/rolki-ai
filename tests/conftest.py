@@ -12,6 +12,15 @@ import higgsfield_cli  # noqa: E402
 import sekrety  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def bez_kolejki_zdjec_w_tle(monkeypatch):
+    """Dyspozytor zdjec panelu (watek w tle, 3.3) nie moze przezyc testu: konczymy go PRZED cofnieciem monkeypatcha (katalog person,
+    udawane CLI) - inaczej siegnalby do prawdziwych person i prawdziwego CLI. Zalezy od monkeypatch, wiec sprzata przed nim."""
+    yield
+    import zdjecia_swap
+    zdjecia_swap.KOLEJKA.zakoncz()
+
+
 @pytest.fixture
 def dane(tmp_path, monkeypatch):
     """Przekierowuje baza.py na tmp_path (modelki/, stan.json, budzet.json, dziennik, klucze)."""
@@ -27,6 +36,9 @@ def dane(tmp_path, monkeypatch):
     monkeypatch.setenv("ROLKI_PULPIT", str(tmp_path / "pulpit" / "ROLKI AI"))   # foldery "na pulpicie" tez w tmp
     for env in ("YAPPER_API_KEY", "WAVESPEED_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(env, raising=False)
+    # rolki z promptu robione przez autopilota (3.3, domyslnie 1 dziennie od 10:00) - w testach wylaczone, zeby przebieg
+    # autopilota nie generowal nic ponad to, co sprawdza dany test (o 10:00 wynik zalezalby od godziny); testy 3.3 wlaczaja same
+    baza.zapisz_ustawienia_globalne(autopilot_z_promptu={"dziennie": 0})
     import time
     monkeypatch.setattr(time, "sleep", lambda s: None)
     from dostawcy import wavespeed, yapper
@@ -86,6 +98,8 @@ class UdawaneCLI:
     `generate get` (job) go oddaje, `generate list` (joby) - liste. Saldo spada tylko przy udanym jobie."""
 
     def __init__(self, saldo=1000, koszt=45):
+        import threading
+        self._lock = threading.RLock()  # zdjecia (3.3) wysylaja sie rownolegle - numer joba i saldo liczone pod blokada
         self.saldo = saldo
         self.cena = koszt
         self.generacje = []      # (model, params, media) - kazde WYSLANIE (generate create)
@@ -115,37 +129,41 @@ class UdawaneCLI:
 
     def generuj(self, model, params=None, media=None, wait=True, wait_timeout="30m"):
         from datetime import datetime, timezone
-        self.generacje.append((model, params, media))
-        wynik = self.wyniki.pop(0) if self.wyniki else None
-        if isinstance(wynik, Exception):
-            raise wynik
-        jid = f"job{len(self.generacje)}"
-        if wynik is None:
-            self.saldo -= self.cena
-            wynik = {"id": jid, "status": "completed", "result": {"url": f"https://cdn.example/wynik{len(self.generacje)}.mp4"}}
-        else:
-            wynik = dict(wynik)
-            wynik.setdefault("id", jid)
-        wideo = (media or {}).get("video")
-        obrazy = (media or {}).get("image") or []
-        wynik.setdefault("job_type", model)
-        wynik.setdefault("created_at", datetime.now(timezone.utc).isoformat())
-        wynik.setdefault("params", {"prompt": (params or {}).get("prompt"),
-                                    "medias": ([{"role": "video", "data": {"id": wideo}}] if wideo else [])
-                                    + [{"role": "image", "data": {"id": o}} for o in obrazy]})
-        self.serwer[wynik["id"]] = wynik
+        with self._lock:
+            self.generacje.append((model, params, media))
+            n = len(self.generacje)
+            wynik = self.wyniki.pop(0) if self.wyniki else None
+            if isinstance(wynik, Exception):
+                raise wynik
+            jid = f"job{n}"
+            if wynik is None:
+                self.saldo -= self.cena
+                wynik = {"id": jid, "status": "completed", "result": {"url": f"https://cdn.example/wynik{n}.mp4"}}
+            else:
+                wynik = dict(wynik)
+                wynik.setdefault("id", jid)
+            wideo = (media or {}).get("video")
+            obrazy = (media or {}).get("image") or []
+            wynik.setdefault("job_type", model)
+            wynik.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+            wynik.setdefault("params", {"prompt": (params or {}).get("prompt"),
+                                        "medias": ([{"role": "video", "data": {"id": wideo}}] if wideo else [])
+                                        + [{"role": "image", "data": {"id": o}} for o in obrazy]})
+            self.serwer[wynik["id"]] = wynik
         if wait:
             return wynik
         return {"id": wynik["id"], "status": "queued"}      # jak CLI bez --wait: samo id
 
     def job(self, jid):
-        self.odpytania.append(jid)
-        if jid not in self.serwer:
-            raise higgsfield_cli.HiggsfieldBlad(f"job {jid} not found")
-        return self.serwer[jid]
+        with self._lock:
+            self.odpytania.append(jid)
+            if jid not in self.serwer:
+                raise higgsfield_cli.HiggsfieldBlad(f"job {jid} not found")
+            return self.serwer[jid]
 
     def joby(self, typ=None, ile=20):
-        return list(self.serwer.values())[::-1][:ile]
+        with self._lock:
+            return list(self.serwer.values())[::-1][:ile]
 
     def pobierz(self, url, sciezka):
         os.makedirs(os.path.dirname(sciezka), exist_ok=True)

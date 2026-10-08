@@ -186,7 +186,7 @@ function wstawIkony(root = document) {
 // Statusy rolek / zdjęć / lipsyncu – jedno proste słowo zamiast nazwy technicznej.
 const SLOWA_STATUSU = {
   rolka: { nowy: 'czeka', w_toku: 'generuje się', wygenerowany: 'zrobiona (jeszcze nie wyprana)', postprodukcja: 'w obróbce', gotowe: 'gotowa', blad: 'nie wyszło', pobieranie: 'pobieram' },
-  zdjecie: { nowy: 'czeka', w_toku: 'robi się', wygenerowany: 'zrobione', postprodukcja: 'w obróbce', gotowe: 'gotowe', blad: 'nie wyszło', niepewne: 'sprawdź w apce', pobieranie: 'pobieram' },
+  zdjecie: { nowy: 'czeka', w_toku: 'robi się', w_kolejce: 'w kolejce', anulowane: 'zatrzymane', wygenerowany: 'zrobione', postprodukcja: 'w obróbce', gotowe: 'gotowe', blad: 'nie wyszło', niepewne: 'sprawdź w apce', pobieranie: 'pobieram' },
   lipsync: { nowy: 'w trakcie', wygenerowany: 'zrobiony', postprodukcja: 'w obróbce', gotowe: 'gotowy', blad: 'nie wyszło' },
 };
 function slowoStatusu(status, rodzaj = 'rolka') {
@@ -194,7 +194,7 @@ function slowoStatusu(status, rodzaj = 'rolka') {
   return m[status] || SLOWA_STATUSU.rolka[status] || status || '';
 }
 function kolorStatusu(status) {
-  return { nowy: 'akcent', w_toku: 'uwaga', wygenerowany: 'uwaga', postprodukcja: 'uwaga', gotowe: 'ok', blad: 'zle', pobieranie: 'uwaga' }[status] || '';
+  return { nowy: 'akcent', w_toku: 'uwaga', w_kolejce: 'akcent', wygenerowany: 'uwaga', postprodukcja: 'uwaga', gotowe: 'ok', blad: 'zle', pobieranie: 'uwaga' }[status] || '';
 }
 
 // Błędy: fragment tekstu technicznego -> jedno zdanie po ludzku (kolejność ma znaczenie).
@@ -238,7 +238,7 @@ function prostyBlad(tekst) {
 // Zadania w tle: nazwy i proste podsumowania wyników.
 const CO_ROBIE = { wznow: 'kończę rolki i zdjęcia przerwane zamknięciem', skanuj: 'sprawdzam nowe filmiki', koszt: 'liczę koszt', generuj: 'rolki', pierz: 'pranie w Media Tool', lipsync: 'dopasowuję usta', zdjecia: 'zdjęcia z opisu', swap: 'zdjęcia (podmiana postaci)', podpis: 'podpis', tts: 'głos z tekstu', autopilot_raz: 'przebieg autopilota', autopilot: 'autopilot', telegram_wyslij: 'wysyłam na telefon', podglad: 'tani podgląd' };
 const NAZWY_AKCJI = { wznow: 'Dokończenie przerwanych rolek i zdjęć', skanuj: 'Sprawdzenie filmików', koszt: 'Liczenie kosztu', generuj: 'Robienie rolek', pierz: 'Pranie w Media Tool', lipsync: 'Dopasowanie ust', zdjecia: 'Zdjęcia z opisu', swap: 'Zdjęcia – podmiana postaci', podpis: 'Podpis', tts: 'Głos z tekstu', autopilot_raz: 'Przebieg autopilota', autopilot: 'Autopilot', telegram_wyslij: 'Wysłanie na telefon', podglad: 'Tani podgląd' };
-const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia' };
+const ETAPY_AUTOPILOTA = { skanuj: 'sprawdza filmiki', generuj: 'robi rolki', podpisy: 'dobiera podpisy', zdjecia: 'robi zdjęcia', z_promptu: 'robi rolkę z promptu' };
 
 function prostyWynik(typ, w) {
   const n = x => (Array.isArray(x) ? x.length : (Number(x) || 0));
@@ -571,6 +571,8 @@ async function odswiez(wymusSaldo = false) {
     state.pulpit = d.pulpit || '';
     state.dziennikOstatni = d.dziennik_ostatni || null;
     state.wersja = d.wersja || '';
+    state.zdjeciaKolejka = d.zdjecia_kolejka || null;          // 3.3: zdjęcia w toku / w kolejce (wszystkie persony + aktywna)
+    state.autopilotZPromptu = d.autopilot_z_promptu || null;   // 3.3: „Rolki z promptu: dziś X z N (…)”
     renderPersonaSelect(); renderKredyty(); renderOdznaki(); renderKonsolaStan(); renderHamulecRolek();
     const wer = $('#wersja');
     const werHtml = state.wersja ? `<span class="ikona">${ikona('ksiezyc')}</span><span>Rolki AI v${esc(state.wersja)}</span>` : '';
@@ -583,7 +585,13 @@ async function odswiez(wymusSaldo = false) {
       if (state.strona === 'start') ladujStart(true).catch(() => {});
       else if (state.strona === 'rolki' || state.strona === 'z-promptu') ladujRolki(true).catch(() => {});
       else if (state.strona === 'ustawienia') renderJakosc();
-      else if (state.strona === 'zdjecia' && state.zadanie && state.zadanie.trwa) ladujGalerieZdjec().catch(() => {});   // postęp zdjęć
+      else if (state.strona === 'zdjecia') {
+        // postęp zdjęć: odświeżamy wyniki, póki coś się robi albo czeka (i raz po końcu - ostatnie karty „gotowe”)
+        const aktywne = zdjeciaAktywne();
+        if (aktywne || state.swBylyAktywne || (state.zadanie && state.zadanie.trwa)) ladujGalerieZdjec().catch(() => {});
+        state.swBylyAktywne = aktywne > 0;
+        renderSwKolejka();
+      }
     }
     if (state.zadanie && state.zadanie.trwa) startKonsoli();
     state.bledyOdswiezania = 0;
@@ -1154,7 +1162,9 @@ function renderAutopilot() {
   $('#autopilot-opis').textContent = `Co ${u.autopilot_co_minut || 15} min sprawdzi folder, zrobi rolki, wypierze je w Media Tool, zrobi zdjęcia, dobierze podpisy i wyśle gotowe na Telegram. Pilnuje limitów kredytów. Ust nie dopasowuje – lipsync robisz ręcznie.`;
   let txt, klasa = '';
   if (a.trwa) {
-    txt = `teraz pracuje: ${ETAPY_AUTOPILOTA[a.etap] || 'sprawdza, co jest do zrobienia'}${a.modelka ? ` (${a.modelka})` : ''}`; klasa = 'praca';
+    txt = a.opis ? `teraz: ${a.opis}`
+      : `teraz pracuje: ${ETAPY_AUTOPILOTA[a.etap] || 'sprawdza, co jest do zrobienia'}${a.modelka ? ` (${a.modelka})` : ''}`;
+    klasa = 'praca';
   } else if (dlaPersony) {
     const m = a.nastepny ? minutDo(a.nastepny) : null;
     txt = 'włączony · ' + (m === null ? 'zaraz pierwsze sprawdzenie' : (m <= 0 ? 'zaraz sprawdzi folder' : `następne sprawdzenie za ${m} min`));
@@ -1167,6 +1177,17 @@ function renderAutopilot() {
   const el = $('#autopilot-status');
   el.innerHTML = `<span class="kropka ${klasa === 'praca' ? 'kredyty pulsuje' : (klasa ? 'ok' : '')}"></span>${esc(txt)}`;
   el.className = 'autopilot-status' + (klasa ? ' ' + klasa : '');
+  // 3.3: rolki z promptu robione przez autopilota (wspólna pula person) – „Rolki z promptu: dziś X z N (następna po 10:00 / gotowe)”
+  const zp = state.autopilotZPromptu || {};
+  const elz = $('#autopilot-z-promptu');
+  if (elz) {
+    // przerysowanie tylko przy zmianie tekstu (innerHTML z SVG przeglądarka serializuje inaczej - nie porównujemy HTML)
+    if (elz.dataset.tekst !== (zp.tekst || '')) {
+      elz.dataset.tekst = zp.tekst || '';
+      elz.innerHTML = zp.tekst ? `${ikona('bolt')}<span>${esc(zp.tekst)}</span><a href="#ustawienia/autopilot">zmień</a>` : '';
+    }
+    elz.className = 'autopilot-z-promptu' + (zp.stan === 'w_toku' ? ' praca' : (zp.stan === 'gotowe' ? ' ok' : ''));
+  }
   // telefon (Telegram): podłączony / czeka na /start / nie podłączony
   const t = state.telegram || {};
   const tel = $('#autopilot-telefon');
@@ -2431,6 +2452,7 @@ async function ladujZdjecia() {
   renderSwPersona();
   renderSwWstawione();
   renderSwPrzycisk();
+  renderSwKolejka();
   if (!sw.wycena && !sw.liczy && !sw.wgrywa) swWycenaPozniej(0);
   // stary formularz (zdjęcia z opisu – autopilot) w „Zaawansowane”
   const s = state.stan || {};
@@ -2619,9 +2641,10 @@ function swIle(krok) {
   swWycenaPozniej();
 }
 
+// 3.3: każde kliknięcie startuje od razu – niezależnie od innych zdjęć i od rolek (bez „Coś już się dzieje”). Zdjęcia idą do
+// kolejki, dyspozytor w tle wysyła je równolegle (do „Ile zdjęć naraz”), karty „robi się…/w kolejce…” są od razu w Wynikach.
 async function swGeneruj() {
   const sw = state.sw;
-  if (state.zadanie && state.zadanie.trwa) { toast('Coś już się dzieje — poczekaj, aż skończy, albo kliknij STOP.', 'uwaga'); return; }
   if (!sw.zrodlo) { toast('Najpierw wstaw zdjęcie (przeciągnij je, wybierz plik albo wklej Ctrl+V).', 'uwaga'); return; }
   let w = sw.wycena;
   if (!w || w.kr === null || w.kr === undefined) w = await swWycena();      // bez świeżej ceny: najpierw darmowa wycena
@@ -2630,25 +2653,71 @@ async function swGeneruj() {
   const k = sw.katalog || {};
   const stroj = $('#sw-stroj').value === k.stroj_ze_zdjecia ? 'ze zdjęcia' : tekstOpcji('#sw-stroj').replace(/^★ /, '');
   const ile = `${w.ile} ${odmiana(w.ile, 'zdjęcie', 'zdjęcia', 'zdjęć')}`;
+  const naraz = (state.zdjeciaKolejka && state.zdjeciaKolejka.limit) || 4;
   const tresc = `<p><b>${esc(sw.zrodlo.nazwa)}</b> → <b>${esc(nazwaPersony(state.aktywna) || state.aktywna)}</b> (twarz, włosy i sylwetka persony; kadr, poza i tło ze zdjęcia)</p>`
     + `<p class="muted">${esc(w.opis)} · strój: ${esc(stroj)} · ${esc(ile)}</p>`
-    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b>${w.ile > 1 ? ` (${esc(liczba(w.kr_sztuka))} kr za zdjęcie, każde osobno)` : ''}.`
+    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b>${w.ile > 1 ? ` (${esc(liczba(w.kr_sztuka))} kr za zdjęcie, każde osobno, wysyłam od razu – do ${esc(naraz)} naraz)` : ''}.`
     + (w.saldo !== null && w.saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(Math.round((w.saldo - w.kr) * 100) / 100))} kr</b>.` : '') + '</p>'
     + '<p class="dialog-uwaga">To wyda kredyty. Jeśli tuż przed wysłaniem cena wyjdzie wyższa – nic nie wyślę.</p>';
   const ok = await potwierdz({ tytul: `Zrobić ${ile}?`, tresc, ok: `Generuj (${liczba(w.kr)} kr)` });
   if (!ok) return;
   try {
     const r = await api('/api/swap', 'POST', Object.assign({ zrodlo: sw.zrodlo.zrodlo, kr: w.kr_sztuka }, swOpcje()));
-    state.konsola.start = null; state.konsola.trwalo = true;
-    state.zadanie = Object.assign({ trwa: true, typ: 'swap' }, r.zadanie || {});
-    toast(`Robię ${ile} – pojawią się niżej w Wynikach i w folderze „tu zdjęcia zrobione”.`, 'info');
-    if (state.pelny) otworzKonsole(true);
-    startKonsoli(); renderKonsolaStan();
-    sw.wycena = null; renderSwPrzycisk(); swWycenaPozniej(1500);
-    setTimeout(() => { ladujGalerieZdjec().catch(() => {}); }, 2000);
+    const k = r.kolejka || {};
+    if (k.limit) state.zdjeciaKolejka = k;
+    const wszystkie = (Number(k.w_toku) || 0) + (Number(k.w_kolejce) || 0);     // w toku + czekające (wszystkie persony)
+    toast(wszystkie > (Number(k.limit) || 4)
+      ? `Dodane: ${ile}. Naraz robię ${k.limit} – reszta czeka w kolejce i pójdzie sama.`
+      : `Robię ${ile} – pojawią się niżej w Wynikach i w folderze „tu zdjęcia zrobione”.`, 'info');
+    sw.wycena = null; renderSwPrzycisk(); swWycenaPozniej(800);
+    state.swBylyAktywne = true;
+    await ladujGalerieZdjec();
+    renderSwKolejka();
+    setTimeout(() => { ladujGalerieZdjec().catch(() => {}); odswiez(); }, 1500);
   } catch (e) {
     bladToast(e);
   }
+}
+
+// ile zdjęć aktywnej persony się robi albo czeka w kolejce (z /api/stan.zdjecia_kolejka)
+function zdjeciaAktywne() {
+  const p = ((state.zdjeciaKolejka || {}).persona) || {};
+  return (Number(p.w_toku) || 0) + (Number(p.w_kolejce) || 0);
+}
+
+// Pasek nad Wynikami: „Robi się 2 · w kolejce 1 – naraz do 4” + STOP (kolejka nie idzie, przyjęte dokończą się później).
+function renderSwKolejka() {
+  const el = $('#sw-kolejka');
+  if (!el) return;
+  const k = state.zdjeciaKolejka || {}, p = k.persona || {};
+  const wt = Number(p.w_toku) || 0, wk = Number(p.w_kolejce) || 0;
+  const inne = Math.max(0, (Number(k.w_toku) || 0) + (Number(k.w_kolejce) || 0) - wt - wk);
+  el.hidden = !(wt || wk || inne);
+  if (el.hidden) return;
+  const czesci = [];
+  if (wt) czesci.push(`robi się ${wt}`);
+  if (wk) czesci.push(`w kolejce ${wk}`);
+  if (inne) czesci.push(`inne persony: ${inne}`);
+  let tekst = `Zdjęcia: ${czesci.join(' · ')} – naraz do ${k.limit || 4}.`;
+  if (k.zatrzymane && !wk) tekst += ' Zatrzymane – te, które Higgsfield już przyjął, dokończą się przy następnym „Generuj”.';
+  $('#sw-kolejka-tekst').textContent = tekst;
+  el.classList.toggle('zatrzymane', !!k.zatrzymane && !wk);
+  $('#sw-kolejka-kropka').className = 'kropka ' + (k.zatrzymane && !wk ? '' : 'uwaga pulsuje');
+  $('#sw-stop').hidden = !!k.zatrzymane && !wk;
+}
+
+async function swStop() {
+  const ok = await potwierdz({
+    tytul: 'Zatrzymać zdjęcia?',
+    tresc: '<p>Zdjęcia, które czekają w kolejce, nie pójdą (0 kr).</p><p>Tych, które Higgsfield już przyjął, nie da się anulować – dokończą się przy następnym „Generuj”, przebiegu autopilota albo po ponownym uruchomieniu programu (bez drugiej opłaty).</p>',
+    ok: 'Zatrzymaj', klasa: 'btn-zly',
+  });
+  if (!ok) return;
+  const d = await api('/api/swap/stop', 'POST', {});
+  if (d.kolejka) state.zdjeciaKolejka = d.kolejka;
+  toast(`Zatrzymane. Z kolejki: ${d.anulowane} (nic nie poszło)${d.w_toku ? `, przyjęte przez Higgsfield: ${d.w_toku} – dokończą się później` : ''}.`, 'info');
+  await ladujGalerieZdjec();
+  renderSwKolejka();
 }
 
 async function przerwijZdjecie(id) {
@@ -2698,10 +2767,13 @@ function kartaZdjecia(z) {
   const swap = z.typ === 'swap';
   const id = Number(z.id);
   const robiSie = z.status === 'w_toku';
+  const wKolejce = z.status === 'w_kolejce';
   // swap: wynik duży, w rogu miniatura wstawionego zdjęcia (wejście -> wynik); bez wyniku – wstawione zdjęcie przygaszone
   let obraz;
+  const napis = robiSie ? '<span class="zdjecie-czeka-napis"><span class="kropka uwaga pulsuje"></span>robi się…</span>'
+    : (wKolejce ? '<span class="zdjecie-czeka-napis"><span class="kropka akcent"></span>w kolejce…</span>' : '');
   if (z.url) obraz = `<a href="${esc(z.url)}" target="_blank" rel="noopener"><img src="${esc(z.url)}" alt="" loading="lazy"></a>`;
-  else if (swap && z.zrodlo_url) obraz = `<div class="brak-obrazu zdjecie-czeka"><img src="${esc(z.zrodlo_url)}" alt="" loading="lazy">${robiSie ? '<span class="zdjecie-czeka-napis"><span class="kropka uwaga pulsuje"></span>robi się…</span>' : ''}</div>`;
+  else if (swap && z.zrodlo_url) obraz = `<div class="brak-obrazu zdjecie-czeka"><img src="${esc(z.zrodlo_url)}" alt="" loading="lazy">${napis}</div>`;
   else obraz = `<div class="brak-obrazu"><span class="ikona">${ikona('zdjecia')}</span></div>`;
   const wejscie = swap && z.zrodlo_url && z.url
     ? `<a class="zdjecie-wejscie" href="${esc(z.zrodlo_url)}" target="_blank" rel="noopener" title="Wstawione zdjęcie: ${esc(z.zrodlo_nazwa || '')}"><img src="${esc(z.zrodlo_url)}" alt="wstawione zdjęcie" loading="lazy"><span aria-hidden="true">→</span></a>` : '';
@@ -2715,7 +2787,7 @@ function kartaZdjecia(z) {
   const przyciski = [
     z.prompt && (state.pelny || !swap) ? `<button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(z.prompt)}" title="kopiuj prompt">${ikona('kopiuj')}</button>` : '',
     robiSie && (dlugo || state.pelny) ? `<button class="btn btn-maly" type="button" data-akcja="przerwij-zdjecie" data-id="${id}" title="Gdy sprawdzisz w apce Higgsfield">Przestań czekać</button>` : '',
-    robiSie ? '' : `<button class="btn btn-maly btn-zly" type="button" data-akcja="usun-zdjecie" data-id="${id}">Usuń</button>`,
+    robiSie ? '' : `<button class="btn btn-maly btn-zly" type="button" data-akcja="usun-zdjecie" data-id="${id}"${wKolejce ? ' title="Nic jeszcze nie poszło do Higgsfield (0 kr)"' : ''}>${wKolejce ? 'Wyjmij z kolejki' : 'Usuń'}</button>`,
   ].join('');
   return `<figure class="zdjecie${swap ? ' swap' : ''}" data-id="${id}">
     <div class="zdjecie-obraz">${obraz}${wejscie}</div>
@@ -2757,6 +2829,17 @@ async function zrobZdjecia() {
 }
 
 async function usunZdjecie(id) {
+  const z = (state.zdjecia || []).find(x => Number(x.id) === Number(id)) || {};
+  if (z.status === 'w_kolejce') {
+    // zdjęcie z kolejki: nic jeszcze nie poszło – tylko wyjmujemy je z kolejki (backend sprawdza to pod blokadą)
+    const ok = await potwierdz({ tytul: 'Wyjąć to zdjęcie z kolejki?', tresc: '<p>Nic jeszcze nie poszło do Higgsfield (0 kr).</p>', ok: 'Wyjmij', klasa: 'btn-zly' });
+    if (!ok) return;
+    await api(`/api/zdjecia/${id}`, 'DELETE');
+    toast('Wyjęte z kolejki.', 'ok');
+    await ladujGalerieZdjec();
+    odswiez();
+    return;
+  }
   const w = await potwierdz({ tytul: 'Usunąć to zdjęcie?', tresc: '', ok: 'Usuń', klasa: 'btn-zly', checkbox: 'Usuń też plik z dysku' });
   if (!w) return;
   await api(`/api/zdjecia/${id}${w.zaznaczone ? '?plik=1' : ''}`, 'DELETE');
@@ -3107,6 +3190,7 @@ async function ladujUstawienia() {
   } catch (e) { /* limity są dodatkiem */ }
   ladujKonta().catch(bladToast);
   ladujTeksty().catch(bladToast);
+  ladujGlobalne().catch(bladToast);        // 3.3: ile zdjęć naraz, rolki z promptu autopilota (wspólne dla person)
   // listy modeli/głosów dociągamy w tle
   podlaczListe($('#u-yapper-model'), 'modele?dostawca=yapper');
   podlaczListe($('#u-ws-model'), 'modele?dostawca=wavespeed');
@@ -3281,6 +3365,44 @@ async function zapiszUstawienia(f) {
     if (f.id === 'form-stroje') state.zp.katalog = null;    // „Kto nagrywa” persony – Z promptu wczyta domyślne od nowa
     toast('Zapisane.', 'ok');
     odswiezDiagnoze();
+    odswiez();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ---------- Ustawienia wspólne dla person (3.3): ile zdjęć naraz, rolki z promptu autopilota ----------
+async function ladujGlobalne() {
+  const d = await api('/api/ustawienia/globalne');
+  state.globalne = d;
+  renderGlobalne();
+}
+
+function renderGlobalne() {
+  const d = state.globalne;
+  if (!d) return;
+  const u = d.ustawienia || {};
+  $$('#strona-ustawienia form[data-ustawienia-globalne]').forEach(f => wypelnijFormularz(f, u));
+  const zp = u.autopilot_z_promptu || {};
+  const wybrane = new Set(zp.persony || []);
+  $('#g-zp-persony').innerHTML = (d.persony || []).map(p => `<label class="check${p.referencje ? '' : ' bez-zdjec'}"${p.referencje ? '' : ' title="Ta persona nie ma zdjęć – autopilot jej nie użyje"'}><input type="checkbox" value="${esc(p.slug)}"${wybrane.has(p.slug) ? ' checked' : ''}><span>${esc(p.nazwa || p.slug)}${p.referencje ? '' : ' <small>(bez zdjęć)</small>'}</span></label>`).join('')
+    || '<span class="muted">Brak person.</span>';
+  const s = d.z_promptu || {};
+  $('#g-zp-stan').textContent = s.tekst ? `${s.tekst}${(s.persony || []).length ? ` Persony: ${s.persony.map(x => nazwaPersony(x) || x).join(', ')}.` : ''}` : '';
+}
+
+async function zapiszUstawieniaGlobalne(f) {
+  const dane = zbierzFormularz(f);
+  if (f.id === 'form-autopilot-z-promptu') {
+    dane.autopilot_z_promptu = Object.assign({}, dane.autopilot_z_promptu || {},
+      { persony: $$('#g-zp-persony input[type="checkbox"]').filter(c => c.checked).map(c => c.value) });
+  }
+  const btn = f.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    state.globalne = await api('/api/ustawienia/globalne', 'POST', dane);
+    renderGlobalne();
+    toast('Zapisane.', 'ok');
     odswiez();
   } finally {
     if (btn) btn.disabled = false;
@@ -3857,6 +3979,7 @@ document.addEventListener('click', async e => {
       case 'przerwij-zdjecie': await przerwijZdjecie(id); break;
       case 'sw-ile': swIle(Number(el.dataset.krok) || 0); break;
       case 'sw-zmien': wybierzPliki('swap'); break;
+      case 'sw-stop': await swStop(); break;
       case 'usun-lipsync': await usunLipsync(id); break;
       case 'tts': await startTts(); break;
       // ustawienia
@@ -3890,6 +4013,7 @@ document.addEventListener('submit', async e => {
     else if (f.id === 'form-lipsync') await startLipsync();
     else if (f.id === 'form-lipsync-dialog') await startLipsyncZDialogu();
     else if (f.hasAttribute('data-ustawienia')) await zapiszUstawienia(f);
+    else if (f.hasAttribute('data-ustawienia-globalne')) await zapiszUstawieniaGlobalne(f);
     else if (f.id === 'form-profil') await zapiszProfil(f);
     else if (f.id === 'form-teksty') await dodajTeksty();
     else if (f.id === 'form-szablon') await dodajSzablon();

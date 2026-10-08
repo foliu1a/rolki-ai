@@ -113,10 +113,26 @@ def _teraz():
     return datetime.now(timezone.utc).isoformat()
 
 
+PROB_DOSTEPU = 20      # Windows: plik chwilowo zajety (podmieniany albo czytany przez inny watek/proces) - tyle prob
+
+
+def _chwila(s):
+    """Krotka pauza na zwolnienie pliku (Event.wait - dziala tez w testach, gdzie time.sleep jest wylaczone)."""
+    threading.Event().wait(s)
+
+
 def _wczytaj_json(sciezka, domyslnie):
-    if os.path.isfile(sciezka):
-        with open(sciezka, encoding="utf-8") as f:
-            return json.load(f)
+    for proba in range(PROB_DOSTEPU):
+        try:
+            if not os.path.isfile(sciezka):
+                return domyslnie
+            with open(sciezka, encoding="utf-8") as f:
+                return json.load(f)
+        except PermissionError:
+            # Windows: plik wlasnie podmieniany przez os.replace z innego watku/procesu (zdjecia 3.3 ida rownolegle) - jeszcze raz
+            if proba == PROB_DOSTEPU - 1:
+                raise
+            _chwila(0.01 * (proba + 1))
     return domyslnie
 
 
@@ -128,15 +144,15 @@ def _zapisz_json(sciezka, dane):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dane, f, ensure_ascii=False, indent=2)
-        for proba in range(6):
+        for proba in range(PROB_DOSTEPU):
             try:
                 os.replace(tmp, sciezka)
                 break
             except PermissionError:
-                # Windows: plik chwilowo otwarty przez czytajacego (panel/CLI) - chwila i jeszcze raz
-                if proba == 5:
+                # Windows: plik chwilowo otwarty przez czytajacego (panel/CLI/inny watek) - chwila i jeszcze raz
+                if proba == PROB_DOSTEPU - 1:
                     raise
-                time.sleep(0.05 * (proba + 1))
+                _chwila(0.01 * (proba + 1))
     except BaseException:
         try:
             os.remove(tmp)
@@ -586,6 +602,49 @@ def przygotuj_foldery_pulpitu_wszystkich():
         except OSError as e:
             wynik[slug] = {"foldery": {}, "zmienione": {}, "blad": str(e)}
     return wynik
+
+
+# ---------------- ustawienia globalne (wspolne dla wszystkich person, 3.3) ----------------
+# Plik ustawienia_globalne.json obok stan.json / budzet.json (poza gitem). Sciezka liczona przy kazdym uzyciu, bo testy przekierowuja
+# PLIK_STANU na katalog tymczasowy.
+
+USTAWIENIA_GLOBALNE_DOMYSLNE = {
+    "zdjecia_rownolegle": 4,        # ile zdjec (podmiana postaci) moze sie robic naraz (1-8); nadmiar czeka w kolejce panelu
+    "autopilot_z_promptu": {        # autopilot sam robi rolki z zakladki "Z promptu" (bez filmikow zrodlowych)
+        "dziennie": 1,              # ile rolek dziennie LACZNIE dla wszystkich person (0 = wylaczone)
+        "model": "seedance_2_5",    # seedance_2_5 (720p, 10 s, ok. 70 kr) | wan3_0_prime (720p, 10 s, ok. 30 kr)
+        "persony": [],              # na zmiane po kolei; [] = wszystkie, ktore maja zdjecia w referencje/
+        "od_godziny": "10:00",      # nie wczesniej niz o (czas lokalny)
+    },
+}
+
+
+def _plik_globalnych():
+    return os.path.join(os.path.dirname(PLIK_STANU), "ustawienia_globalne.json")
+
+
+def ustawienia_globalne():
+    """Ustawienia wspolne dla wszystkich person: domyslne + zapisane (slowniki laczone pole po polu)."""
+    dane = copy.deepcopy(USTAWIENIA_GLOBALNE_DOMYSLNE)
+    for k, v in (_wczytaj_json(_plik_globalnych(), {}) or {}).items():
+        if isinstance(v, dict) and isinstance(dane.get(k), dict):
+            dane[k].update(v)
+        else:
+            dane[k] = v
+    return dane
+
+
+def zapisz_ustawienia_globalne(**pola):
+    """Zapisuje podane ustawienia globalne (slownik = dopisany do zapisanego). Zwraca pelne ustawienia globalne."""
+    with _rmw(_plik_globalnych()):
+        zapisane = _wczytaj_json(_plik_globalnych(), {}) or {}
+        for k, v in pola.items():
+            if isinstance(v, dict) and isinstance(zapisane.get(k), dict):
+                zapisane[k] = dict(zapisane[k], **v)
+            else:
+                zapisane[k] = v
+        _zapisz_json(_plik_globalnych(), zapisane)
+    return ustawienia_globalne()
 
 
 # ---------------- budzet dzienny (wspolny) ----------------
@@ -1052,9 +1111,9 @@ def zapisz_probe(slug, pomysl_id, wpis):
         return aktualizuj_pomysl(slug, pomysl_id, proby=proby)
 
 
-def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
-    """Kredyty zarezerwowane przez rolki i zdjecia w toku (job wyslany, jeszcze nie rozliczony) - wszystkie persony, jeden
-    dostawca. Bezpieczniki dzienne licza je razem z wydatkami, zeby kilka wolnych jobow naraz nie przebilo limitu."""
+def koszt_w_drodze(dostawca=DOSTAWCA_GLOWNY):
+    """Kredyty zarezerwowane przez rolki i zdjecia W TOKU (job wysylany albo wyslany, jeszcze nie rozliczony) - wszystkie persony,
+    jeden dostawca. Bez zdjec czekajacych w kolejce panelu (te liczy koszt_w_kolejce)."""
     suma = 0
     for slug in lista_modelek():
         for p in pomysly_w_toku(slug) + zdjecia_w_toku(slug):
@@ -1067,8 +1126,29 @@ def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
     return suma
 
 
+def koszt_w_kolejce(dostawca=DOSTAWCA_GLOWNY):
+    """Kredyty zarezerwowane przez zdjecia czekajace w kolejce panelu (3.3: rezerwacja od klikniecia "Generuj", zanim cokolwiek
+    poszlo) - wszystkie persony."""
+    suma = 0
+    for slug in lista_modelek():
+        for z in zdjecia_w_kolejce(slug):
+            if (z.get("dostawca") or DOSTAWCA_GLOWNY) == (dostawca or DOSTAWCA_GLOWNY):
+                try:
+                    suma += int((z.get("kolejka") or {}).get("koszt") or 0)
+                except (TypeError, ValueError):
+                    pass
+    return suma
+
+
+def koszt_w_toku(dostawca=DOSTAWCA_GLOWNY):
+    """Kredyty zarezerwowane przez rolki i zdjecia w toku (job wyslany, jeszcze nie rozliczony) ORAZ zdjecia w kolejce panelu -
+    wszystkie persony, jeden dostawca. Bezpieczniki dzienne licza je razem z wydatkami, zeby kilka wolnych jobow naraz (i kilka
+    szybkich klikniec "Generuj") nie przebilo limitu."""
+    return koszt_w_drodze(dostawca) + koszt_w_kolejce(dostawca)
+
+
 def wydano_z_rezerwa(dostawca=DOSTAWCA_GLOWNY):
-    """Wydane dzis + zarezerwowane przez rolki w toku - to porownujemy z limitem dziennym."""
+    """Wydane dzis + zarezerwowane przez rolki/zdjecia w toku i zdjecia w kolejce - to porownujemy z limitem dziennym."""
     return wydano_dzis(dostawca) + koszt_w_toku(dostawca)
 
 
@@ -1214,6 +1294,161 @@ def zdjecie(slug, zid):
 
 def zdjecia_w_toku(slug):
     return [z for z in lista_zdjec(slug) if z.get("status") == "w_toku"]
+
+
+# Kolejka zdjec panelu (3.3, zdjecia_swap): klikniecie "Generuj" = wpisy ze statusem "w_kolejce" i slownikiem `kolejka`
+# {kr (cena 1 zdjecia, ktora user zatwierdzil), koszt (rezerwacja w limicie dnia, w gore), od, seria (jedno klikniecie),
+# nie_przed (czas - ponowienie po odmowie "za duzo naraz"), ponowienia}. Nic jeszcze nie poszlo do Higgsfield. Dyspozytor przejmuje
+# wpis (w_kolejce -> w_toku) pod blokada pliku, wiec ten sam wpis nigdy nie pojdzie dwa razy (takze z dwoch procesow).
+
+def zdjecia_w_kolejce(slug):
+    return [z for z in lista_zdjec(slug) if z.get("status") == "w_kolejce"]
+
+
+def dodaj_zdjecia(slug, wpisy):
+    """Kilka nowych wpisow w zdjecia.json JEDNYM zapisem (seria z kolejki zdjec). Zwraca liste id."""
+    plik_json = _plik_zdjec(slug)
+    with _rmw(plik_json):
+        zdjecia = _wczytaj_json(plik_json, [])
+        nastepny = max((z["id"] for z in zdjecia), default=0) + 1
+        ids = []
+        for w in wpisy:
+            wpis = {"id": nastepny, "prompt": "", "plik": None, "job_id": None, "koszt": None, "status": "w_kolejce", "notatki": "",
+                    "stroj": None, "utworzono": _teraz()}
+            wpis.update({k: v for k, v in w.items() if k not in ("id", "utworzono")})
+            zdjecia.append(wpis)
+            ids.append(nastepny)
+            nastepny += 1
+        _zapisz_json(plik_json, zdjecia)
+    return ids
+
+
+def przejmij_zdjecie(slug, zid):
+    """Atomowo: zdjecie 'w_kolejce' -> 'w_toku' (znacznik: etap 'wysylanie', bez 'wysylam' - po awarii w tym miejscu wiadomo, ze
+    nic nie poszlo; koszt = rezerwacja z kolejki). False = nie ma go albo juz nie czeka (wzial je ktos inny, anulowane, usuniete)."""
+    plik_json = _plik_zdjec(slug)
+    with _rmw(plik_json):
+        lista = _wczytaj_json(plik_json, [])
+        for z in lista:
+            if z["id"] == zid:
+                if z.get("status") != "w_kolejce":
+                    return False
+                k = z.get("kolejka") or {}
+                z["status"] = "w_toku"
+                z["w_toku"] = {"dostawca": z.get("dostawca") or DOSTAWCA_GLOWNY, "model": z.get("model"), "koszt": int(k.get("koszt") or 0),
+                               "od": _teraz(), "etap": "wysylanie", "job_id": None}
+                _zapisz_json(plik_json, lista)
+                return True
+    return False
+
+
+def zwroc_zdjecie_do_kolejki(slug, zid, notatki="", **pola_kolejki):
+    """Zdjecie w toku, ktorego job NA PEWNO nie powstal (Higgsfield odmowil: za duzo naraz), wraca do kolejki: status w_kolejce,
+    bez znacznika, `kolejka` uzupelniona o pola (nie_przed, ponowienia). False = nie ma takiego zdjecia."""
+    plik_json = _plik_zdjec(slug)
+    with _rmw(plik_json):
+        lista = _wczytaj_json(plik_json, [])
+        for z in lista:
+            if z["id"] == zid:
+                z["status"] = "w_kolejce"
+                z["w_toku"] = None
+                z["kolejka"] = dict(z.get("kolejka") or {}, **pola_kolejki)
+                z["notatki"] = notatki
+                _zapisz_json(plik_json, lista)
+                return True
+    return False
+
+
+def anuluj_zdjecia_w_kolejce(slug, notatki, seria=None, ids=None):
+    """Zdjecia czekajace w kolejce (nic nie poszlo) -> status 'anulowane' z notatka (STOP, filtr odrzucil inne z tej serii...).
+    seria / ids zawezaja. Zwraca liste anulowanych id."""
+    plik_json = _plik_zdjec(slug)
+    anulowane = []
+    with _rmw(plik_json):
+        lista = _wczytaj_json(plik_json, [])
+        for z in lista:
+            if z.get("status") != "w_kolejce":
+                continue
+            if seria is not None and (z.get("kolejka") or {}).get("seria") != seria:
+                continue
+            if ids is not None and z["id"] not in ids:
+                continue
+            z["status"] = "anulowane"
+            z["notatki"] = notatki
+            z["w_toku"] = None
+            anulowane.append(z["id"])
+        if anulowane:
+            _zapisz_json(plik_json, lista)
+    return anulowane
+
+
+def usun_zdjecie_jesli(slug, zid, poza=("w_toku",)):
+    """Usuwa wpis zdjecia, chyba ze jego status jest w `poza` (domyslnie w_toku - job mogl juz pojsc) - sprawdzenie i usuniecie pod
+    jedna blokada, wiec dyspozytor nie przejmie zdjecia z kolejki w tej samej chwili. Zwraca wpis, jaki byl (None = nie ma takiego
+    zdjecia); usuniety tylko, gdy status nie byl w `poza`."""
+    plik_json = _plik_zdjec(slug)
+    with _rmw(plik_json):
+        zdjecia = _wczytaj_json(plik_json, [])
+        z = next((x for x in zdjecia if x["id"] == zid), None)
+        if z is not None and z.get("status") not in poza:
+            _zapisz_json(plik_json, [x for x in zdjecia if x["id"] != zid])
+        return z
+
+
+class BlokadaZdjecia:
+    """Jedno zdjecie (podmiana postaci) obsluguje naraz jeden watek jednego procesu: rejestr w tym procesie + plik
+    modelki/<slug>/blokady/zdjecie_<id>.lock (msvcrt/fcntl - znika sama, gdy proces umrze). Zablokowac moze dyspozytor, a zwolnic
+    watek, ktory dokonczyl zdjecie. zablokuj() -> False, gdy zdjecie ma juz wlasciciela (np. panel, a to drugi proces)."""
+    _trzymane = set()
+    _lock = threading.Lock()
+
+    def __init__(self, slug, zid):
+        self.slug, self.zid = slug, int(zid)
+        self.klucz = (os.path.normcase(os.path.abspath(KATALOG_MODELEK)), slug, self.zid)
+        self.plik = None
+
+    def zablokuj(self):
+        with BlokadaZdjecia._lock:
+            if self.klucz in BlokadaZdjecia._trzymane:
+                return False
+            BlokadaZdjecia._trzymane.add(self.klucz)
+        f = None
+        try:
+            folder = os.path.join(folder_modelki(self.slug), "blokady")
+            os.makedirs(folder, exist_ok=True)
+            f = open(os.path.join(folder, f"zdjecie_{self.zid}.lock"), "a+")
+            if _zablokuj_plik(f):
+                self.plik = f
+                return True
+        except (OSError, ValueError):
+            pass
+        if f is not None:
+            f.close()
+        with BlokadaZdjecia._lock:
+            BlokadaZdjecia._trzymane.discard(self.klucz)
+        return False
+
+    def odblokuj(self, usun=False):
+        """Zwalnia blokade; usun=True kasuje plik blokady (zdjecie skonczone - nikt go juz nie przejmie)."""
+        f, self.plik = self.plik, None
+        if f is None:
+            return
+        _odblokuj_plik(f)
+        sciezka = f.name
+        f.close()
+        if usun:
+            try:
+                os.remove(sciezka)
+            except OSError:
+                pass        # inny proces ma go wlasnie otwartego - nic nie szkodzi
+        with BlokadaZdjecia._lock:
+            BlokadaZdjecia._trzymane.discard(self.klucz)
+
+    def __enter__(self):
+        return self.zablokuj()
+
+    def __exit__(self, *_):
+        self.odblokuj()
 
 
 def zacznij_zdjecie_w_toku(slug, zid, **marker):

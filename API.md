@@ -38,7 +38,11 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
  "dzis": {"rolki": 3, "zdjecia": 1, "bledy": 0, "kredyty": {"higgsfield": 135, "yapper": 0, "sync": 0}, "rolki_persony": 2},
  "foldery": {"wrzutnia": "C:\\Users\\yux\\Desktop\\ROLKI AI\\tu wrzucasz rolki\\Noemi", "gotowe": "...\\tu rolki zrobione\\Noemi", "zdjecia": "...\\tu zdjecia zrobione\\Noemi"},
  "pulpit": "C:\\Users\\yux\\Desktop\\ROLKI AI",
- "wersja": "3.2"}
+ "wersja": "3.3",
+ "zdjecia_kolejka": {"w_toku": 2, "w_kolejce": 1, "limit": 4, "dziala": true, "zatrzymane": false,
+                     "persona": {"w_toku": 2, "w_kolejce": 1}},           // 3.3: zdjęcia (wszystkie persony + aktywna)
+ "autopilot_z_promptu": {"dziennie": 1, "dzis": 0, "nieudane": 0, "model": "seedance_2_5", "od_godziny": "10:00", "persony": ["noemi"],
+                         "stan": "przed_godzina", "tekst": "Rolki z promptu: dziś 0 z 1 (następna po 10:00)"}}
 ```
 - Foldery na pulpicie (2.1): panel przy starcie (i `POST /api/modelki`) tworzy `Pulpit\ROLKI AI\tu wrzucasz rolki\<Persona>`,
   `...\tu rolki zrobione\<Persona>`, `...\tu zdjecia zrobione\<Persona>` i wpisuje je w `zrodla_dir` / `wyniki_dir` / `zdjecia_dir`
@@ -277,17 +281,27 @@ sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Hi
   może być ułamkowa), "kr": 5 (razem), "kr_limit": 6 (do limitu dnia – w górę), "saldo", "dzis": {wydano (z rezerwą w toku), limit},
   "min_kredyty", "mozna", "powody", "ostrzezenia"}`. Darmowe `generate cost` BEZ zdjęć (cena od nich nie zależy), cache 1 h po
   parametrach. Wartość spoza schematu modelu → 400.
-- `POST /api/swap {zrodlo, model, proporcje, jakosc, rozdzielczosc, ile, stroj, dopisek, kr}` → `{"zadanie": {typ: "swap"}}`. Bez `kr`
-  (cena 1 zdjęcia z wyceny) → 400; coś trwa → 409. Każde zdjęcie = osobne zlecenie: wpis `w_toku` + znacznik przed wysłaniem, wstawione
-  zdjęcie świeżym uploadem (`w_toku.obraz_id`), create bez `--wait`, `job_id` zapisany od razu, cena liczona jeszcze raz (wyższa = nic),
-  limit dnia Higgsfield wspólny, blokada generacji persony; odrzucenie NSFW/IP = koniec serii (pozostałe nie idą). Wynik zadania:
-  `{"zrobione", "pliki", "bledy", "odrzucone", "w_toku", "stop", "ids"}`. Wznawianie: start panelu (`wznow`), autopilot, `fabryka.py wznow`.
+- `POST /api/swap {zrodlo, model, proporcje, jakosc, rozdzielczosc, ile, stroj, dopisek, kr}` (3.3) → `{"ids": [12, 13], "kolejka":
+  {...jak zdjecia_kolejka...}}` OD RAZU – N wpisów `w_kolejce` (nic jeszcze nie wysłane); konsola zajęta (rolki, autopilot) NIE
+  przeszkadza (bez 409). Bez `kr` (cena 1 zdjęcia z wyceny) → 400. Rezerwacja w limicie dnia i saldzie atomowa (blokada kolejki,
+  liczy rolki i zdjęcia w toku + całą kolejkę); odmowa → 400 `{"ok": false, "blad", "kod": "cena wzrosla"|"limit dzienny"|
+  "min_kredyty"|"max/zdjecie"|...}` i nic nie powstaje. Dyspozytor w tle wysyła równolegle, max `zdjecia_rownolegle` (globalne,
+  domyślnie 4) w toku naraz; każde zdjęcie: świeża cena (wyższa = blad, 0 kr), bezpieczniki, wpis `w_toku` przed wysłaniem, świeży
+  upload (`w_toku.obraz_id`), create bez `--wait`, `job_id` od razu. Higgsfield odmówił „za dużo naraz” (HTTP 429 / too many /
+  concurrent / rate limit) i job na pewno nie powstał → zdjęcie wraca do kolejki (`kolejka.nie_przed`, `ponowienia`); wątpliwość →
+  nigdy drugi raz. NSFW/IP albo niepewne wysyłanie jednego → reszta serii z kolejki `anulowane`.
+- `POST /api/swap/stop` → `{"anulowane": n, "w_toku": m, "kolejka": {...}}` – STOP strony Zdjęcia: kolejka (wszystkie persony) →
+  `anulowane` (0 kr); przyjęte joby nie są anulowane – dokończą się przy następnym sprawdzeniu (Generuj, przebieg autopilota, restart).
+- CLI `zdjecie-swap` = `zdjecia_swap.generuj` (zlec + obsługa tych zdjęć do końca, też równolegle) → `{"zrobione", "pliki", "bledy",
+  "odrzucone", "w_toku", "stop", "ids"}`. Wznawianie: dyspozytor panelu (start, co 60 s osierocone), autopilot, `fabryka.py wznow`.
 
 ## Zdjęcia, lipsync, dziennik, budżet, autopilot
 - `GET /api/zdjecia` → `{"zdjecia": [{"id", "prompt", "plik", "url", "status", "koszt", "utworzono", "notatki", "stroj"}]}`; swap (3.2):
   `typ: "swap"`, `status` też `w_toku`, `zrodlo` + `zrodlo_url` (miniatura wstawionego zdjęcia), `zrodlo_nazwa`, `model`, `parametry`,
   `stroj_bib`, `stroj_url`, `opis` (krótko po polsku), `wycena` (np. 2.5), `koszt` (do limitu, w górę), `powod` (nsfw|ip|inny), `w_toku`
-- `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik); zdjęcie `w_toku` → 409
+- `DELETE /api/zdjecia/<id>` (`?plik=1` kasuje też plik); zdjęcie `w_toku` → 409; `w_kolejce` → wyjęte z kolejki (sprawdzenie i
+  usunięcie pod blokadą). Statusy zdjęć swap (3.3): `w_kolejce` (czeka, `kolejka` {kr, koszt, od, seria, nie_przed, ponowienia}),
+  `w_toku`, `gotowe`, `blad`, `anulowane` (STOP / reszta serii po filtrze – nic nie poszło).
 - `POST /api/zdjecia/<id>/przerwij {"potwierdzam": true}` – „Przestań czekać” na zdjęcie `w_toku` (status blad + prośba o sprawdzenie
   w apce); bez potwierdzenia 400, w trakcie wysyłania 409
 - `GET /api/lipsync` → `{"lipsync": [{"id", "wideo", "audio", "dostawca", "model", "pomysl_id", "status", "plik_wynikowy", "url", "koszt", "notatki", "utworzono", "styl"?, "audio_przygotowane"?}]}`
@@ -301,7 +315,18 @@ sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Hi
 - `GET /api/dziennik?ile=100&typ=blad` → `{"wpisy": [{"czas", "typ", "modelka", "tekst", "dane"}]}` (najnowszy na końcu)
 - `GET /api/budzet` → `{"budzet": {...plik budzet.json...}, "dzis": {"higgsfield": {"wydano": 90, "limit": 300, "jednostka": "kr"}, "yapper": {"wydano": 0, "limit": 0, "jednostka": "kr"}, "sync": {"wydano": 50, "limit": 0, "jednostka": "c"}, "wavespeed": {"wydano": 260, "limit": 1000, "jednostka": "c"}}}`
 - `POST /api/budzet` `{"dostawca": "higgsfield", "max_kredyty_dziennie": 300}` (WaveSpeed: w centach, 1000 = $10; nieznany dostawca = 400)
-- `POST /api/autopilot` `{"wlacz": true}` → `{"autopilot": {...jak w /api/stan...}}` (pętla w tle; `wlacz: false` zatrzymuje)
+- `POST /api/autopilot` `{"wlacz": true}` → `{"autopilot": {...jak w /api/stan...}}` (pętla w tle; `wlacz: false` zatrzymuje).
+  `autopilot.etap` może być `z_promptu`, a `autopilot.opis` = np. „robię rolkę z promptu: Noemi, Galeria Posnania” (3.3).
+- Ustawienia wspólne dla person (3.3, `ustawienia_globalne.json`): `GET /api/ustawienia/globalne` → `{"ustawienia":
+  {"zdjecia_rownolegle": 4, "autopilot_z_promptu": {"dziennie": 1, "model": "seedance_2_5", "persony": [], "od_godziny": "10:00"}},
+  "domyslne", "modele_z_promptu": [{id, nazwa}], "persony": [{slug, nazwa, referencje}], "z_promptu": {...jak w /api/stan...},
+  "max_rownolegle": 8}`; `POST /api/ustawienia/globalne` `{"zdjecia_rownolegle": 1-8}` albo `{"autopilot_z_promptu": {dowolne z pól}}`
+  (dziennie 0-20, 0 = wyłączone, ŁĄCZNIE dla person; model `seedance_2_5` | `wan3_0_prime`; persony = istniejące slugi; od_godziny
+  GG:MM) – złe wartości → 400. Limitów budżetu tu nie ma.
+- Autopilot rolek z promptu (3.3): co przebieg (po rolkach ze swapu), od `od_godziny`, aż `dziennie` rolek z promptu autopilota
+  dziś (dzień lokalny, osobny licznik od swapu): persony na zmianę → losowy pomysł + asystent → darmowa wycena i bezpieczniki →
+  ta sama ścieżka co „Zrób rolkę” → ElevenLabs, Media Tool, Telegram. Max 2 nieudane dziennie; pominięcie (limit/saldo) = wpis
+  „uwaga” w dzienniku. Pomysł ma `autopilot_z_promptu: true` (karta: „autopilot · ...”).
 
 ## Teksty i szablony (bez zmian)
 - `GET /api/teksty`, `POST /api/teksty` `{"teksty": "linia\nlinia", "zrodlo": ""}` → `{"dodano": n}`, `POST /api/teksty/losuj` → `{"tekst", "nieuzyte", "wszystkie"}`

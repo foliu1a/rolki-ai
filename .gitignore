@@ -17,6 +17,7 @@ uploady_wavespeed.json
 # Pliki robocze panelu/fabryki (zmieniaja sie same przy pracy - w gicie psulyby `git pull` w aktualizuj.bat)
 budzet.json
 stan.json
+ustawienia_globalne.json
 telegram.json
 server.log
 *.log

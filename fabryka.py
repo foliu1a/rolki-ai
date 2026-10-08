@@ -2087,9 +2087,10 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     return wynik
 
 
-def dodaj_z_promptu(slug, opcje, prompt=None, kr=None):
+def dodaj_z_promptu(slug, opcje, prompt=None, kr=None, **pola):
     """Tworzy pomysl 'nowy' typu 'prompt' z ZAMROZONYM promptem i lista zdjec (bez wysylania). prompt = tekst po recznej
-    poprawce (sprawdzany: limit znakow, numery zdjec); kr = wycena, ktora user widzial (zapis w pomysle). Zwraca id."""
+    poprawce (sprawdzany: limit znakow, numery zdjec); kr = wycena, ktora user widzial (zapis w pomysle). pola = dodatkowe pola
+    pomyslu (autopilot 3.3: autopilot_z_promptu=True - jego dzienny licznik). Zwraca id."""
     import scenariusz
     sc = _zbuduj_z_promptu(slug, opcje)
     tekst = (prompt or "").strip() or sc["prompt"]
@@ -2103,11 +2104,13 @@ def dodaj_z_promptu(slug, opcje, prompt=None, kr=None):
         zp["asystent"] = {k: opcje["asystent"].get(k) for k in ("dlaczego", "zrodlo", "podsumowanie")}
     zp["wycena"] = kr
     zp["prompt_reczny"] = tekst != sc["prompt"]
+    dodatki = {k: v for k, v in pola.items() if k not in ("typ", "z_promptu", "koszt", "resolution", "model", "stroj_bib")}
     pid = baza.dodaj_pomysl(slug, sc["tytul"] or f"z promptu: {sc['miejsce_nazwa']}", tekst, stroj=sc.get("stroj_plik"),
                             typ="prompt", z_promptu=zp, koszt=kr, resolution=sc["rozdzielczosc"], model=sc["model"],
-                            **({"stroj_bib": sc["stroj_id"]} if sc.get("stroj_tryb") == "biblioteka" else {}))
-    _zdarzenie(None, slug, "info", f"#{pid}: rolka z promptu - {sc['miejsce_nazwa']}, {sc['model']} {sc['dlugosc']} s "
-               f"{sc['rozdzielczosc']}" + (f", wycena {kr} kr" if kr is not None else ""), pomysl=pid)
+                            **({"stroj_bib": sc["stroj_id"]} if sc.get("stroj_tryb") == "biblioteka" else {}), **dodatki)
+    _zdarzenie(None, slug, "info", f"#{pid}: rolka z promptu{' (autopilot)' if dodatki.get('autopilot_z_promptu') else ''} - "
+               f"{sc['miejsce_nazwa']}, {sc['model']} {sc['dlugosc']} s {sc['rozdzielczosc']}"
+               + (f", wycena {kr} kr" if kr is not None else ""), pomysl=pid)
     return pid
 
 

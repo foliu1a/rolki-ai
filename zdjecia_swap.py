@@ -5,7 +5,10 @@
     zapisz_zrodlo(slug, plik, nazwa)       -> wstawione zdjecie: kopia obrocona wg EXIF, bez metadanych -> swap_zrodla/
     zbuduj(slug, zrodlo, opcje)            -> prompt + obrazy (kolejnosc!) + parametry modelu (zero wysylania)
     wycena(slug, opcje, zrodlo)            -> cena z `generate cost` (darmowe, BEZ mediow, cache po parametrach) + bezpieczniki
-    generuj(slug, zrodlo, opcje, kr)       -> N zdjec, kazde osobne zlecenie z pelnym zabezpieczeniem pieniedzy
+    zlec(slug, zrodlo, opcje, kr)          -> 3.3: "Generuj" = N wpisow w kolejce (rezerwacja limitu atomowo), nic nie wysyla;
+                                              KOLEJKA (dyspozytor panelu w tle) wysyla je rownolegle, max `zdjecia_rownolegle`
+    generuj(slug, zrodlo, opcje, kr)       -> CLI/testy: zlec + obsluga tych zdjec do konca (rownolegle), pelne zabezpieczenie pieniedzy
+    zatrzymaj()                            -> STOP strony Zdjecia: kolejka anulowana, przyjete joby dokoncza sie przy nastepnym sprawdzeniu
     wznow_w_toku(slug) / wznow_wszystkie() -> dokancza zdjecia w toku (ten sam job, nic nie wysyla drugi raz)
 
 Obrazy (prompt mowi "image N" + "the first / the last image"): 1 = wstawione zdjecie (kadr, poza, tlo, swiatlo, aparat, mimika,
@@ -17,16 +20,20 @@ bez slow z fabryka.SLOWA_RYZYKOWNE (filtr NSFW) - opisy persony i dopisek przech
 Pieniadze jak w rolkach: wpis w zdjecia.json (status w_toku + znacznik) PRZED wyslaniem; wszystkie pliki wgrane przed
 'wysylam' (wstawione zdjecie swiezym uploadem - jego id odnajduje job na `generate list --image`); create bez --wait, job_id
 zapisany od razu, potem `generate get`; po 'wysylam' NIGDY drugi create (blad = szukamy joba, nie ma = czeka 60 min, potem
-"sprawdz w apce"); limit dzienny Higgsfield wspolny (z rezerwa w toku); blokada generacji persony; przed kazdym wyslaniem
-cena jeszcze raz - wyzsza niz zatwierdzona = nic nie idzie. Ceny obrazow sa ulamkowe (Seedream 5.0 Pro 2K = 2,5 kr) - do
-limitu dnia liczymy w gore (3 kr). Wynik: zdjecia_dir persony, NNN_swap_<nazwa zrodla>.<ext>, bez obrobki (jak zdjecia).
+"sprawdz w apce"); limit dzienny Higgsfield wspolny (z rezerwa w toku i w kolejce; rezerwacja przy "Generuj" atomowa); jeden
+wlasciciel zdjecia (baza.BlokadaZdjecia, takze miedzy procesami) zamiast blokady generacji persony - zdjecia nie czekaja na
+rolki; przed kazdym wyslaniem cena jeszcze raz - wyzsza niz zatwierdzona = nic nie idzie. Ceny obrazow sa ulamkowe (Seedream
+5.0 Pro 2K = 2,5 kr) - do limitu dnia liczymy w gore (3 kr). Wynik: zdjecia_dir persony, NNN_swap_<nazwa zrodla>.<ext>, bez
+obrobki (jak zdjecia).
 """
+import itertools
 import math
 import os
 import re
 import shutil
 import threading
 import time
+import traceback
 
 import baza
 import dostawcy
@@ -595,10 +602,13 @@ def wycena(slug, opcje=None, zrodlo=None, saldo=None, swieza=False):
     if isinstance(wynik["kr"], float) and wynik["kr"].is_integer():
         wynik["kr"] = int(wynik["kr"])
     wydano, limit = wynik["dzis"]["wydano"], wynik["dzis"]["limit"]
+    # saldo: minus to, co juz zarezerwowane (rolki i zdjecia w toku + kolejka) - tak samo liczy zlec() przy "Generuj"
+    rezerwa = baza.koszt_w_toku("higgsfield")
     if kl > max_k:
         wynik["powody"].append(f"{_kr(k)} za zdjecie to wiecej niz bezpiecznik {max_k} kr.")
-    if saldo is not None and saldo - kl * ile < min_k:
-        wynik["powody"].append(f"po tych zdjeciach zostaloby {saldo - kl * ile} kr, a minimum to {min_k} kr.")
+    if saldo is not None and saldo - rezerwa - kl * ile < min_k:
+        wynik["powody"].append(f"po tych zdjeciach zostaloby {saldo - rezerwa - kl * ile} kr" + (f" (z tym, co w toku i w kolejce: "
+                               f"{rezerwa} kr)" if rezerwa else "") + f", a minimum to {min_k} kr.")
     if limit and wydano + kl * ile > limit:
         wejdzie = max(0, (limit - wydano) // kl) if kl else 0
         wynik["powody"].append(f"dzis wydano {wydano} z {limit} kr - {ile} zdj. ({kl * ile} kr) przekroczyloby dzienny limit"
@@ -607,126 +617,489 @@ def wycena(slug, opcje=None, zrodlo=None, saldo=None, swieza=False):
     return wynik
 
 
-# ---------------- generacja: kazde zdjecie osobno, z pelnym zabezpieczeniem pieniedzy ----------------
+# ---------------- generacja: kolejka zdjec i wysylanie rownolegle (3.3) ----------------
+# "Generuj" = zlec(): wpisy 'w_kolejce' z rezerwacja w limicie dnia i saldzie - ATOMOWO pod blokada kolejki (watki i procesy),
+# liczac rolki i zdjecia w toku oraz cala kolejke - nic nie wysyla. Wysyla _Obsluga: w panelu dyspozytor w tle (KOLEJKA, wszystkie
+# persony, niezalezny od zadan konsoli/rolek), w CLI i testach generuj() (tylko swoje zdjecia, az do konca). Najwyzej
+# `zdjecia_rownolegle` (ustawienie globalne, domyslnie 4) zdjec w toku naraz - liczonych z dysku, wiec takze z innego procesu;
+# nadmiar czeka w kolejce. Kazde zdjecie ma jednego wlasciciela (baza.BlokadaZdjecia) i jest przejmowane atomowo (w_kolejce ->
+# w_toku). Potem jak dawniej: swieza cena i bezpieczniki -> _wyslij (znacznik w_toku przed wysylka, job_id od razu) -> _dokoncz
+# (generate get, 0 kr). Higgsfield odmowil "za duzo naraz" (HTTP 429 / too many / concurrent / rate limit) i job NA PEWNO nie
+# powstal -> zdjecie wraca do kolejki (po chwili); przy watpliwosci, czy job powstal - NIGDY drugi raz (jak rolki).
+
+STATUS_KOLEJKA = "w_kolejce"
+STATUS_ANULOWANE = "anulowane"
+STATUSY_KONCOWE = ("gotowe", "blad", STATUS_ANULOWANE)
+ROWNOLEGLE_MAX = 8
+PONOW_PO_S = 30                 # odmowa "za duzo naraz": zdjecie wraca do kolejki - proba po tylu s (potem 2x dluzej, max PONOW_MAX_S)
+PONOW_MAX_S = 300
+MAX_PONOWIEN = 10               # po tylu odmowach "za duzo naraz" zdjecie konczy sie bledem (nic nie zeszlo)
+ODSTEP_KOLEJKI_S = 2            # dyspozytor patrzy w kolejke co tyle s (i od razu po "Generuj" albo koncu zdjecia)
+ODSTEP_OSIEROCONYCH_S = 60      # zdjecie w toku bez wlasciciela (restart, limit czasu czekania) sprawdzamy znowu najwczesniej po tylu s
+CZEKAJ_NA_MIEJSCE_S = 15 * 60   # generuj() (CLI): tyle czekamy na wolne miejsce, gdy wszystkie zajmuja cudze zdjecia w toku
+
+NOTATKA_STOP = "Zatrzymane (STOP) przed wyslaniem - nic nie poszlo do Higgsfield, 0 kr."
+NOTATKA_SERIA_FILTR = ("Nie wyslane: filtr Higgsfield odrzucil inne zdjecie z tej serii (to samo zdjecie i ustawienia dalyby to samo) - "
+                       "0 kr. Zmien zdjecie, stroj albo model i kliknij Generuj.")
+NOTATKA_SERIA_NIEPEWNE = ("Nie wyslane: przy wysylaniu innego zdjecia z tej serii nie wiadomo, czy job powstal (siec/CLI) - nie "
+                          "dokladam kolejnych, 0 kr. Kliknij Generuj jeszcze raz, gdy tamto sie wyjasni.")
+
+_numer_serii = itertools.count(1)
+
+
+class Odmowa(ValueError):
+    """zlec() odmowil, zanim cokolwiek powstalo (cena, bezpieczniki, limit dnia). kod = jak dawne wynik['stop']."""
+
+    def __init__(self, kod, tekst):
+        super().__init__(tekst)
+        self.kod = kod
+
+
+class ZaDuzoNaraz(Exception):
+    """Higgsfield odmowil przyjecia zlecenia (limit zadan naraz / za duzo zapytan) i job NA PEWNO nie powstal - wraca do kolejki."""
+
 
 def _nowy_wynik():
     return {"zrobione": 0, "pliki": [], "bledy": [], "odrzucone": [], "w_toku": [], "stop": None, "ids": []}
 
 
-def generuj(slug, zrodlo, opcje=None, kr=None, log=None, stop=None, timeout=CZAS_NA_ZDJECIE):
-    """N zdjec (opcje["ile"], 1-4) po kolei - kazde to osobne zlecenie. kr = cena JEDNEGO zdjecia, ktora user widzial (panel):
-    przed kazdym wyslaniem cena jest liczona jeszcze raz (`generate cost`, 0 kr) i wyzsza = nic nie idzie. Najpierw dokancza
-    zdjecia w toku (0 kr). Zwraca {"zrobione", "pliki", "bledy", "odrzucone" (NSFW/IP), "w_toku", "stop", "ids"}."""
+def _scal(wynik, czesc):
+    for k in ("pliki", "bledy", "odrzucone", "w_toku"):
+        wynik[k].extend(czesc[k])
+    wynik["zrobione"] += czesc["zrobione"]
+    if czesc.get("stop") and not wynik.get("stop"):
+        wynik["stop"] = czesc["stop"]
+
+
+def rownolegle():
+    """Ustawienie globalne `zdjecia_rownolegle` (1-8, domyslnie 4): ile zdjec moze byc w toku naraz."""
+    try:
+        n = int(baza.ustawienia_globalne().get("zdjecia_rownolegle") or 4)
+    except (TypeError, ValueError):
+        n = 4
+    return max(1, min(ROWNOLEGLE_MAX, n))
+
+
+def _blokada_kolejki():
+    """Blokada kolejki zdjec (watki i procesy): rezerwacja przy "Generuj" i liczenie wolnych miejsc przy przejmowaniu."""
+    return baza._rmw(os.path.join(os.path.dirname(baza.PLIK_BUDZETU), "kolejka_zdjec"))
+
+
+_WZOR_ZA_DUZO = re.compile(
+    r"\bhttp\s*429\b|\b429\s+too many|status(?:\s*code)?\s*[:=]?\s*429\b|too many|rate[ _-]?limit|ratelimit|concurren|"
+    r"\bparallel\b|simultaneous|(?:max|maximum|limit)\b[^.\n]{0,40}\b(?:jobs|generations|tasks|requests)\b[^.\n]{0,30}"
+    r"\b(?:running|in progress|at (?:a|the same) time|at once|active|in queue)", re.I)
+_WZOR_SIECI = re.compile(r"timeout|timed out|deadline|nie odpowiedzialo|connection|connect:|socket|\beof\b|reset by peer|"
+                         r"broken pipe|dial tcp|\btls\b|no such host|network|unreachable|hang up", re.I)
+
+
+def za_duzo_naraz(blad):
+    """Czy Higgsfield ODMOWIL zlecenia z powodu limitu zadan naraz / zapytan (HTTP 429, "too many", "concurrent", "rate limit") -
+    czyli odpowiedzial serwer. NIE: filtr NSFW/IP, blad trwaly (kredyty, walidacja, logowanie) ani blad sieci (timeout, zerwane
+    polaczenie = nie wiadomo, czy zlecenie dotarlo). Higgsfield nie dokumentuje dokladnego tekstu (skill higgsfield-generate:
+    "Higgsfield API error (HTTP 429) - too many requests"; CLI 1.1.26 drukuje "Higgsfield API error (HTTP %d).") - stad ogolne
+    wzorce."""
+    t = str(blad or "")
+    if not t or fabryka.powod_odrzucenia("", t) in fabryka.POWODY_ZAPASU or fabryka._blad_trwaly(blad):
+        return False
+    if _WZOR_SIECI.search(t):
+        return False
+    return bool(_WZOR_ZA_DUZO.search(t))
+
+
+def zlec(slug, zrodlo, opcje=None, kr=None, saldo=None, log=None, obudz=True):
+    """"Generuj": N zdjec (opcje["ile"], 1-4) do kolejki - wpisy 'w_kolejce' z rezerwacja w limicie dnia Higgsfield i w saldzie,
+    ATOMOWO pod blokada kolejki (watki i procesy). Liczy rolki i zdjecia w toku oraz cala kolejke, wiec kilka szybkich klikniec nie
+    przebije limitu ani min_kredyty. Nic nie wysyla (wysyla dyspozytor panelu albo generuj()). kr = cena JEDNEGO zdjecia, ktora user
+    widzial: wyzsza teraz = Odmowa, rezerwacja liczy kr w gore. saldo = saldo Higgsfield (panel: z cache; None = pyta CLI).
+    Zwraca liste id. Odmowa (kod, tekst) = nic nie powstalo; ValueError = zle opcje / brak zdjecia."""
     log = log or _log
     o = dict(opcje or {})
     ile = _ile(o.get("ile"))
-    wynik = _nowy_wynik()
-    with baza.blokada_generacji(slug) as moge:
-        if not moge:
-            log("Inny proces (panel/autopilot albo konsola) robi wlasnie rolki albo zdjecia tej persony - nie wysylam rownolegle, "
-                "sprobuj za chwile.")
-            wynik["stop"] = "zajete"
-            return wynik
-        wznow_w_toku(slug, log=log, stop=stop, timeout=timeout, wynik=wynik)
-        sw = zbuduj(slug, zrodlo, o)
-        for u in sw["ostrzezenia"]:
-            log(f"[UWAGA] {u}")
-        d = dostawcy.dostawca("higgsfield")
+    sw = zbuduj(slug, zrodlo, o)
+    try:
+        k = cena(sw["model"], sw["parametry"])
+    except dostawcy.BladDostawcy as e:
+        raise Odmowa(f"koszt: {e}", f"Higgsfield nie podal ceny ({e}) - nic nie wyslalem.")
+    if k is None:
+        raise Odmowa("koszt nieznany", "Higgsfield nie podal ceny - sprobuj jeszcze raz (nic nie wyslalem).")
+    if kr is not None and float(k) > float(kr) + 1e-9:
+        raise Odmowa("cena wzrosla", f"Cena wzrosla z {_kr(kr)} do {_kr(k)} - nic nie wyslalem. Sprawdz cene jeszcze raz.")
+    kl = do_limitu(max(float(k), float(kr)) if kr is not None else k)
+    min_k, max_k = fabryka.bezpiecznik(baza.ustawienia_modelki(slug), "higgsfield")
+    if kl > max_k:
+        raise Odmowa("max/zdjecie", f"{_kr(k)} za zdjecie to wiecej niz bezpiecznik {max_k} kr.")
+    if saldo is None:
         try:
-            saldo = d.saldo()
+            saldo = dostawcy.dostawca("higgsfield").saldo()
         except dostawcy.BladDostawcy as e:
-            _zdarzenie(log, slug, "blad", f"[BLAD] saldo higgsfield: {e}")
-            wynik["stop"] = f"saldo: {e}"
-            return wynik
-        if saldo is None:
-            saldo = 10 ** 9
-        ust = baza.ustawienia_modelki(slug)
-        min_k, max_k = fabryka.bezpiecznik(ust, "higgsfield")
+            raise Odmowa(f"saldo: {e}", f"Nie moge sprawdzic salda Higgsfield ({e}) - nic nie wyslalem.")
+    seria = f"{time.strftime('%Y%m%d%H%M%S')}-{os.getpid()}-{next(_numer_serii)}"
+    wpis = {"prompt": sw["prompt"], "status": STATUS_KOLEJKA, "typ": "swap", "stroj": sw["stroj_plik"], "zrodlo": sw["obrazy"][0],
+            "zrodlo_nazwa": nazwa_zrodla(zrodlo), "model": sw["model"], "parametry": sw["parametry"], "stroj_bib": sw["stroj_id"],
+            "opis": sw["opis"], "dostawca": "higgsfield", "wycena": k, "obrazy": list(sw["obrazy"]), "w_toku": None}
+    with _blokada_kolejki():
         limit = baza.limit_dzienny("higgsfield")
-        log(f"zdjecia (podmiana postaci) - {sw['opis']}, {ile} szt. | saldo {saldo} kr | dzis wydano "
-            f"{baza.wydano_dzis('higgsfield')}/{limit} (+{baza.koszt_w_toku('higgsfield')} w toku) | min_kredyty={min_k}")
-        for i in range(ile):
-            if stop is not None and stop.is_set():
-                wynik["stop"] = "stop"
-                break
-            try:
-                k = cena(sw["model"], sw["parametry"], swieza=True)      # tuz przed wyslaniem jeszcze raz (0 kr)
-            except dostawcy.BladDostawcy as e:
-                _zdarzenie(log, slug, "blad", f"zdjecie: koszt nieznany ({e}) - nic nie wysylam")
-                wynik["stop"] = f"koszt: {e}"
-                break
-            if k is None:
-                _zdarzenie(log, slug, "blad", "zdjecie: Higgsfield nie podal ceny - nic nie wysylam")
-                wynik["stop"] = "koszt nieznany"
-                break
-            if kr is not None and float(k) > float(kr) + 1e-9:
-                _zdarzenie(log, slug, "uwaga", f"zdjecie: cena wzrosla z {_kr(kr)} do {_kr(k)} - NIE wysylam. Sprawdz cene jeszcze raz.")
-                wynik["stop"] = "cena wzrosla"
-                break
-            kl = do_limitu(k)
-            try:
-                saldo = d.saldo() or saldo
-            except dostawcy.BladDostawcy:
-                pass
-            wydano = baza.wydano_z_rezerwa("higgsfield")
-            if kl > max_k:
-                _zdarzenie(log, slug, "uwaga", f"zdjecie: {_kr(k)} > max {max_k} kr na jedno zlecenie - STOP")
-                wynik["stop"] = "max/zdjecie"
-                break
-            if saldo - kl < min_k:
-                _zdarzenie(log, slug, "uwaga", f"zdjecie: {_kr(k)} zostawiloby {saldo - kl} kr < min_kredyty {min_k} - STOP")
-                wynik["stop"] = "min_kredyty"
-                break
-            if limit and wydano + kl > limit:
-                _zdarzenie(log, slug, "uwaga", f"zdjecie: limit dzienny ({wydano}+{kl} > {limit}) - STOP na dzis")
-                wynik["stop"] = "limit dzienny"
-                break
-            # wpis ze znacznikiem w_toku PRZED wyslaniem - po awarii wiemy, ze to zdjecie bylo w drodze
-            zid = baza.dodaj_zdjecie(slug, sw["prompt"], status="w_toku", stroj=sw["stroj_plik"], typ="swap",
-                                     zrodlo=sw["obrazy"][0], zrodlo_nazwa=nazwa_zrodla(zrodlo), model=sw["model"],
-                                     parametry=sw["parametry"], stroj_bib=sw["stroj_id"], opis=sw["opis"], dostawca=d.NAZWA,
-                                     wycena=k, w_toku={"dostawca": d.NAZWA, "model": sw["model"], "koszt": kl,
-                                                       "etap": "wysylanie", "od": fabryka._teraz_iso(), "job_id": None})
-            wynik["ids"].append(zid)
-            _zdarzenie(log, slug, "info", f"zdjecie #{zid}: start (podmiana postaci, {sw['opis']}, ~{_kr(k)}) - "
-                       f"{nazwa_zrodla(zrodlo)}", zdjecie=zid)
-            _zdjecie(slug, zid, d, sw, kl, log, stop, timeout, wynik)
-            if zid in wynik["odrzucone"]:
-                # filtr odrzucil to zdjecie - kolejne z tymi samymi wejsciami dostalyby to samo: zero powtorek
-                if i + 1 < ile:
-                    log(f"zdjecie #{zid}: filtr odrzucil - nie wysylam pozostalych ({ile - i - 1}) z tym samym zdjeciem")
-                wynik["stop"] = "odrzucone przez filtr"
-                break
-            z = baza.zdjecie(slug, zid)
-            if z.get("status") == "w_toku" and not (z.get("w_toku") or {}).get("job_id"):
-                # nie wiadomo, czy job powstal (siec/CLI) - nie dokladamy kolejnych zlecen, az sie wyjasni
-                wynik["stop"] = "niepewne wysylanie"
-                break
-        log(f"zdjecia: {wynik['zrobione']} zrobione, dzis wydano {baza.wydano_dzis('higgsfield')}/{limit} kr"
-            + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
+        rezerwa = baza.koszt_w_toku("higgsfield")         # rolki + zdjecia w toku + kolejka zdjec (wszystkie persony)
+        wydano = baza.wydano_dzis("higgsfield") + rezerwa
+        if limit and wydano + kl * ile > limit:
+            wejdzie = max(0, (limit - wydano) // kl) if kl else 0
+            raise Odmowa("limit dzienny", f"Dzis wydano {wydano} z {limit} kr (razem z tym, co w toku i w kolejce) - {ile} zdj. "
+                         f"({kl * ile} kr) przekroczyloby dzienny limit" + (f"; zmiesci sie {wejdzie}." if wejdzie else "."))
+        if saldo is not None and saldo - rezerwa - kl * ile < min_k:
+            raise Odmowa("min_kredyty", f"Po tych zdjeciach zostaloby {saldo - rezerwa - kl * ile} kr (saldo {saldo}, w toku i w "
+                         f"kolejce {rezerwa} kr), a minimum to {min_k} kr.")
+        kolejka = {"kr": kr if kr is not None else k, "koszt": kl, "od": fabryka._teraz_iso(), "seria": seria, "nie_przed": 0,
+                   "ponowienia": 0}
+        ids = baza.dodaj_zdjecia(slug, [dict(wpis, kolejka=dict(kolejka)) for _ in range(ile)])
+    for u in sw["ostrzezenia"]:
+        log(f"[UWAGA] {u}")
+    _zdarzenie(log, slug, "info", f"zdjecia {', '.join('#%s' % i for i in ids)}: w kolejce (podmiana postaci, {sw['opis']}, "
+               f"{_kr(k)} za sztuke, rezerwacja {kl * ile} kr) - {nazwa_zrodla(zrodlo)}", zdjecia=ids)
+    if obudz:
+        KOLEJKA.obudz(wznawiaj=True)
+    return ids
+
+
+def generuj(slug, zrodlo, opcje=None, kr=None, log=None, stop=None, timeout=CZAS_NA_ZDJECIE, saldo=None):
+    """CLI i testy: zlec() + obsluga TYCH zdjec w tym procesie az do konca - wysylane od razu, rownolegle (najwyzej rownolegle()
+    w toku naraz, nadmiar czeka w kolejce), kazde jako osobne zlecenie z pelnym zabezpieczeniem pieniedzy. Przy okazji (tez
+    rownolegle) dokancza zdjecia persony w toku (0 kr). Zwraca {"zrobione", "pliki", "bledy", "odrzucone" (NSFW/IP), "w_toku",
+    "stop", "ids"}."""
+    log = log or _log
+    wynik = _nowy_wynik()
+    try:
+        ids = zlec(slug, zrodlo, opcje, kr=kr, saldo=saldo, log=log, obudz=False)
+    except Odmowa as e:
+        _zdarzenie(log, slug, "uwaga", f"zdjecia: {e}")
+        wynik["stop"] = e.kod
+        return wynik
+    wynik["ids"] = list(ids)
+    tylko = {(slug, i) for i in ids} | {(slug, z["id"]) for z in baza.zdjecia_w_toku(slug)}
+    log(f"zdjecia: {len(ids)} szt. wysylam rownolegle (najwyzej {rownolegle()} w toku naraz) | dzis wydano "
+        f"{baza.wydano_dzis('higgsfield')}/{baza.limit_dzienny('higgsfield')} (+{baza.koszt_w_toku('higgsfield')} w toku i w kolejce)")
+    _Obsluga(log=log, timeout=timeout, tylko=tylko, stop=stop, wynik=wynik).do_konca()
+    log(f"zdjecia: {wynik['zrobione']} zrobione, dzis wydano {baza.wydano_dzis('higgsfield')}/{baza.limit_dzienny('higgsfield')} kr"
+        + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
     return wynik
 
 
-def _zdjecie(slug, zid, d, sw, kl, log, stop, timeout, wynik):
-    """Jedno zdjecie: wyslanie (job_id od razu w znaczniku) -> czekanie na TEN job -> rozliczenie -> pobranie albo blad."""
+def _swap_na_dysku():
+    """[(slug, zdjecie)] zdjec w toku i w kolejce - wszystkie persony, prosto z dysku (takze te z innego procesu)."""
+    wynik = []
+    for slug in baza.lista_modelek():
+        try:
+            lista = baza.lista_zdjec(slug)
+        except (OSError, ValueError):
+            continue
+        wynik += [(slug, z) for z in lista if z.get("status") in ("w_toku", STATUS_KOLEJKA)]
+    return wynik
+
+
+class _Obsluga:
+    """Wysyla zdjecia z kolejki i dokancza zdjecia w toku - kazde w osobnym watku, najwyzej rownolegle() w toku naraz (liczone z
+    dysku, wiec takze zdjecia innego procesu zajmuja miejsca). tylko = {(slug, id)}: tylko te (generuj / wznow_w_toku - kazde
+    zdjecie w toku najwyzej raz); None = wszystkie persony (dyspozytor panelu - osierocone w toku sprawdza znowu najwczesniej co
+    ODSTEP_OSIEROCONYCH_S)."""
+
+    def __init__(self, log=None, timeout=CZAS_NA_ZDJECIE, tylko=None, stop=None, wynik=None):
+        self.log = log or _log
+        self.timeout = timeout
+        self.tylko = set(tylko) if tylko is not None else None
+        self.stop = stop if stop is not None else threading.Event()
+        self.wynik = wynik if wynik is not None else _nowy_wynik()
+        self.lock = threading.Lock()
+        self.watki = {}             # (slug, id) -> watek
+        self.ruszone = set()        # zdjecia, ktore ten obiekt juz obslugiwal (tryb `tylko`: w toku najwyzej raz)
+        self.nie_przed = {}         # (slug, id) w toku -> czas, przed ktorym dyspozytor go nie rusza
+        self.budzik = threading.Event()
+        self.katalog = baza.KATALOG_MODELEK     # bezpiecznik: inny katalog person (koniec testu) = nic nie robimy
+        self.wstrzymane = False     # panel sie zamyka: nic nie przejmujemy (kolejka zostaje na nastepny start)
+
+    def _moje(self, klucz):
+        return self.tylko is None or klucz in self.tylko
+
+    def aktywne(self):
+        with self.lock:
+            return {k for k, w in self.watki.items() if w.is_alive()}
+
+    def katalog_zmieniony(self):
+        return baza.KATALOG_MODELEK != self.katalog
+
+    def krok(self, wznawiaj=True):
+        """Jeden obrot: osierocone zdjecia w toku -> watek dokonczenia (nic nie wysyla), potem z kolejki (najstarsze najpierw) tyle,
+        ile jest wolnych miejsc. Zwraca liczbe uruchomionych watkow."""
+        if self.katalog_zmieniony() or self.wstrzymane:
+            return 0
+        teraz = time.time()
+        stan = _swap_na_dysku()
+        aktywne = self.aktywne()
+        n = 0
+        if wznawiaj and not self.stop.is_set():
+            for slug, z in stan:
+                klucz = (slug, z["id"])
+                if z.get("status") != "w_toku" or klucz in aktywne or not self._moje(klucz):
+                    continue
+                if (self.tylko is not None and klucz in self.ruszone) or self.nie_przed.get(klucz, 0) > teraz:
+                    continue
+                blok = baza.BlokadaZdjecia(slug, z["id"])
+                if not blok.zablokuj():
+                    continue            # obsluguje je ktos inny (watek dyspozytora, inny proces)
+                self._start(klucz, self._dokoncz_w_toku, blok)
+                n += 1
+        if self.stop.is_set():
+            return n
+        kolejka = [(slug, z) for slug, z in stan if z.get("status") == STATUS_KOLEJKA and self._moje((slug, z["id"]))
+                   and (slug, z["id"]) not in aktywne and float((z.get("kolejka") or {}).get("nie_przed") or 0) <= teraz]
+        if not kolejka:
+            return n
+        kolejka.sort(key=lambda x: (str((x[1].get("kolejka") or {}).get("od") or x[1].get("utworzono") or ""), x[0], x[1]["id"]))
+        with _blokada_kolejki():
+            if self.katalog_zmieniony():
+                return n
+            # wolne miejsca liczone swiezo POD blokada - drugi proces nie przejmie w tej samej chwili ponad limit
+            wolne = rownolegle() - sum(1 for _, z in _swap_na_dysku() if z.get("status") == "w_toku")
+            for slug, z in kolejka:
+                if wolne <= 0:
+                    break
+                blok = baza.BlokadaZdjecia(slug, z["id"])
+                if not blok.zablokuj():
+                    continue
+                if not baza.przejmij_zdjecie(slug, z["id"]):
+                    blok.odblokuj()
+                    continue
+                wolne -= 1
+                self._start((slug, z["id"]), self._wyslij_z_kolejki, blok)
+                n += 1
+        return n
+
+    def _start(self, klucz, fn, blok):
+        stop = self.stop
+        with self.lock:
+            self.ruszone.add(klucz)
+            w = threading.Thread(target=self._watek, args=(klucz, fn, blok, stop), daemon=True,
+                                 name=f"zdjecie-{klucz[0]}-{klucz[1]}")
+            self.watki[klucz] = w
+        w.start()
+
+    def _watek(self, klucz, fn, blok, stop):
+        slug, zid = klucz
+        czesc = _nowy_wynik()
+        try:
+            fn(slug, zid, stop, czesc)
+        except Exception as e:      # watek nie moze zginac bez sladu; zdjecie zostaje, jak jest (nic nie wysylamy drugi raz)
+            traceback.print_exc()
+            _zdarzenie(self.log, slug, "blad", f"zdjecie #{zid}: nieoczekiwany blad ({type(e).__name__}: {str(e)[:200]}) - nic nie "
+                       f"wysylam drugi raz, sprawdze je jeszcze", zdjecie=zid)
+        finally:
+            try:
+                status = baza.zdjecie(slug, zid).get("status")
+            except (ValueError, OSError):
+                status = None
+            blok.odblokuj(usun=status in STATUSY_KONCOWE or status is None)
+            with self.lock:
+                _scal(self.wynik, czesc)
+                self.watki.pop(klucz, None)
+                if status == "w_toku":
+                    self.nie_przed[klucz] = time.time() + ODSTEP_OSIEROCONYCH_S
+            self.budzik.set()
+
+    def _dokoncz_w_toku(self, slug, zid, stop, wynik):
+        z = baza.zdjecie(slug, zid)
+        if z.get("status") == "w_toku":
+            _wznow_jedno(slug, z, dostawcy.dostawca("higgsfield"), self.log, stop, self.timeout, wynik)
+
+    def _wyslij_z_kolejki(self, slug, zid, stop, wynik):
+        _obsluz_z_kolejki(slug, zid, self.log, stop, self.timeout, wynik)
+
+    def do_konca(self):
+        """Tryb `tylko` (generuj, wznow_w_toku): obroty, az wybrane zdjecia skoncza sie albo zostana w toku (dokonczy je nastepne
+        sprawdzenie). STOP: wybrane zdjecia z kolejki -> anulowane (nic nie poszlo)."""
+        bez_miejsca_od = None
+        while not self.katalog_zmieniony():
+            uruchomione = self.krok()
+            if self.aktywne():
+                bez_miejsca_od = None
+                self.budzik.wait(ODSTEP_KOLEJKI_S)
+                self.budzik.clear()
+                continue
+            czeka = [(s, z) for s, z in _swap_na_dysku() if z.get("status") == STATUS_KOLEJKA and self._moje((s, z["id"]))]
+            if not czeka:
+                break
+            if self.stop.is_set():
+                for s in {s for s, _ in czeka}:
+                    ids = baza.anuluj_zdjecia_w_kolejce(s, NOTATKA_STOP, ids={z["id"] for x, z in czeka if x == s})
+                    if ids:
+                        _zdarzenie(self.log, s, "info", f"zdjecia {', '.join('#%s' % i for i in ids)}: {NOTATKA_STOP}")
+                self.wynik["stop"] = self.wynik["stop"] or "stop"
+                break
+            teraz = time.time()
+            if not uruchomione and any(float((z.get("kolejka") or {}).get("nie_przed") or 0) <= teraz for _, z in czeka):
+                # gotowe do wyslania, a wszystkie miejsca zajmuja cudze zdjecia w toku
+                bez_miejsca_od = bez_miejsca_od or teraz
+                if teraz - bez_miejsca_od > CZEKAJ_NA_MIEJSCE_S:
+                    self.log(f"zdjecia: od {CZEKAJ_NA_MIEJSCE_S // 60} min nie ma wolnego miejsca (w toku {rownolegle()} naraz) - "
+                             f"{len(czeka)} zostaje w kolejce, wysle je panel")
+                    self.wynik["stop"] = self.wynik["stop"] or "kolejka pelna"
+                    break
+            self.budzik.wait(ODSTEP_KOLEJKI_S)
+            self.budzik.clear()
+
+
+def _obsluz_z_kolejki(slug, zid, log, stop, timeout, wynik):
+    """Zdjecie przejete z kolejki (status w_toku, etap 'wysylanie', nic jeszcze nie poszlo): swieza cena i bezpieczniki -> wyslanie
+    (job_id od razu) -> czekanie na TEN job -> pobranie. Odmowa 'za duzo naraz' (job na pewno nie powstal) = z powrotem do kolejki.
+    Odrzucenie NSFW/IP albo niepewne wysylanie = reszta tej serii z kolejki nie idzie."""
+    z = baza.zdjecie(slug, zid)
+    k = z.get("kolejka") or {}
+    kr, kl, seria = k.get("kr"), int(k.get("koszt") or 0), k.get("seria")
+    sw = {"prompt": z.get("prompt") or "", "obrazy": list(z.get("obrazy") or []), "model": z.get("model") or MODEL_DOMYSLNY,
+          "parametry": dict(z.get("parametry") or {})}
+    brak = [os.path.basename(o) for o in sw["obrazy"] if not os.path.isfile(o)]
+    if not sw["obrazy"] or brak:
+        _nie_wyslane(slug, zid, log, wynik, f"brakuje plikow ({', '.join(brak) or 'zdjec'}) - wstaw zdjecie i kliknij Generuj "
+                     f"jeszcze raz")
+        return
+    if stop.is_set():
+        _anuluj(slug, zid, log, wynik)
+        return
+    d = dostawcy.dostawca("higgsfield")
     try:
-        job = _wyslij(slug, zid, d, zlecenie(slug, sw), kl, log)
-    except fabryka.JobTrwa:
-        wynik["w_toku"].append(zid)
-        return
+        c = cena(sw["model"], sw["parametry"], swieza=True)        # tuz przed wyslaniem jeszcze raz (0 kr)
     except dostawcy.BladDostawcy as e:
-        _nie_wyszlo(slug, zid, None, fabryka.powod_odrzucenia("", str(e)) or "inny", log, wynik, blad=str(e))
+        if za_duzo_naraz(e):
+            _do_kolejki(slug, zid, log, e)
+        else:
+            _nie_wyslane(slug, zid, log, wynik, f"Higgsfield nie podal ceny ({str(e)[:200]})", stop_kod=f"koszt: {e}")
         return
-    if job.get("job_id") is None:          # odrzucone juz przy wysylaniu (filtr)
+    if c is None:
+        _nie_wyslane(slug, zid, log, wynik, "Higgsfield nie podal ceny", stop_kod="koszt nieznany")
+        return
+    if kr is not None and float(c) > float(kr) + 1e-9:
+        _nie_wyslane(slug, zid, log, wynik, f"cena wzrosla z {_kr(kr)} do {_kr(c)} - sprawdz cene i kliknij Generuj jeszcze raz",
+                     stop_kod="cena wzrosla", typ="uwaga")
+        return
+    kl2 = do_limitu(c)
+    min_k, max_k = fabryka.bezpiecznik(baza.ustawienia_modelki(slug), "higgsfield")
+    if kl2 > max_k:
+        _nie_wyslane(slug, zid, log, wynik, f"{_kr(c)} to wiecej niz max {max_k} kr na jedno zlecenie", stop_kod="max/zdjecie",
+                     typ="uwaga")
+        return
+    try:
+        saldo = d.saldo()
+    except dostawcy.BladDostawcy as e:
+        if za_duzo_naraz(e):
+            _do_kolejki(slug, zid, log, e)
+        else:
+            _nie_wyslane(slug, zid, log, wynik, f"nie moge sprawdzic salda Higgsfield ({str(e)[:200]})", stop_kod=f"saldo: {e}")
+        return
+    # saldo swieze; minus inne rolki i zdjecia w toku (moga jeszcze nie byc zaksiegowane) - to zdjecie ma w znaczniku rezerwacje kl
+    inne = max(0, baza.koszt_w_drodze("higgsfield") - kl)
+    if saldo is not None and saldo - inne - kl2 < min_k:
+        _nie_wyslane(slug, zid, log, wynik, f"{_kr(c)} zostawiloby {saldo - inne - kl2} kr (saldo {saldo}, inne w toku {inne} kr) "
+                     f"< min_kredyty {min_k}", stop_kod="min_kredyty", typ="uwaga")
+        return
+    limit = baza.limit_dzienny("higgsfield")
+    wydano = baza.wydano_z_rezerwa("higgsfield") - kl          # bez rezerwacji tego zdjecia
+    if limit and wydano + kl2 > limit:
+        _nie_wyslane(slug, zid, log, wynik, f"limit dzienny ({wydano}+{kl2} > {limit} kr)", stop_kod="limit dzienny", typ="uwaga")
+        return
+    if stop.is_set():
+        _anuluj(slug, zid, log, wynik)
+        return
+    # panel sie zamyka (aktualizacja): najpierw znacznik "wysylam" w fabryka._WYSYLANIE (na niego czeka /api/zamknij), potem flaga
+    # zamykania - albo panel poczeka na koniec wysylania, albo zdjecie wraca do kolejki (nic nie poszlo) i pojdzie po starcie
+    straz = ("zdjecie-start", slug, zid)
+    with fabryka._WYSYLANIE_LOCK:
+        fabryka._WYSYLANIE.add(straz)
+    job, blad = None, None
+    try:
+        if KOLEJKA.zamykanie:
+            baza.zwroc_zdjecie_do_kolejki(slug, zid, notatki="Panel sie zamykal - zdjecie czeka w kolejce i pojdzie po starcie "
+                                                             "(nic nie zeszlo).")
+            log(f"zdjecie #{zid}: panel sie zamyka - wraca do kolejki, pojdzie po starcie (nic nie poszlo)")
+            return
+        _zdarzenie(log, slug, "info", f"zdjecie #{zid}: start (podmiana postaci, {z.get('opis') or sw['model']}, ~{_kr(c)})",
+                   zdjecie=zid)
+        try:
+            job = _wyslij(slug, zid, d, zlecenie(slug, sw), kl2, log)
+        except ZaDuzoNaraz as e:
+            _do_kolejki(slug, zid, log, e)
+            return
+        except fabryka.JobTrwa:
+            # nie wiadomo, czy job powstal (siec/CLI) - zostaje w toku (wznowienie szuka go 60 min); reszty serii nie dokladamy
+            wynik["w_toku"].append(zid)
+            wynik["stop"] = wynik["stop"] or "niepewne wysylanie"
+            _anuluj_serie(slug, seria, zid, NOTATKA_SERIA_NIEPEWNE, log)
+            return
+        except dostawcy.BladDostawcy as e:
+            blad = e
+    finally:
+        with fabryka._WYSYLANIE_LOCK:
+            fabryka._WYSYLANIE.discard(straz)      # wyslane (job_id zapisany) - czekanie na wynik nie blokuje zamkniecia panelu
+    if job is None:
+        _nie_wyszlo(slug, zid, None, fabryka.powod_odrzucenia("", str(blad)) or "inny", log, wynik, blad=str(blad))
+    elif job.get("job_id") is None:          # odrzucone juz przy wysylaniu (filtr)
         _nie_wyszlo(slug, zid, job, fabryka.powod_odrzucenia(job.get("status"), job.get("blad")) or "inny", log, wynik)
+    else:
+        _dokoncz(slug, zid, d, job["job_id"], kl2, log, stop, timeout, wynik, gotowy=job.get("gotowy"))
+    if zid in wynik["odrzucone"]:
+        # filtr odrzucil to zdjecie - reszta serii (te same wejscia) dostalaby to samo: zero powtorek
+        wynik["stop"] = wynik["stop"] or "odrzucone przez filtr"
+        _anuluj_serie(slug, seria, zid, NOTATKA_SERIA_FILTR, log)
+
+
+def _nie_wyslane(slug, zid, log, wynik, przyczyna, stop_kod=None, typ="blad"):
+    """Zdjecie z kolejki NIE poszlo (cena, bezpiecznik, brak plikow) - status blad, 0 kr, rezerwacja zwolniona."""
+    notatki = f"Nie wyslane: {przyczyna} - nic nie zeszlo, 0 kr."
+    baza.ustaw_zdjecie(slug, zid, status="blad", w_toku=None, powod="inny", notatki=notatki[:1000], koszt=0)
+    wynik["bledy"].append(zid)
+    if stop_kod and not wynik.get("stop"):
+        wynik["stop"] = stop_kod
+    _zdarzenie(log, slug, typ, f"zdjecie #{zid}: {notatki}", zdjecie=zid)
+
+
+def _anuluj(slug, zid, log, wynik):
+    """STOP, zanim zdjecie poszlo: status 'anulowane' (nic nie zeszlo)."""
+    baza.ustaw_zdjecie(slug, zid, status=STATUS_ANULOWANE, w_toku=None, notatki=NOTATKA_STOP)
+    wynik["stop"] = wynik["stop"] or "stop"
+    _zdarzenie(log, slug, "info", f"zdjecie #{zid}: {NOTATKA_STOP}", zdjecie=zid)
+
+
+def _anuluj_serie(slug, seria, zid, notatki, log):
+    """Reszta serii (to samo klikniecie) czekajaca w kolejce -> anulowane (nic nie poszlo). Zwraca anulowane id."""
+    if not seria:
+        return []
+    ids = baza.anuluj_zdjecia_w_kolejce(slug, notatki, seria=seria)
+    if ids:
+        _zdarzenie(log, slug, "info", f"zdjecie #{zid}: reszta serii nie idzie ({', '.join('#%s' % i for i in ids)}) - {notatki}",
+                   zdjecie=zid)
+    return ids
+
+
+def _do_kolejki(slug, zid, log, blad):
+    """Higgsfield odmowil 'za duzo naraz', job NA PEWNO nie powstal: zdjecie wraca do kolejki (proba za chwile, coraz rzadziej);
+    po MAX_PONOWIEN - blad (nic nie zeszlo)."""
+    z = baza.zdjecie(slug, zid)
+    n = int((z.get("kolejka") or {}).get("ponowienia") or 0) + 1
+    if n > MAX_PONOWIEN:
+        notatki = (f"Higgsfield {n - 1} razy odmowil przyjecia (za duzo zadan naraz: {str(blad)[:150]}) - nic nie zeszlo, 0 kr. "
+                   f"Kliknij Generuj pozniej albo zmniejsz 'Ile zdjec naraz' w Ustawienia -> Zdjecia.")
+        baza.ustaw_zdjecie(slug, zid, status="blad", w_toku=None, powod="inny", notatki=notatki[:1000], koszt=0)
+        _zdarzenie(log, slug, "blad", f"zdjecie #{zid}: {notatki}", zdjecie=zid)
         return
-    _dokoncz(slug, zid, d, job["job_id"], kl, log, stop, timeout, wynik, gotowy=job.get("gotowy"))
+    za = min(PONOW_MAX_S, PONOW_PO_S * 2 ** (n - 1))
+    baza.zwroc_zdjecie_do_kolejki(slug, zid, notatki=f"Higgsfield: za duzo zadan naraz - czeka w kolejce, sprobuje znowu za {za} s "
+                                  f"(nic nie zeszlo).", ponowienia=n, nie_przed=time.time() + za)
+    _zdarzenie(log, slug, "info", f"zdjecie #{zid}: Higgsfield odmowil ({str(blad)[:160]}) - job nie powstal, wraca do kolejki "
+               f"(proba {n}/{MAX_PONOWIEN} za {za} s)", zdjecie=zid)
 
 
 def _wyslij(slug, zid, d, z, kl, log):
     """Znacznik w_toku -> zlec() (wszystkie pliki wgrane, wstawione zdjecie swiezo; 'wysylam' tuz przed create) -> job_id zapisany
-    od razu. Ponowne wyslanie TYLKO gdy job na pewno nie powstal (blad przed 'wysylam' albo blad trwaly). Po 'wysylam' blad =
-    szukamy joba po id wstawionego zdjecia; nie ma -> JobTrwa (zdjecie czeka w toku, NIGDY drugi create)."""
+    od razu. Ponowne wyslanie TYLKO gdy job na pewno nie powstal (blad przed 'wysylam' albo blad trwaly). Odmowa 'za duzo naraz'
+    (odpowiedz serwera) i joba nie ma na liscie -> ZaDuzoNaraz (zdjecie wraca do kolejki). Po 'wysylam' inny blad = szukamy joba
+    po id wstawionego zdjecia; nie ma -> JobTrwa (zdjecie czeka w toku, NIGDY drugi create)."""
     ile = 1 + max(0, int(baza.ustawienia_modelki(slug).get("powtorki") or 0))
     model = z.get("model")
     klucz = ("zdjecie", slug, zid)
@@ -752,7 +1125,9 @@ def _wyslij(slug, zid, d, z, kl, log):
                     return {"job_id": None, "status": "nsfw" if powod == "nsfw" else "ip_detected", "urls": [], "blad": str(blad),
                             "surowe": {}}
                 marker = baza.zdjecie(slug, zid).get("w_toku") or {}
-                if marker.get("wysylam") and not fabryka._blad_trwaly(blad):
+                if za_duzo_naraz(blad):
+                    job = _po_odmowie(slug, zid, d, model, marker, blad, log)     # job / ZaDuzoNaraz / JobTrwa
+                elif marker.get("wysylam") and not fabryka._blad_trwaly(blad):
                     job = _szukaj_wyslanego(slug, zid, d, model, marker, blad, log)
             if job is not None:
                 baza.ustaw_zdjecie_w_toku(slug, zid, job_id=job["job_id"], etap="czeka", wyslano=fabryka._teraz_iso())
@@ -766,6 +1141,28 @@ def _wyslij(slug, zid, d, z, kl, log):
         log(f"zdjecie #{zid}: job nie powstal - wysylam jeszcze raz za 10 s (proba {proba + 1}/{ile})")
         time.sleep(10)
     raise blad or dostawcy.BladDostawcy("wyslanie nie wyszlo")
+
+
+def _po_odmowie(slug, zid, d, model, marker, blad, log):
+    """Higgsfield odmowil 'za duzo naraz'. Przed 'wysylam' (np. odmowa przy wgrywaniu) nic nie poszlo -> ZaDuzoNaraz. Po 'wysylam'
+    odmowa przyszla z samego create (odpowiedz serwera = job nie powstal), ale dla pewnosci rzut oka na liste jobow po id
+    wstawionego zdjecia: jest job -> ten job (bez wysylania); listy nie widac -> jak niepewne wyslanie (_szukaj_wyslanego, potem
+    JobTrwa - NIGDY drugi raz); lista jest, a joba nie ma -> ZaDuzoNaraz (zdjecie wraca do kolejki)."""
+    if not marker.get("wysylam"):
+        raise ZaDuzoNaraz(str(blad))
+    if marker.get("obraz_id"):
+        try:
+            znaleziony = d.znajdz(model, obraz_id=marker["obraz_id"])
+        except dostawcy.BladDostawcy as e:
+            log(f"zdjecie #{zid}: odmowa ({str(blad)[:120]}), a listy jobow nie widac ({str(e)[:120]}) - nie wysylam drugi raz, "
+                f"sprawdzam dalej")
+        else:
+            if znaleziony:
+                _zdarzenie(log, slug, "info", f"zdjecie #{zid}: mimo odmowy job {znaleziony['job_id']} powstal - czekam na niego (bez "
+                           f"drugiego wysylania)", zdjecie=zid)
+                return znaleziony
+            raise ZaDuzoNaraz(str(blad))
+    return _szukaj_wyslanego(slug, zid, d, model, marker, blad, log)
 
 
 def _szukaj_wyslanego(slug, zid, d, model, marker, blad, log):
@@ -922,22 +1319,18 @@ def _niepewne(slug, zid, m, przyczyna, log, wynik):
 def wznow_w_toku(slug, log=None, stop=None, timeout=CZAS_NA_ZDJECIE, wynik=None):
     """Dokancza zdjecia persony w toku: job_id znany -> odpytuje TEN job; 'wysylam' bez job_id -> szuka joba po id wstawionego
     zdjecia (60 min, potem 'sprawdz w apce'); bez 'wysylam' -> nic nie poszlo, zdjecie 'nie wyszlo' (user kliknie jeszcze raz).
-    Nigdy nie wysyla nowego joba."""
+    Nigdy nie wysyla nowego joba. Rownolegle, kazde zdjecie pod jego blokada (obslugiwane juz przez kogos innego - pominiete).
+    W panelu (dziala dyspozytor KOLEJKA) tylko go budzi (zdejmuje STOP) i wraca od razu - dokancza w tle."""
     log = log or _log
     wynik = wynik if wynik is not None else _nowy_wynik()
-    if not baza.zdjecia_w_toku(slug):
+    w_toku = baza.zdjecia_w_toku(slug)
+    if not w_toku:
         return wynik
-    with baza.blokada_generacji(slug) as moge:
-        if not moge:
-            log(f"{slug}: inny proces dokancza juz zdjecia tej persony - pomijam")
-            wynik["stop"] = "zajete"
-            return wynik
-        d = dostawcy.dostawca("higgsfield")
-        for z in baza.zdjecia_w_toku(slug):
-            if stop is not None and stop.is_set():
-                wynik["stop"] = "stop"
-                break
-            _wznow_jedno(slug, z, d, log, stop, timeout, wynik)
+    if KOLEJKA.dziala():
+        KOLEJKA.obudz(wznawiaj=True)
+        wynik["w_toku"] = [z["id"] for z in w_toku]
+        return wynik
+    _Obsluga(log=log, timeout=timeout, tylko={(slug, z["id"]) for z in w_toku}, stop=stop, wynik=wynik).do_konca()
     return wynik
 
 
@@ -948,6 +1341,14 @@ def _wznow_jedno(slug, z, d, log, stop, timeout, wynik):
     kl = int(m.get("koszt") or 0)
     gotowy = None
     if not jid:
+        if not m.get("wysylam") and z.get("kolejka"):
+            # zdjecie z kolejki (3.3) przerwane PRZED 'wysylam' (zamkniety panel w trakcie sprawdzania ceny / wgrywania) - nic nie
+            # poszlo do Higgsfield, wiec wraca do kolejki i pojdzie normalnie (cena i bezpieczniki jeszcze raz)
+            baza.zwroc_zdjecie_do_kolejki(slug, zid, notatki="Wysylanie przerwane, zanim cokolwiek poszlo - wraca do kolejki "
+                                                             "(nic nie zeszlo).")
+            _zdarzenie(log, slug, "info", f"zdjecie #{zid}: wysylanie nie zaczelo sie przed przerwaniem - wraca do kolejki (nic nie "
+                       f"zeszlo)", zdjecie=zid)
+            return
         if not m.get("wysylam"):
             baza.ustaw_zdjecie(slug, zid, status="blad", w_toku=None, powod="inny",
                                notatki="Wysylanie przerwane, zanim cokolwiek poszlo do Higgsfield - nic nie zeszlo. Kliknij Generuj "
@@ -1005,3 +1406,135 @@ def wznow_wszystkie(log=None, stop=None, timeout=CZAS_NA_ZDJECIE):
         if baza.zdjecia_w_toku(slug):
             wyniki[slug] = wznow_w_toku(slug, log=log, stop=stop, timeout=timeout)
     return wyniki
+
+
+# ---------------- dyspozytor panelu (watek w tle), STOP, stan kolejki (3.3) ----------------
+
+class _Dyspozytor:
+    """Panel: watek w tle - co ODSTEP_KOLEJKI_S (i od razu po "Generuj" / koncu zdjecia) obrot _Obsluga dla wszystkich person:
+    wysyla z kolejki tyle, ile wolnych miejsc, i dokancza osierocone zdjecia w toku. Niezalezny od zadan konsoli (rolki, autopilot),
+    wiec zdjecia i rolki ida obok siebie. Bez dzialajacego dyspozytora (CLI, testy) kolejke obsluguje generuj()."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.watek = None
+        self.obsluga = None
+        self.koniec = False
+        self.zatrzymane = False     # po STOP: osierocone w toku czekaja na nastepne sprawdzenie (Generuj, autopilot, restart)
+        self.zamykanie = False      # panel sie zamyka: przejete, a jeszcze nie wyslane zdjecia wracaja do kolejki
+
+    def dziala(self):
+        w, o = self.watek, self.obsluga
+        return bool(w and w.is_alive() and o is not None and not o.katalog_zmieniony() and not self.koniec)
+
+    def uruchom(self, log=None):
+        """Start watku (panel: przy starcie i przy "Generuj"). False = juz dziala."""
+        with self.lock:
+            if self.watek and self.watek.is_alive() and not self.koniec:
+                return False
+            self.koniec = False
+            self.zatrzymane = False
+            self.zamykanie = False
+            self.obsluga = _Obsluga(log=log)
+            self.watek = threading.Thread(target=self._petla, args=(self.obsluga,), daemon=True, name="kolejka-zdjec")
+            self.watek.start()
+        return True
+
+    def _petla(self, o):
+        while not self.koniec and not o.katalog_zmieniony():
+            try:
+                o.krok(wznawiaj=not self.zatrzymane)
+            except Exception as e:      # jeden zly obrot nie moze zatrzymac kolejki
+                traceback.print_exc()
+                o.log(f"kolejka zdjec: {type(e).__name__}: {e}")
+            o.budzik.wait(ODSTEP_KOLEJKI_S)
+            o.budzik.clear()
+
+    def obudz(self, wznawiaj=False):
+        """Nowa praca (Generuj, przebieg autopilota): obrot od razu. wznawiaj=True zdejmuje STOP (nowe watki dostaja swiezy STOP,
+        osierocone w toku dokanczamy od razu). False = dyspozytor nie dziala."""
+        o = self.obsluga
+        if o is None or not self.dziala():
+            return False
+        if wznawiaj:
+            self.zatrzymane = False
+            if o.stop.is_set():
+                o.stop = threading.Event()
+            with o.lock:
+                o.nie_przed.clear()
+        o.budzik.set()
+        return True
+
+    def zatrzymaj(self):
+        """STOP: watki przestaja czekac (job zostaje w toku), osieroconych nie dokanczamy do nastepnego sprawdzenia. Kolejke
+        anuluje zatrzymaj() modulu."""
+        self.zatrzymane = True
+        o = self.obsluga
+        if o is not None:
+            o.stop.set()
+            o.budzik.set()
+
+    def wstrzymaj(self):
+        """Panel sie zamyka: nic nowego nie przejmujemy z kolejki (zostaje na nastepny start), przejete, a jeszcze nie wyslane wracaja
+        do kolejki; wysylane koncza wysylanie (na nie czeka /api/zamknij), zdjecia w toku czekaja dalej."""
+        self.zamykanie = True
+        o = self.obsluga
+        if o is not None:
+            o.wstrzymane = True
+
+    def zakoncz(self, czekaj_s=10):
+        """Konczy watek dyspozytora i watki zdjec (STOP - job zostaje w toku). Testy (sprzatanie po tescie)."""
+        with self.lock:
+            w, o = self.watek, self.obsluga
+            self.koniec = True
+        if o is not None:
+            o.wstrzymane = True
+            o.stop.set()
+            o.budzik.set()
+        if w is not None:
+            w.join(czekaj_s)
+        if o is not None:
+            for t in list(o.watki.values()):
+                t.join(czekaj_s)
+        with self.lock:
+            self.watek = None
+            self.obsluga = None
+            self.zatrzymane = False
+            self.zamykanie = False
+
+
+KOLEJKA = _Dyspozytor()
+
+
+def zatrzymaj(log=None):
+    """STOP na stronie Zdjecia (wszystkie persony): zdjecia z kolejki -> 'anulowane' (nic nie poszlo, 0 kr), czekanie na joby w toku
+    przerwane. Przyjete joby NIE sa anulowane - dokoncza sie przy nastepnym sprawdzeniu (kolejne Generuj, przebieg autopilota,
+    restart panelu, `python fabryka.py wznow`). Zwraca {"anulowane": [[slug, id], ...], "w_toku": n}."""
+    KOLEJKA.zatrzymaj()
+    anulowane, w_toku = [], 0
+    for slug in baza.lista_modelek():
+        anulowane += [[slug, zid] for zid in baza.anuluj_zdjecia_w_kolejce(slug, NOTATKA_STOP)]
+        w_toku += len(baza.zdjecia_w_toku(slug))
+    tekst = (f"zdjecia: STOP - z kolejki anulowane {len(anulowane)} (nic nie poszlo, 0 kr), w toku {w_toku} (juz przyjete - "
+             f"dokoncza sie przy nastepnym sprawdzeniu)")
+    (log or _log)(tekst)
+    baza.dziennik_zapisz("info", tekst)
+    return {"anulowane": anulowane, "w_toku": w_toku}
+
+
+def wysylane(slug, zid):
+    """Czy to zdjecie jest wlasnie wysylane (upload + create) - wtedy nie wolno go 'przestac czekac'."""
+    with fabryka._WYSYLANIE_LOCK:
+        return ("zdjecie", slug, int(zid)) in fabryka._WYSYLANIE
+
+
+def stan_kolejki(slug=None):
+    """Dla panelu: zdjecia w toku i w kolejce (wszystkie persony i `slug`), limit naraz, czy dyspozytor dziala, czy po STOP."""
+    w = {"w_toku": 0, "w_kolejce": 0}
+    p = {"w_toku": 0, "w_kolejce": 0}
+    for s, z in _swap_na_dysku():
+        k = "w_toku" if z.get("status") == "w_toku" else "w_kolejce"
+        w[k] += 1
+        if s == slug:
+            p[k] += 1
+    return dict(w, limit=rownolegle(), dziala=KOLEJKA.dziala(), zatrzymane=bool(KOLEJKA.zatrzymane), persona=p)

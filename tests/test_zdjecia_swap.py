@@ -378,15 +378,20 @@ def test_job_trwa_zostaje_w_toku_i_dokanczamy_ten_sam(persona, zrodlo, cli):
 
 def test_nsfw_jasny_komunikat_bez_powtorki(persona, zrodlo, cli):
     src = zs.zapisz_zrodlo(persona, zrodlo)
+    # 3.3: seria idzie rownolegle - tu jedno naraz (ustawienie), wiec 2. i 3. czekaja w kolejce, gdy filtr odrzuca 1.
+    baza.zapisz_ustawienia_globalne(zdjecia_rownolegle=1)
     cli.wyniki = [{"status": "nsfw"}]
     w = zs.generuj(persona, src, {"ile": 3}, kr=45)
-    # odrzucone pierwsze = pozostale z tym samym zdjeciem nie ida (dostalyby to samo)
+    # odrzucone pierwsze = pozostale z tej serii (to samo zdjecie) nie ida z kolejki - dostalyby to samo
     assert len(cli.generacje) == 1 and w["odrzucone"] == [1] and w["zrobione"] == 0 and w["stop"] == "odrzucone przez filtr"
     z = baza.zdjecie(persona, 1)
     assert z["status"] == "blad" and z["powod"] == "nsfw" and z["notatki"].startswith(zs.NOTATKA_NSFW) and z["koszt"] == 0
-    assert baza.wydano_dzis("higgsfield") == 0 and len(baza.lista_zdjec(persona)) == 1
+    assert [baza.zdjecie(persona, i)["status"] for i in (2, 3)] == ["anulowane", "anulowane"]
+    assert baza.zdjecie(persona, 2)["notatki"] == zs.NOTATKA_SERIA_FILTR
+    assert baza.wydano_dzis("higgsfield") == 0 and baza.koszt_w_toku("higgsfield") == 0     # rezerwacje zwolnione
     # odrzucenie juz przy wysylaniu (create zwraca blad filtra) - jeden create, zero powtorek
-    baza.usun_zdjecie(persona, 1)
+    for x in baza.lista_zdjec(persona):
+        baza.usun_zdjecie(persona, x["id"])
     n = len(cli.generacje)
     cli.wyniki = [higgsfield_cli.HiggsfieldBlad("Error: content flagged by moderation (nsfw)")]
     w = zs.generuj(persona, src, {}, kr=45)
@@ -413,20 +418,22 @@ def test_bezpieczniki_limit_saldo_cena(persona, zrodlo, cli):
     assert w["stop"] == "min_kredyty" and cli.generacje == []
 
 
-def test_blokada_generacji_persony(persona, zrodlo, cli):
+def test_zdjecia_nie_czekaja_na_rolki_persony(persona, zrodlo, cli):
+    """3.3: zdjecia nie biora blokady generacji persony (rolki) - rolka, ktora sie wlasnie generuje, nie zatrzymuje zdjec. Jedno
+    zdjecie = jeden wlasciciel pilnuje baza.BlokadaZdjecia (test_zdjecia_rownolegle.py)."""
     src = zs.zapisz_zrodlo(persona, zrodlo)
     trzyma, puszczaj = threading.Event(), threading.Event()
 
-    def inny_proces():
+    def rolka_w_innym_watku():
         with baza.blokada_generacji(persona):
             trzyma.set()
             puszczaj.wait(5)
-    t = threading.Thread(target=inny_proces)
+    t = threading.Thread(target=rolka_w_innym_watku)
     t.start()
     trzyma.wait(5)
     try:
         w = zs.generuj(persona, src, {}, kr=45)
-        assert w["stop"] == "zajete" and cli.generacje == [] and baza.lista_zdjec(persona) == []
+        assert w["zrobione"] == 1 and len(cli.generacje) == 1 and w["stop"] is None
     finally:
         puszczaj.set()
         t.join(5)
@@ -487,6 +494,18 @@ def _czekaj():
     assert not panel.konsola.stan["trwa"]
 
 
+def czekaj_na_zdjecia(limit_s=10):
+    """Dyspozytor zdjec panelu (watek w tle) skonczyl: nic w toku, nic w kolejce, zaden watek zdjecia nie pracuje."""
+    import time as _t
+    koniec = _t.monotonic() + limit_s
+    while _t.monotonic() < koniec:
+        s, o = zs.stan_kolejki(), zs.KOLEJKA.obsluga
+        if not s["w_toku"] and not s["w_kolejce"] and not (o and o.aktywne()):
+            return
+        threading.Event().wait(0.02)            # time.sleep jest w testach wylaczone (conftest)
+    raise AssertionError(f"zdjecia nie skonczyly sie w {limit_s} s: {zs.stan_kolejki()}")
+
+
 def _wstaw(klient, w=1080, h=1920, nazwa="Moje zdjęcie.jpg"):
     buf = io.BytesIO()
     Image.new("RGB", (w, h), (10, 20, 30)).save(buf, "JPEG")
@@ -520,24 +539,26 @@ def test_api_wycena_i_generuj(klient, persona, cli):
     assert r.status_code == 400 and "cene" in r.get_json()["blad"] and baza.lista_zdjec(persona) == []
     assert klient.post("/api/swap", json={"zrodlo": "nie_ma.jpg", "kr": 45}).status_code == 400
     d = klient.post("/api/swap", json={"zrodlo": zrodlo, "model": "nano_banana_pro", "ile": 2, "kr": 45}).get_json()
-    assert d["ok"] and d["zadanie"]["typ"] == "swap"
-    _czekaj()
+    assert d["ok"] and len(d["ids"]) == 2 and d["kolejka"]["limit"] == 4 and not panel.konsola.stan["trwa"]   # bez zadania konsoli
+    czekaj_na_zdjecia()
     lista = klient.get("/api/zdjecia").get_json()["zdjecia"]
     assert len(lista) == 2 and all(z["status"] == "gotowe" and z["typ"] == "swap" and z["url"] and z["zrodlo_url"] for z in lista)
-    assert len(cli.generacje) == 2 and panel.konsola.stan["wynik"]["zrobione"] == 2
+    assert len(cli.generacje) == 2 and baza.wydano_dzis("higgsfield") == 90
 
 
-def test_api_generuj_cena_wzrosla_i_409(klient, persona, cli):
+def test_api_generuj_cena_wzrosla_i_bez_409_przy_rolkach(klient, persona, cli):
     zrodlo = _wstaw(klient).get_json()["zrodlo"]
     cli.cena = 60
-    klient.post("/api/swap", json={"zrodlo": zrodlo, "kr": 45})
-    _czekaj()
+    r = klient.post("/api/swap", json={"zrodlo": zrodlo, "kr": 45})
+    assert r.status_code == 400 and r.get_json()["kod"] == "cena wzrosla" and "Cena wzrosla z 45 kr do 60 kr" in r.get_json()["blad"]
     assert cli.generacje == [] and baza.lista_zdjec(persona) == []
-    assert any("cena wzrosla" in linia for linia in panel.konsola.log)
+    # konsola zajeta (rolki, autopilot) - zdjecia i tak ida od razu (bez "Cos juz sie dzieje")
     panel.konsola._start("skanuj", persona)
     try:
         r = klient.post("/api/swap", json={"zrodlo": zrodlo, "kr": 60})
-        assert r.status_code == 409 and baza.lista_zdjec(persona) == []
+        assert r.status_code == 200 and len(r.get_json()["ids"]) == 1
+        czekaj_na_zdjecia()
+        assert len(cli.generacje) == 1 and baza.lista_zdjec(persona)[0]["status"] == "gotowe"
     finally:
         panel.konsola._koniec()
 
@@ -557,8 +578,9 @@ def test_panel_wznawia_zdjecia_przy_starcie(klient, persona, cli):
     zid = baza.dodaj_zdjecie(persona, "p", status="w_toku", typ="swap", zrodlo_nazwa="foto",
                              w_toku={"dostawca": "higgsfield", "model": "seedream_v5_pro", "koszt": 3, "job_id": "j1",
                                      "od": fabryka._teraz_iso()})
-    assert panel.wznow_przy_starcie()["typ"] == "wznow"
-    _czekaj()
+    assert panel.wznow_przy_starcie() is None           # 3.3: zdjecia dokancza dyspozytor zdjec, nie zadanie konsoli
+    panel.start_kolejki_zdjec()
+    czekaj_na_zdjecia()
     z = baza.zdjecie(persona, zid)
     assert z["status"] == "gotowe" and os.path.basename(z["plik"]) == f"{zid:03d}_swap_foto.png" and cli.generacje == []
 

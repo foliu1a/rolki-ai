@@ -31,7 +31,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
 
 STAN = {"trwa": False, "ostatni": None, "nastepny": None, "modelka": None, "etap": "", "przebiegi": 0,
-        "telegram_wiadomosci": 0}
+        "telegram_wiadomosci": 0, "opis": ""}   # opis: co dokladnie robi (widget Pierdolkomat), np. "robię rolkę z promptu: Noemi, ..."
 _OSTRZEZENIA = set()            # ostrzezenia wyslane raz na uruchomienie (np. konto persony bez /start)
 ODSTEP_TELEGRAM_S = 60          # z telefonem sprawdzamy wiadomosci co minute
 RAPORT_GODZINA = 20             # raport dnia na telefon po tej godzinie (lokalnie)
@@ -142,6 +142,10 @@ def _status_tekst():
                      + f"gotowe {st.get('gotowe', 0)}, nie wyszlo {st.get('blad', 0)}; "
                      f"dzis {len(baza.pomysly_z_dnia(slug))} rolek, {wydane}"
                      + (" | AUTOPILOT: " + ("PAUZA - " + ap["pauza"] if ap.get("pauza") else ("wlaczony" if ust.get("autopilot") else "wylaczony"))))
+    try:
+        linie.append(stan_z_promptu()["tekst"])
+    except Exception:
+        pass
     return "\n".join(linie) or "Brak person."
 
 
@@ -160,6 +164,13 @@ def raport_dnia(wymus=False):
         rolki = baza.pomysly_z_dnia(slug)
         d = baza.ustawienia_modelki(slug).get("dostawca") or "higgsfield"
         linie.append(f"- {slug}: {len(rolki)} rolek, {len(baza.zdjecia_z_dnia(slug))} zdjec, {dostawcy.kwota(baza.wydano_dzis(d), d)} ({d})")
+    try:
+        zp = stan_z_promptu()
+        if zp["dziennie"]:
+            linie.append(f"Rolki z promptu (autopilot): {zp['dzis']} z {zp['dziennie']}"
+                         + (f", nie wyszlo {zp['nieudane']}" if zp["nieudane"] else ""))
+    except Exception:
+        pass
     bledy = [w for w in baza.dziennik_ostatnie(500, typ="blad") if baza.dzien_lokalny(w.get("czas")) == dzis]
     if bledy:
         linie.append(f"Problemy dzis: {len(bledy)} (szczegoly w panelu -> Historia)")
@@ -451,6 +462,311 @@ def wyslij_zdjecia(slug, log=None):
     return ile
 
 
+# ---------------- rolki z promptu (3.3): autopilot sam robi rolki bez filmikow ----------------
+# Raz na przebieg (co 15 min / co minute z Telegramem), po rolkach ze swapu: gdy dzis jest mniej niz `dziennie` rolek z promptu
+# zrobionych przez autopilota (licznik osobny od rolek ze swapu; dzien lokalny), jest juz `od_godziny` i nie bylo 2 nieudanych
+# prob -> nastepna persona na zmiane (ze zdjeciami, bez pauzy) -> losowy gotowy pomysl + asystent (jak "Losuj" w panelu) ->
+# darmowa wycena (`generate cost`) i bezpieczniki (limit dnia wspolny, min_kredyty, max na rolke) -> ta sama bezpieczna sciezka co
+# reczne "Zrob rolke" (fabryka.generuj po id: znacznik w_toku, create bez --wait, job_id od razu, nigdy drugi create) ->
+# komentarz ElevenLabs, Media Tool, folder "tu rolki zrobione", Telegram. Jedna rolka naraz; w toku = czekamy (wznowienie 0 kr).
+
+MODELE_Z_PROMPTU = {
+    "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr)", "szacunek": 70},
+    "wan3_0_prime": {"nazwa": "Wan 3.0 Prime · 720p · 10 s (ok. 30 kr)", "szacunek": 30},
+}
+DLUGOSC_Z_PROMPTU = 10
+ROZDZIELCZOSC_Z_PROMPTU = "720p"
+MAX_NIEUDANYCH_Z_PROMPTU = 2        # tyle nieudanych prob dziennie (NSFW/IP/blad) na cala pule person - potem koniec na dzis
+MAX_DZIENNIE_Z_PROMPTU = 20
+PONOW_PO_POMINIECIU_S = 15 * 60     # pominieta (limit dnia, saldo): nastepne sprawdzenie najwczesniej po tylu s (bez spamu CLI/dziennika)
+_Z_PROMPTU = {"pominiete_do": 0.0, "powod": "", "dzien": "", "wpisy": set()}
+
+
+def _godzina(t):
+    """'10:00' / '9.30' -> '10:00' / '09:30'; zla -> None."""
+    m = re.match(r"^\s*(\d{1,2})[:.](\d{2})\s*$", str(t or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
+
+
+def ustawienia_z_promptu():
+    """Ustawienia autopilota rolek z promptu (globalne, Ustawienia -> Autopilot): dziennie 0-20 (0 = wylaczone), model,
+    persony (lista slugow; [] = wszystkie ze zdjeciami), od_godziny HH:MM (czas lokalny)."""
+    u = dict(baza.ustawienia_globalne().get("autopilot_z_promptu") or {})
+    dom = baza.USTAWIENIA_GLOBALNE_DOMYSLNE["autopilot_z_promptu"]
+    try:
+        dziennie = int(u["dziennie"]) if u.get("dziennie") not in (None, "") else dom["dziennie"]
+    except (TypeError, ValueError):
+        dziennie = dom["dziennie"]
+    persony = u.get("persony") if isinstance(u.get("persony"), list) else []
+    return {"dziennie": max(0, min(MAX_DZIENNIE_Z_PROMPTU, dziennie)),
+            "model": u.get("model") if u.get("model") in MODELE_Z_PROMPTU else dom["model"],
+            "persony": [str(s).strip() for s in persony if str(s).strip()],
+            "od_godziny": _godzina(u.get("od_godziny")) or dom["od_godziny"]}
+
+
+def sprawdz_ustawienia_z_promptu(v):
+    """Zmiany z panelu (dowolne z pol: dziennie, model, persony, od_godziny) -> sprawdzone wartosci. ValueError po polsku."""
+    if not isinstance(v, dict):
+        raise ValueError("autopilot_z_promptu musi byc slownikiem.")
+    wynik = {}
+    for k, x in v.items():
+        if k == "dziennie":
+            try:
+                n = int(x)
+            except (TypeError, ValueError):
+                raise ValueError("Rolki z promptu dziennie: podaj liczbe (0 = wylaczone).")
+            if not 0 <= n <= MAX_DZIENNIE_Z_PROMPTU:
+                raise ValueError(f"Rolki z promptu dziennie: od 0 do {MAX_DZIENNIE_Z_PROMPTU}.")
+            wynik[k] = n
+        elif k == "model":
+            if x not in MODELE_Z_PROMPTU:
+                raise ValueError(f"Model rolek z promptu: {' albo '.join(MODELE_Z_PROMPTU)}.")
+            wynik[k] = x
+        elif k == "persony":
+            lista = x if isinstance(x, list) else str(x or "").split(",")
+            lista = [str(s).strip() for s in lista if str(s).strip()]
+            nieznane = [s for s in lista if s not in baza.lista_modelek()]
+            if nieznane:
+                raise ValueError(f"Nie ma person: {', '.join(nieznane)}.")
+            wynik[k] = lista
+        elif k == "od_godziny":
+            g = _godzina(x)
+            if not g:
+                raise ValueError("Godzina w formacie GG:MM, np. 10:00.")
+            wynik[k] = g
+        else:
+            raise ValueError(f"Nieznane ustawienie autopilot_z_promptu.{k}.")
+    return wynik
+
+
+def rolki_z_promptu_z_dnia(dzien=None):
+    """Rolki z promptu zrobione przez AUTOPILOTA danego dnia (lokalnego, wg utworzono) - wszystkie persony:
+    {"zrobione": [(slug, p)] (w toku albo gotowe), "w_toku", "nieudane" (blad: NSFW/IP/techniczny), "czeka" (nowy - np. po
+    awarii miedzy dodaniem a wyslaniem)}. Reczne rolki z promptu i rolki ze swapu sie nie licza."""
+    dzien = dzien or baza._dzis()
+    w = {"zrobione": [], "w_toku": [], "nieudane": [], "czeka": []}
+    for slug in baza.lista_modelek():
+        for p in baza.lista_pomyslow(slug):
+            if not p.get("autopilot_z_promptu") or baza.dzien_lokalny(p.get("utworzono")) != dzien:
+                continue
+            st = p.get("status")
+            if st == "blad":
+                w["nieudane"].append((slug, p))
+            elif st == "nowy":
+                w["czeka"].append((slug, p))
+            else:
+                w["zrobione"].append((slug, p))
+                if st == "w_toku":
+                    w["w_toku"].append((slug, p))
+    return w
+
+
+def persony_z_promptu(u=None):
+    """Persony do rolek z promptu: wybrane w ustawieniach (puste = wszystkie) i majace zdjecia w referencje/ - w tej kolejnosci."""
+    u = u or ustawienia_z_promptu()
+    wszystkie = baza.lista_modelek()
+    return [s for s in (u["persony"] or wszystkie) if s in wszystkie and baza.sciezki_referencji(s)]
+
+
+def nastepna_persona(kandydaci):
+    """Na zmiane po kolei: persona po tej, ktora miala ostatnia rolke z promptu autopilota (najnowsza w ogole); pierwszy raz -
+    pierwsza z listy. Persony w pauzie (hamulec, /stop z telefonu) pomijamy. None = zadna."""
+    if not kandydaci:
+        return None
+    ostatnia, czas = None, ""
+    for slug in baza.lista_modelek():
+        for p in baza.lista_pomyslow(slug):
+            if p.get("autopilot_z_promptu") and str(p.get("utworzono") or "") > czas:
+                ostatnia, czas = slug, str(p.get("utworzono") or "")
+    if ostatnia in kandydaci:
+        i = kandydaci.index(ostatnia)
+        kandydaci = kandydaci[i + 1:] + kandydaci[:i + 1]
+    return next((s for s in kandydaci if not baza.autopilot_stan(s).get("pauza")), None)
+
+
+def _nazwa(slug):
+    return (baza.profil_modelki(slug).get("nazwa") or slug).strip() or slug
+
+
+def _wpis_raz(klucz, typ, tekst, modelka=None):
+    """Wpis w dzienniku raz dziennie dla danego klucza (przebieg co minute nie zasypie Historii tym samym)."""
+    dzien = baza._dzis()
+    if _Z_PROMPTU["dzien"] != dzien:
+        _Z_PROMPTU.update(dzien=dzien, wpisy=set())
+    if klucz in _Z_PROMPTU["wpisy"]:
+        return False
+    _Z_PROMPTU["wpisy"].add(klucz)
+    baza.dziennik_zapisz(typ, tekst, modelka=modelka)
+    return True
+
+
+def _pomin(klucz, powod, log, modelka=None):
+    """Rolka z promptu pominieta (limit dnia, saldo, cena...): jasny wpis raz dziennie, nastepna proba za PONOW_PO_POMINIECIU_S."""
+    _Z_PROMPTU.update(pominiete_do=time.time() + PONOW_PO_POMINIECIU_S, powod=powod)
+    tekst = f"Autopilot: rolka z promptu pominieta - {powod}"
+    log(tekst)
+    _wpis_raz(klucz, "uwaga", tekst, modelka=modelka)
+    return {"stan": "pominieta", "powod": powod}
+
+
+def krok_z_promptu(log=None, stop=None, teraz=None):
+    """Jeden krok autopilota rolek z promptu (patrz opis sekcji). Zwraca {"stan": wylaczone | gotowe | limit_prob | przed_godzina |
+    w_toku | brak_person | pominieta | zrobiona | nie_wyszla | ..., ...}. STOP (Przerwano) przechodzi dalej jak w innych krokach."""
+    log = log or _log
+    teraz = teraz or datetime.now()
+    u = ustawienia_z_promptu()
+    n = u["dziennie"]
+    if n <= 0:
+        return {"stan": "wylaczone"}
+    dzien = teraz.strftime("%Y-%m-%d")
+    d = rolki_z_promptu_z_dnia(dzien)
+    # rolka autopilota z wyslanym jobem (STOP, limit czasu, restart): dokanczamy TEN job (0 kr), zanim cokolwiek nowego
+    for slug in sorted({s for s, _ in d["w_toku"]}):
+        STAN["etap"], STAN["modelka"], STAN["opis"] = "z_promptu", slug, f"kończę rolkę z promptu: {_nazwa(slug)}"
+        fabryka.wznow_w_toku(slug, log=log, stop=stop, lipsync=False)
+        wyslij_gotowe(slug, log=log)
+    if d["w_toku"]:
+        d = rolki_z_promptu_z_dnia(dzien)
+    if d["w_toku"]:
+        return {"stan": "w_toku"}                   # jedna naraz - nic nowego, dopoki tamta sie nie wyjasni
+    if len(d["zrobione"]) >= n:
+        return {"stan": "gotowe"}
+    if len(d["nieudane"]) >= MAX_NIEUDANYCH_Z_PROMPTU:
+        _wpis_raz("limit_prob", "uwaga", f"Autopilot: {len(d['nieudane'])} rolki z promptu dzis nie wyszly - kolejne jutro (zeby nie "
+                  f"palic kredytow w petli).")
+        return {"stan": "limit_prob"}
+    if teraz.strftime("%H:%M") < u["od_godziny"]:
+        return {"stan": "przed_godzina"}
+    if time.time() < _Z_PROMPTU["pominiete_do"]:
+        return {"stan": "pominieta", "powod": _Z_PROMPTU["powod"]}
+    czeka = [(s, p) for s, p in d["czeka"] if not baza.autopilot_stan(s).get("pauza")]     # persona w pauzie (/stop) - nie
+    if czeka:
+        # rolka dodana, ale nie wyslana (awaria panelu, persona zajeta) - ta sama, bez nowego losowania
+        slug, p = czeka[0]
+        kr = (p.get("z_promptu") or {}).get("wycena") or p.get("koszt")
+        opis = (p.get("z_promptu") or {}).get("obiekt_nazwa") or (p.get("z_promptu") or {}).get("miejsce_nazwa") or p.get("opis")
+        return _zrob_z_promptu(slug, p["id"], kr, opis, log, stop, len(d["zrobione"]), n, len(d["nieudane"]))
+    kandydaci = persony_z_promptu(u)
+    slug = nastepna_persona(kandydaci)
+    if not slug:
+        powod = ("zadna persona nie ma zdjec w referencje/" if not kandydaci else "wszystkie persony sa w pauzie (hamulec / /stop)")
+        _wpis_raz("brak_person", "uwaga", f"Autopilot: rolki z promptu czekaja - {powod}.")
+        return {"stan": "brak_person"}
+    import asystent
+    import scenariusz
+    STAN["etap"], STAN["modelka"], STAN["opis"] = "z_promptu", slug, f"dobieram rolkę z promptu: {_nazwa(slug)}"
+    pomysl = scenariusz.losuj_pomysl(slug)
+    try:
+        import komentarz_glos
+        tts = komentarz_glos.tts_dostepne()[0]
+    except Exception:
+        tts = False
+    a = asystent.dobierz(slug, pomysl["pl"], pomysl_id=pomysl["id"], zablokowane={
+        "model": u["model"], "dlugosc": DLUGOSC_Z_PROMPTU, "rozdzielczosc": ROZDZIELCZOSC_Z_PROMPTU},
+        glos_efektywny="tts" if tts else "brak")
+    opcje = dict(a["opcje"], model=u["model"], dlugosc=DLUGOSC_Z_PROMPTU, rozdzielczosc=ROZDZIELCZOSC_Z_PROMPTU)
+    try:
+        w = fabryka.wycena_z_promptu(slug, opcje, z_cena=True)
+    except ValueError as e:
+        return _pomin("zle_opcje", f"{_nazwa(slug)}: {e}", log, modelka=slug)
+    if not w["mozna"] or w.get("kr") is None:
+        powody = "; ".join(w["powody"]) or "Higgsfield nie podal ceny"
+        klucz = ("limit" if "limit" in powody else "saldo" if "minimum" in powody or "salda" in powody
+                 else "max" if "bezpiecznik" in powody else "cena")
+        return _pomin(klucz, f"{_nazwa(slug)} ({MODELE_Z_PROMPTU[u['model']]['nazwa']}): {powody}", log, modelka=slug)
+    pid = fabryka.dodaj_z_promptu(slug, dict(opcje, ustalone=w["ustalone"], asystent=a), kr=w["kr"], autopilot_z_promptu=True)
+    opis = w.get("obiekt_nazwa") or w.get("miejsce_nazwa") or pomysl["pl"]
+    baza.dziennik_zapisz("info", f"autopilot z promptu: {_nazwa(slug)} #{pid} - {opis} ({w['model']} {w['dlugosc']} s "
+                         f"{w['rozdzielczosc']}, ~{w['kr']} kr; rolka {len(d['zrobione']) + 1} z {n} dzis). {a['podsumowanie']}",
+                         modelka=slug, pomysl=pid)
+    return _zrob_z_promptu(slug, pid, w["kr"], opis, log, stop, len(d["zrobione"]), n, len(d["nieudane"]))
+
+
+def _zrob_z_promptu(slug, pid, kr, opis, log, stop, zrobione, dziennie, nieudane):
+    """Generacja rolki z promptu po id - ta sama sciezka co reczne "Zrob rolke" (cena jeszcze raz tuz przed wyslaniem: wyzsza niz
+    kr = nic nie idzie), potem Telegram. Wynik w dzienniku."""
+    STAN["etap"], STAN["modelka"] = "z_promptu", slug
+    STAN["opis"] = f"robię rolkę z promptu: {_nazwa(slug)}, {opis}"
+
+    def cena_ok(p, k, *_):
+        if kr is not None and k is not None and k > kr:
+            log(f"#{p['id']}: cena wzrosla z {kr} do {k} kr - NIE wysylam")
+            return False
+        return True
+    try:
+        wynik = fabryka.generuj(slug, ids=[pid], potwierdz=cena_ok, log=log, stop=stop, lipsync=False)
+    except ValueError as e:              # rolka juz nie do zrobienia (np. usunieta w panelu)
+        log(f"rolka z promptu #{pid}: {e}")
+        return {"stan": "nie_do_zrobienia", "slug": slug, "pid": pid}
+    p = baza.pomysl(slug, pid)
+    st = p.get("status")
+    if st in ("gotowe", "wygenerowany", "postprodukcja"):
+        baza.dziennik_zapisz("ok", f"autopilot z promptu: {_nazwa(slug)} #{pid} gotowa ({p.get('koszt')} kr) - rolka "
+                             f"{zrobione + 1} z {dziennie} dzis", modelka=slug, pomysl=pid)
+        try:
+            wyslij_gotowe(slug, log=log)
+        except Exception as e:
+            log(f"telegram: {e}")
+        return {"stan": "zrobiona", "slug": slug, "pid": pid}
+    if st == "w_toku":
+        baza.dziennik_zapisz("info", f"autopilot z promptu: {_nazwa(slug)} #{pid} jeszcze sie robi - dokoncze przy nastepnym "
+                             f"przebiegu (bez wysylania drugi raz)", modelka=slug, pomysl=pid)
+        return {"stan": "w_toku", "slug": slug, "pid": pid}
+    if st == "nowy" and pid in (wynik.get("pominiete") or []):
+        # cena wyzsza niz zatwierdzona / ponad max na rolke - nic nie poszlo; liczy sie jak nieudana proba (bez petli)
+        baza.aktualizuj_pomysl(slug, pid, status="blad", powod="inny",
+                               notatki="Autopilot: nic nie wyslane (cena wyzsza niz z wyceny albo ponad max na rolke) - 0 kr.")
+        st = "blad"
+    elif st == "nowy":
+        # bezpiecznik (limit dnia, saldo) albo persona zajeta - rolka czeka, sprobujemy pozniej (ta sama rolka)
+        return _pomin("generuj_" + str(wynik.get("stop") or "?"), f"{_nazwa(slug)} #{pid}: {wynik.get('stop') or 'nie ruszyla'} - "
+                      f"sprobuje pozniej", log, modelka=slug)
+    if st == "blad":
+        p = baza.pomysl(slug, pid)
+        powod = {"nsfw": "filtr NSFW", "ip": "filtr IP (znana marka/postac)"}.get(p.get("powod"), "blad")
+        baza.dziennik_zapisz("uwaga", f"autopilot z promptu: {_nazwa(slug)} #{pid} nie wyszla ({powod}) - proba {nieudane + 1} z "
+                             f"{MAX_NIEUDANYCH_Z_PROMPTU} nieudanych dzis; asystent uczy sie z tego (inny stroj/miejsce nastepnym "
+                             f"razem), nic nie wysylam drugi raz", modelka=slug, pomysl=pid)
+        return {"stan": "nie_wyszla", "slug": slug, "pid": pid, "powod": p.get("powod")}
+    return {"stan": st or "?", "slug": slug, "pid": pid}
+
+
+def stan_z_promptu(wlaczony=None, teraz=None):
+    """Dla panelu (Start -> autopilot) i telefonu: {"dziennie", "dzis", "nieudane", "model", "od_godziny", "persony", "stan",
+    "tekst": "Rolki z promptu: dziś X z N (następna po 10:00 / gotowe)"}. wlaczony = czy petla autopilota dziala."""
+    u = ustawienia_z_promptu()
+    teraz = teraz or datetime.now()
+    d = rolki_z_promptu_z_dnia(teraz.strftime("%Y-%m-%d"))
+    n, x = u["dziennie"], len(d["zrobione"])
+    persony = persony_z_promptu(u)
+    wynik = {"dziennie": n, "dzis": x, "nieudane": len(d["nieudane"]), "model": u["model"], "od_godziny": u["od_godziny"],
+             "persony": persony, "model_nazwa": MODELE_Z_PROMPTU[u["model"]]["nazwa"]}
+    if n <= 0:
+        wynik.update(stan="wylaczone", tekst="Rolki z promptu: wyłączone (Ustawienia → Autopilot).")
+        return wynik
+    if d["w_toku"] or (STAN.get("trwa") and STAN.get("etap") == "z_promptu"):
+        slug = (d["w_toku"][0][0] if d["w_toku"] else STAN.get("modelka")) or ""
+        stan, dopisek = "w_toku", f"robi się{': ' + _nazwa(slug) if slug in baza.lista_modelek() else ''}"
+    elif x >= n:
+        stan, dopisek = "gotowe", "gotowe"
+    elif len(d["nieudane"]) >= MAX_NIEUDANYCH_Z_PROMPTU:
+        stan, dopisek = "limit_prob", f"{len(d['nieudane'])} nie wyszły – następne jutro"
+    elif wlaczony is False:
+        stan, dopisek = "autopilot_wylaczony", "autopilot wyłączony"
+    elif not persony:
+        stan, dopisek = "brak_person", "żadna persona nie ma zdjęć"
+    elif teraz.strftime("%H:%M") < u["od_godziny"]:
+        stan, dopisek = "przed_godzina", f"następna po {u['od_godziny']}"
+    elif time.time() < _Z_PROMPTU["pominiete_do"]:
+        stan, dopisek = "pominieta", "pominięta: " + (_Z_PROMPTU["powod"] or "bezpiecznik")[:120]
+    else:
+        stan, dopisek = "czeka", "następna przy najbliższym sprawdzeniu"
+    wynik.update(stan=stan, tekst=f"Rolki z promptu: dziś {x} z {n} ({dopisek})")
+    return wynik
+
+
 # ---------------- przebieg ----------------
 
 def przebieg(slug, log=None, stop=None):
@@ -494,7 +810,8 @@ def przebieg(slug, log=None, stop=None):
             pods["bledy"].append(f"wznow zdjec: {e}")
             log(f"wznowienie zdjec nie wyszlo: {e}")
     max_dzis = int(ust.get("autopilot_max_rolek_dziennie") or 0)
-    zrobione_dzis = len(baza.pomysly_z_dnia(slug)) + len(baza.pomysly_w_toku(slug))   # rolki w toku tez sie licza
+    # rolki w toku tez sie licza; rolki z promptu maja wlasny licznik (Ustawienia -> Autopilot -> Rolki z promptu)
+    zrobione_dzis = len([p for p in baza.pomysly_z_dnia(slug) + baza.pomysly_w_toku(slug) if not fabryka.z_promptu(p)])
     zostalo = (max_dzis - zrobione_dzis) if max_dzis else None
     if ap.get("pauza"):
         log(f"{slug}: autopilot w pauzie ({ap['pauza']}) - nie robie rolek, tylko zbieram filmiki")
@@ -593,6 +910,15 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
             if stop is not None and stop.is_set():
                 break
             wyniki.append(przebieg(slug, log=log, stop=stop))
+        if not tylko and not (stop is not None and stop.is_set()):
+            # rolki z promptu (3.3): wspolna pula person, osobny licznik dzienny - po rolkach ze swapu
+            try:
+                STAN["z_promptu"] = krok_z_promptu(log=log or _log, stop=stop)
+            except fabryka.Przerwano:
+                raise
+            except Exception as e:
+                (log or _log)(f"rolki z promptu: {e}")
+                baza.dziennik_zapisz("blad", f"autopilot rolki z promptu: {type(e).__name__}: {e}")
         try:
             raport_dnia()
         except Exception as e:
@@ -607,7 +933,7 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
         STAN["ostatni"] = time.time()
     finally:
         STAN["trwa"] = False
-        STAN["modelka"], STAN["etap"] = None, ""
+        STAN["modelka"], STAN["etap"], STAN["opis"] = None, "", ""
     return wyniki
 
 
@@ -632,7 +958,8 @@ def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
     przebieg_fn = przebieg_fn or (lambda log, stop: przebieg_wszystkich(tylko, log=log, stop=stop))
     while not stop.is_set():
         modelki = modelki_z_autopilotem(tylko)
-        if not modelki and not _telegram():
+        z_promptu = not tylko and ustawienia_z_promptu()["dziennie"] > 0      # rolki z promptu nie potrzebuja filmikow ani person z autopilot
+        if not modelki and not _telegram() and not z_promptu:
             log("zadna modelka nie ma autopilot=true - czekam 5 min")
         else:
             try:

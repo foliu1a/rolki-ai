@@ -194,7 +194,7 @@ body.konsola-otwarta .tresc { padding-bottom: calc(var(--konsola-wys, calc(var(-
 .przelacznik.duzy input:checked + .suwak::after { transform: translateX(28px); }
 
 /* ---------- formularze ---------- */
-input[type="text"], input[type="number"], input[type="password"], input[type="search"], input[type="url"], select, textarea {
+input[type="text"], input[type="number"], input[type="password"], input[type="search"], input[type="url"], input[type="time"], select, textarea {
   width: 100%; min-height: 44px; padding: 10px 13px;
   background: var(--tlo); color: var(--tekst);
   border: 1px solid var(--linia-2); border-radius: var(--promien-m);
@@ -1041,3 +1041,20 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
   .sw-ile { justify-content: center; }
   .sw-generuj { flex: 1 1 100%; margin-left: 0; }
 }
+
+/* 3.3: kolejka zdjęć (strona Zdjęcia) i rolki z promptu autopilota */
+.sw-kolejka { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; padding: 8px 12px;
+  background: var(--karta-2); border: 1px solid var(--linia-2); border-left: 3px solid var(--uwaga); border-radius: var(--promien-m);
+  font-size: 14.5px; }
+.sw-kolejka-tekst { flex: 1 1 200px; min-width: 0; }
+.sw-kolejka.zatrzymane { border-left-color: var(--linia-3); }
+.autopilot-z-promptu { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14.5px; color: var(--szary); line-height: 1.4; }
+.autopilot-z-promptu:empty { display: none; }
+.autopilot-z-promptu svg { width: 18px; height: 18px; flex: none; }
+.autopilot-z-promptu.praca { color: var(--akcent-jasny); }
+.autopilot-z-promptu.ok { color: var(--ok); }
+.autopilot-z-promptu a { color: var(--szary); font-size: 14px; }
+.etykieta-pola { font-size: 14px; color: var(--szary); font-weight: 500; }
+.g-zp-persony { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.g-zp-persony .check { padding: 4px 0; }
+.g-zp-persony .check.bez-zdjec { opacity: .55; }

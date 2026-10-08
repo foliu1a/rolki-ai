@@ -177,6 +177,7 @@
                 </label>
               </div>
               <div class="autopilot-status" id="autopilot-status">—</div>
+              <div class="autopilot-z-promptu" id="autopilot-z-promptu"></div>
               <div class="autopilot-telefon" id="autopilot-telefon"></div>
               <div class="rzad" data-zaawansowane>
                 <button class="btn btn-maly" type="button" data-akcja="autopilot-raz">Jeden przebieg autopilota teraz</button>
@@ -402,6 +403,12 @@
             <div class="karta-naglowek">
               <div><h2>Wyniki</h2><p class="muted" id="zdjecia-dzis"></p></div>
               <button class="btn btn-maly" type="button" data-akcja="otworz-folder" data-co="zdjecia"><span class="ikona" data-ikona="folder"></span>Otwórz folder</button>
+            </div>
+            <!-- kolejka zdjęć (3.3): ile się robi / czeka; STOP = kolejka nie idzie, przyjęte przez Higgsfield dokończą się później -->
+            <div class="sw-kolejka" id="sw-kolejka" role="status" hidden>
+              <span class="kropka uwaga pulsuje" id="sw-kolejka-kropka"></span>
+              <span class="sw-kolejka-tekst" id="sw-kolejka-tekst"></span>
+              <button class="btn btn-maly btn-zly" type="button" data-akcja="sw-stop" id="sw-stop" title="Zdjęcia z kolejki nie pójdą (0 kr). Te już przyjęte przez Higgsfield dokończą się później."><span class="ikona" data-ikona="stop"></span>STOP</button>
             </div>
             <div class="galeria" id="zdjecia-galeria"></div>
           </section>
@@ -713,6 +720,13 @@
                 <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
               </details>
             </form>
+            <!-- wspólne dla wszystkich person (ustawienia_globalne.json, 3.3) -->
+            <form class="sekcja-tresc" data-ustawienia-globalne novalidate id="form-zdjecia-globalne">
+              <div class="pola-siatka">
+                <div class="pole"><label for="g-rownolegle">Ile zdjęć naraz</label><input type="number" id="g-rownolegle" name="zdjecia_rownolegle" min="1" max="8" data-domyslne="4"><small class="pole-info">Każde kliknięcie „Generuj” startuje od razu. Tyle zdjęć robi się jednocześnie (wspólnie dla wszystkich person), reszta czeka w kolejce. Domyślnie 4.</small></div>
+              </div>
+              <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
           </details>
 
           <!-- Foldery -->
@@ -777,6 +791,21 @@
               <label class="check" data-zaawansowane><input type="checkbox" name="dziel_dlugie"><span>Długi filmik potnij na kawałki (długość rolki z „Jak robić rolki”)<small>Seedance robi najwyżej 30 s naraz – każdy kawałek stanie się osobną rolką. Wyłączone = filmik idzie w całości (do 30 s) i kosztuje odpowiednio więcej.</small></span></label>
               <div class="callout info" id="autostart-info" data-zaawansowane><span class="ikona" data-ikona="info"></span><span>Na pulpicie masz skrót <b>„Rolki AI”</b> (tworzy go <b>aktualizuj.bat</b>; jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b>). Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+            </form>
+            <!-- rolki z promptu robione przez autopilota (3.3) - wspólne dla wszystkich person (ustawienia_globalne.json) -->
+            <form class="sekcja-tresc" data-ustawienia-globalne novalidate id="form-autopilot-z-promptu">
+              <div class="podsekcja">
+                <h3>Rolki z promptu – bez filmików</h3>
+                <p class="muted">Autopilot sam wymyśla i robi rolki jak „Losuj” w zakładce <a href="#z-promptu">Z promptu</a>: miejsce, strój z biblioteki, kamera z ukrycia, reakcja ludzi i komentarz zza kamery (ElevenLabs). Potem pranie w Media Tool, folder „tu rolki zrobione” i Telegram. Pilnuje wspólnego dziennego limitu kredytów; gdy filtr odrzuci 2 rolki w ciągu dnia – próbuje dopiero jutro.</p>
+                <div class="pola-siatka">
+                  <div class="pole"><label for="g-zp-dziennie">Rolki z promptu dziennie (łącznie)</label><input type="number" id="g-zp-dziennie" name="autopilot_z_promptu.dziennie" min="0" max="20" data-domyslne="1"><small class="pole-info">Razem dla wszystkich person, nie na każdą. 0 = wyłączone.</small></div>
+                  <div class="pole"><label for="g-zp-model">Model</label><select id="g-zp-model" name="autopilot_z_promptu.model"><option value="seedance_2_5">Seedance 2.5 · 720p · 10 s (ok. 70 kr)</option><option value="wan3_0_prime">Wan 3.0 Prime · 720p · 10 s (ok. 30 kr)</option></select><small class="pole-info">Seedance – najlepsza twarz. Wan – ponad 2× taniej.</small></div>
+                  <div class="pole"><label for="g-zp-od">Nie wcześniej niż o</label><input type="time" id="g-zp-od" name="autopilot_z_promptu.od_godziny" step="60"><small class="pole-info">Godzina na tym komputerze.</small></div>
+                </div>
+                <div class="pole"><span class="etykieta-pola">Persony – na zmianę, po kolei</span><div class="g-zp-persony" id="g-zp-persony"></div><small class="pole-info">Nic nie zaznaczone = wszystkie, które mają zdjęcia. Robi tylko wtedy, gdy autopilot jest włączony (Start).</small></div>
+                <p class="muted" id="g-zp-stan"></p>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </div>
             </form>
           </details>
 
@@ -984,6 +1013,7 @@
             <summary><span class="ikona" data-ikona="chevron-dol"></span>Jak działa autopilot i hamulec?</summary>
             <div class="pomoc-tresc">
               <p><b>Autopilot</b> to przełącznik na Starcie. Gdy jest włączony, program co kilkanaście minut sam sprawdza wrzutnię, robi rolki z nowych filmików (Higgsfield albo yapper), pierze je w Media Tool, robi zdjęcia, dobiera podpisy i wysyła gotowe rolki na Telegram. Pilnuje limitów kredytów i liczby rolek dziennie.</p>
+              <p><b>Rolki z promptu bez filmików:</b> autopilot sam wymyśla też rolki jak „Losuj” w zakładce Z promptu – ile dziennie (razem dla wszystkich person), jakim modelem i od której godziny ustawiasz w <a href="#ustawienia/autopilot">Ustawienia → Autopilot</a>. Persony idą na zmianę. Gdy filtr odrzuci 2 takie rolki w ciągu dnia, próbuje dopiero następnego dnia.</p>
               <p><b>Autopilot nigdy nie robi lipsyncu.</b> Usta dopasowujesz ręcznie w zakładce <a href="#lipsync">Lipsync</a> (tryb pełny) – albo przy ręcznym „Zrób rolkę”, jeśli włączysz to w Ustawienia → Autopilot (tryb pełny) i obok filmiku leży <span class="mono">nazwa.audio.mp3</span>.</p>
               <p><b>Hamulec</b> chroni kredyty: gdy kilka rolek z rzędu nie wyjdzie (liczbę ustawiasz w Ustawienia → Autopilot, tryb pełny), autopilot zatrzymuje się. Na Starcie pojawia się czerwony pasek – sprawdź rolki, które nie wyszły, i kliknij <b>Wznów</b>.</p>
             </div>

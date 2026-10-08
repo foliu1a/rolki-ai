@@ -34,7 +34,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.2"
+WERSJA = "3.3"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -386,11 +386,20 @@ def api_stan():
             min_k = fabryka.bezpiecznik(baza.ustawienia_modelki(aktywna), konto)[0]
             zostalo.append(max(0, int(kredyty) - int(min_k)) // jakosc["koszt_rolki"])
         dzis["rolek_zostalo"] = max(0, min(zostalo)) if zostalo else None
+    try:
+        zdjecia_kolejka = zdjecia_swap.stan_kolejki(aktywna)
+    except Exception as e:          # stan kolejki zdjec to dodatek - nie moze wywalic /api/stan
+        zdjecia_kolejka = {"w_toku": 0, "w_kolejce": 0, "blad": str(e)}
+    try:
+        z_promptu = autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony())
+    except Exception as e:
+        z_promptu = {"tekst": "", "blad": str(e)}
     return _ok(aktywna=aktywna, modelki=modelki, stan=stan, saldo=salda, autopilot=_stan_autopilota(),
                autopilot_stan=baza.autopilot_stan(aktywna) if aktywna else None, telegram=_stan_telegramu(),
                dzis=dzis, zadanie=konsola.opis(), konta=_konta_skrot(salda), jakosc=jakosc,
                foldery=_foldery(aktywna) if aktywna else None, pulpit=baza.pulpit(),
-               dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA)
+               dziennik_ostatni=ostatnie[-1] if ostatnie else None, wersja=WERSJA,
+               zdjecia_kolejka=zdjecia_kolejka, autopilot_z_promptu=z_promptu)
 
 
 @app.route("/api/ustawienia/preset", methods=["POST"])
@@ -554,7 +563,8 @@ def _pomysl_dla_panelu(p):
         glos = {"tts": ("głos ElevenLabs" + (f" ({kto})" if kto else "") + ("" if p.get("glos_dograny") else " – do dogrania")
                         if zp.get("komentarz") else ""),
                 "model": "głos modelu (stara rolka)"}.get(zp.get("glos") or "", "")
-        p["z_promptu_opis"] = " · ".join(x for x in (zp.get("miejsce_nazwa"), (info.get("nazwa") or zp.get("model") or "").split(" –")[0],
+        p["z_promptu_opis"] = " · ".join(x for x in ("autopilot" if p.get("autopilot_z_promptu") else "", zp.get("miejsce_nazwa"),
+                                                       (info.get("nazwa") or zp.get("model") or "").split(" –")[0],
                                                        f"{zp.get('dlugosc')} s" if zp.get("dlugosc") else "", zp.get("rozdzielczosc"),
                                                        "inne włosy" if zp.get("wlosy_zmienione") else "", glos) if x)
         p["z_promptu_dlaczego"] = (zp.get("asystent") or {}).get("dlaczego") or ""
@@ -1150,6 +1160,51 @@ def api_zapisz_ustawienia():
     return _ok(ustawienia=ust)
 
 
+# ---------------- ustawienia globalne (wspolne dla wszystkich person, 3.3) ----------------
+
+def _globalne_dla_panelu():
+    return {"ustawienia": baza.ustawienia_globalne(), "domyslne": baza.USTAWIENIA_GLOBALNE_DOMYSLNE,
+            "modele_z_promptu": [{"id": k, "nazwa": v["nazwa"]} for k, v in autopilot.MODELE_Z_PROMPTU.items()],
+            "persony": [{"slug": s, "nazwa": baza.profil_modelki(s).get("nazwa") or s, "referencje": len(baza.sciezki_referencji(s))}
+                        for s in baza.lista_modelek()],
+            "z_promptu": autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony()), "max_rownolegle": zdjecia_swap.ROWNOLEGLE_MAX}
+
+
+@app.route("/api/ustawienia/globalne")
+def api_ustawienia_globalne():
+    """Ustawienia wspolne dla person: zdjecia_rownolegle (ile zdjec naraz) i autopilot_z_promptu {dziennie, model, persony,
+    od_godziny} + lista modeli/person do formularza i stan rolek z promptu na dzis."""
+    return _ok(**_globalne_dla_panelu())
+
+
+@app.route("/api/ustawienia/globalne", methods=["POST"])
+def api_zapisz_ustawienia_globalne():
+    """{"zdjecia_rownolegle": 4} albo {"autopilot_z_promptu": {"dziennie": 1, "model": "seedance_2_5", "persony": [],
+    "od_godziny": "10:00"}} (dowolne z pol). Zle wartosci -> 400. Limity budzetu (300 kr dziennie, min_kredyty) sie tu nie zmieniaja."""
+    dane = request.json or {}
+    zmiany = {}
+    try:
+        for k, v in dane.items():
+            if k == "zdjecia_rownolegle":
+                n = int(v)
+                if not 1 <= n <= zdjecia_swap.ROWNOLEGLE_MAX:
+                    raise ValueError(f"Ile zdjec naraz: od 1 do {zdjecia_swap.ROWNOLEGLE_MAX}.")
+                zmiany[k] = n
+            elif k == "autopilot_z_promptu":
+                zmiany[k] = autopilot.sprawdz_ustawienia_z_promptu(v)
+            else:
+                return _blad(f"Nieznane ustawienie: {k}")
+    except (TypeError, ValueError) as e:
+        return _blad(e)
+    if zmiany:
+        baza.zapisz_ustawienia_globalne(**zmiany)
+        baza.dziennik_zapisz("info", "ustawienia wspolne: " + ", ".join(f"{k} = {json.dumps(v, ensure_ascii=False)}"
+                                                                         for k, v in zmiany.items()))
+        if "zdjecia_rownolegle" in zmiany:
+            zdjecia_swap.KOLEJKA.obudz()       # wiecej miejsc = od razu kolejne zdjecia z kolejki
+    return _ok(**_globalne_dla_panelu())
+
+
 def _nazwa_pliku(nazwa):
     nazwa = os.path.basename(nazwa or "").strip()
     nazwa = re.sub(r"[^\w.\- ]+", "_", nazwa, flags=re.UNICODE).strip(" ._")
@@ -1415,14 +1470,17 @@ ZDJECIE_SIE_ROBI = ("To zdjecie wlasnie sie robi - fabryka dokonczy je sama (tak
 
 @app.route("/api/zdjecia/<int:zid>", methods=["DELETE"])
 def api_usun_zdjecie(zid):
+    """Usuwa wpis zdjecia (w kolejce = wypada z kolejki, nic nie poszlo); w toku -> 409. Sprawdzenie statusu i usuniecie pod jedna
+    blokada - dyspozytor nie przejmie go w tej samej chwili do wysylania."""
     try:
         slug = _wymaga_modelki()
-        z = next((x for x in baza.lista_zdjec(slug) if x["id"] == zid), None)
-        if z and z.get("status") == "w_toku":
+        z = baza.usun_zdjecie_jesli(slug, zid, poza=("w_toku",))
+        if z is None:
+            raise ValueError(f"Nie ma zdjecia #{zid}.")
+        if z.get("status") == "w_toku":
             return _blad(ZDJECIE_SIE_ROBI, 409)
-        if z and request.args.get("plik") == "1" and z.get("plik") and os.path.isfile(z["plik"]) and _plik_dozwolony(z["plik"]):
+        if request.args.get("plik") == "1" and z.get("plik") and os.path.isfile(z["plik"]) and _plik_dozwolony(z["plik"]):
             os.remove(z["plik"])
-        baza.usun_zdjecie(slug, zid)
     except ValueError as e:
         return _blad(e)
     return _ok()
@@ -1438,8 +1496,9 @@ def api_przerwij_zdjecie(zid):
         slug = _wymaga_modelki()
         z = baza.zdjecie(slug, zid)
         if z.get("status") != "w_toku":
-            return _blad("To zdjecie nie czeka na generacje.")
-        if fabryka.trwa_wysylanie():
+            return _blad("To zdjecie nie czeka na generacje." + (" Jest w kolejce - nic jeszcze nie poszlo, mozesz je po prostu usunac."
+                                                                  if z.get("status") == "w_kolejce" else ""))
+        if zdjecia_swap.wysylane(slug, zid):
             return _blad("Zdjecie jest wlasnie wysylane - poczekaj chwile i sprobuj jeszcze raz.", 409)
         marker = z.get("w_toku") or {}
         job = marker.get("job_id") or z.get("job_id")
@@ -1523,8 +1582,10 @@ def api_swap_wycena():
 
 @app.route("/api/swap", methods=["POST"])
 def api_swap_generuj():
-    """'Generuj': N zdjec z podmiana postaci jako zadanie w tle. Wymaga "kr" (cena 1 zdjecia z wyceny, ktora user widzial) -
-    przed kazdym wyslaniem fabryka liczy cene jeszcze raz i NIE wysyla, gdy wyszlaby wyzsza. 409, gdy cos juz trwa."""
+    """'Generuj' (3.3): N zdjec OD RAZU do kolejki zdjec - niezaleznie od innych zdjec i od zadan konsoli (rolki, autopilot).
+    Dyspozytor w tle wysyla je rownolegle (najwyzej `zdjecia_rownolegle` w toku naraz, nadmiar czeka w kolejce). Wymaga "kr"
+    (cena 1 zdjecia z wyceny, ktora user widzial) - przed kazdym wyslaniem cena jeszcze raz, wyzsza = nic nie idzie. Rezerwacja
+    w limicie dnia i saldzie atomowa; odmowa = 400 z powodem i kodem (nic nie powstalo)."""
     dane = request.json or {}
     try:
         slug = _wymaga_modelki()
@@ -1536,13 +1597,23 @@ def api_swap_generuj():
         return _blad(e)
     if kr is None or kr <= 0:
         return _blad("Najpierw sprawdz cene - bez wyceny nic nie wysylam.")
-    if konsola.stan.get("trwa"):
-        return _blad(f"Cos juz trwa ({konsola.stan.get('typ') or 'inne zadanie'}) - poczekaj, az skonczy, i kliknij jeszcze raz.", 409)
+    zdjecia_swap.KOLEJKA.uruchom()                       # dyspozytor dziala od startu panelu; gdyby nie - rusza teraz
+    saldo = (_saldo_dostawcy("higgsfield") or {}).get("kredyty")
     try:
-        zadanie = konsola.uruchom("swap", slug, lambda log, stop: zdjecia_swap.generuj(slug, zrodlo, opcje, kr=kr, log=log, stop=stop))
-    except Zajete as e:
-        return _blad(f"Cos juz trwa ({e}) - poczekaj, az skonczy, i kliknij jeszcze raz.", 409)
-    return _ok(zadanie=zadanie)
+        ids = zdjecia_swap.zlec(slug, zrodlo, opcje, kr=kr, saldo=saldo)
+    except zdjecia_swap.Odmowa as e:
+        return jsonify({"ok": False, "blad": str(e), "kod": e.kod}), 400
+    except ValueError as e:
+        return _blad(e)
+    return _ok(ids=ids, kolejka=zdjecia_swap.stan_kolejki(slug))
+
+
+@app.route("/api/swap/stop", methods=["POST"])
+def api_swap_stop():
+    """STOP na stronie Zdjecia: zdjecia z kolejki (wszystkie persony) -> 'anulowane' (nic nie poszlo, 0 kr); czekanie na joby w toku
+    przerwane - przyjete joby dokoncza sie przy nastepnym sprawdzeniu (kolejne Generuj, przebieg autopilota, restart panelu)."""
+    w = zdjecia_swap.zatrzymaj()
+    return _ok(anulowane=len(w["anulowane"]), w_toku=w["w_toku"], kolejka=zdjecia_swap.stan_kolejki(_aktywna()))
 
 
 @app.route("/api/lipsync")
@@ -1730,6 +1801,7 @@ def api_zamknij():
     trwa = bool(konsola.stan.get("trwa")) or fabryka.trwa_wysylanie()
     autopilot_stop()
     konsola.stop.set()
+    zdjecia_swap.KOLEJKA.wstrzymaj()      # nic nowego z kolejki zdjec (zostaje na nastepny start); wysylane koncza wysylanie
     if trwa:
         komunikat = (f"Teraz trwa: {konsola.stan.get('typ') or 'wysylanie rolki'}. Zamkne panel, gdy skonczy sie biezacy krok "
                      f"(wysylanie rolki do Higgsfield/yapper/WaveSpeed nie jest przerywane). Rolka, ktora juz sie generuje, dokonczy sie "
@@ -1743,27 +1815,28 @@ def api_zamknij():
 
 
 def wznow_przy_starcie():
-    """Start panelu: rolki i zdjecia w toku (job wyslany przed zamknieciem/aktualizacja) dokanczamy w tle - ten sam job, nic
-    nowego nie wysylamy. Zwraca opis zadania albo None (nic do wznowienia / konsola zajeta - wtedy zrobi to autopilot/generuj)."""
+    """Start panelu: rolki w toku (job wyslany przed zamknieciem/aktualizacja) dokanczamy w tle - ten sam job, nic nowego nie
+    wysylamy. Zwraca opis zadania albo None (nic do wznowienia / konsola zajeta - wtedy zrobi to autopilot/generuj).
+    Zdjecia (3.3) dokancza i wysyla z kolejki dyspozytor zdjec (start_kolejki_zdjec) - osobno, obok rolek."""
     w_toku = {s: [p["id"] for p in baza.pomysly_w_toku(s)] for s in baza.lista_modelek()}
     w_toku = {s: ids for s, ids in w_toku.items() if ids}
-    zdjecia = {s: [z["id"] for z in baza.zdjecia_w_toku(s)] for s in baza.lista_modelek()}
-    zdjecia = {s: ids for s, ids in zdjecia.items() if ids}
-    if not w_toku and not zdjecia:
+    if not w_toku:
         return None
-    baza.dziennik_zapisz("info", "start panelu: dokanczam w toku (bez wysylania drugi raz): "
-                         + ", ".join([f"{s} #{', #'.join(map(str, ids))}" for s, ids in w_toku.items()]
-                                     + [f"{s} zdjecia #{', #'.join(map(str, ids))}" for s, ids in zdjecia.items()]))
-
-    def _wznow(log, stop):
-        wynik = fabryka.wznow_wszystkie(log=log, stop=stop) if w_toku else {}
-        if zdjecia:
-            wynik = {"rolki": wynik, "zdjecia": zdjecia_swap.wznow_wszystkie(log=log, stop=stop)}
-        return wynik
+    baza.dziennik_zapisz("info", "start panelu: dokanczam rolki w toku (bez wysylania drugi raz): "
+                         + ", ".join(f"{s} #{', #'.join(map(str, ids))}" for s, ids in w_toku.items()))
     try:
-        return konsola.uruchom("wznow", None, _wznow)
+        return konsola.uruchom("wznow", None, lambda log, stop: fabryka.wznow_wszystkie(log=log, stop=stop))
     except Zajete:
         return None
+
+
+def start_kolejki_zdjec():
+    """Start panelu: dyspozytor zdjec w tle - dokancza zdjecia w toku (ten sam job) i wysyla te, ktore czekaly w kolejce."""
+    s = zdjecia_swap.stan_kolejki()
+    if s["w_toku"] or s["w_kolejce"]:
+        baza.dziennik_zapisz("info", f"start panelu: zdjecia w toku {s['w_toku']}, w kolejce {s['w_kolejce']} - dokanczam w tle "
+                             f"(bez wysylania drugi raz tego, co juz poszlo)")
+    zdjecia_swap.KOLEJKA.uruchom()
 
 
 def _port_zajety():
@@ -1819,6 +1892,7 @@ def main():
     # chipy strony Zdjecia wg aktualnego schematu modeli (darmowe `model get`); bez CLI zostaje kopia z kodu
     threading.Thread(target=zdjecia_swap.odswiez_schematy, daemon=True, name="schematy-swap").start()
     wznow_przy_starcie()
+    start_kolejki_zdjec()
     if "--autopilot" in sys.argv:
         autopilot_start()
     if "--bez-przegladarki" not in sys.argv:

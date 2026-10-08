@@ -272,8 +272,8 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   `wysylam` = `znajdz(obraz_id=...)` na `generate list --image` (media data.id), nie ma = czeka 60 min, potem blad "Sprawdz w apce";
   NIGDY drugi create. Przed KAZDYM wyslaniem cena jeszcze raz (`swieza=True`) - wyzsza niz `kr` z panelu = nic nie idzie; min_kredyty,
   limit dzienny Higgsfield z rezerwa (`koszt_w_toku` liczy tez zdjecia w toku - rolki widza rezerwe zdjec i odwrotnie),
-  `baza.blokada_generacji(slug)`, `fabryka._WYSYLANIE` (panel nie zamknie sie w trakcie). NSFW/IP: jasny komunikat, zero powtorek i
-  koniec serii N zdjec; niepewne wysylanie tez konczy serie. Ile 1-4, kazde osobne zlecenie. Wznawianie: start panelu (`wznow`),
+  (od 3.3 zamiast `baza.blokada_generacji(slug)`: `baza.BlokadaZdjecia`), `fabryka._WYSYLANIE` (panel nie zamknie sie w trakcie). NSFW/IP:
+  jasny komunikat, zero powtorek, reszta serii z kolejki nie idzie; niepewne wysylanie tez. Ile 1-4, kazde osobne zlecenie (3.3: rownolegle). Wznawianie: start panelu (`wznow`),
   autopilot (przebieg), `python fabryka.py wznow`, poczatek kazdego `generuj`. "Przestan czekac": `POST /api/zdjecia/<id>/przerwij`.
 - Wynik: `zdjecia_dir` (`Desktop\ROLKI AI\tu zdjecia zrobione\<Persona>\`) jako `NNN_swap_<nazwa zrodla>.<ext>` - bez obrobki (jak
   zdjecia: Media Tool tylko dla wideo, zdjecia "pierze" osobna apka). Autopilot: swapy nie zjadaja `zdjecia_dziennie`
@@ -284,6 +284,41 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - Testy: tests/test_zdjecia_swap.py (proporcje + EXIF, chipy wg schematu, prompt, stroj, limit zdjec, slowa ryzykowne - takze dla
   PRAWDZIWYCH person z modelki/ (tylko odczyt), job_id przed czekaniem, swiezy upload, blad po wysylam, wznowienie po obraz_id, NSFW,
   bezpieczniki, blokada, wycena bez mediow z cache, CLI --sucho, endpointy).
+
+## 3.3 (2026-10-08): zdjecia kilka naraz + autopilot rolek z promptu
+
+- **Zdjecia kilka naraz** (`zdjecia_swap.py`): "Generuj" = `zlec()` -> N wpisow `w_kolejce` (`kolejka` {kr, koszt = rezerwacja w gore,
+  od, seria, nie_przed, ponowienia}), NIC nie wysyla. Rezerwacja ATOMOWA pod `_blokada_kolejki()` (`baza._rmw` na `kolejka_zdjec.lock`
+  obok budzet.json - watki i procesy): limit dnia z `baza.koszt_w_toku` (= `koszt_w_drodze` rolki+zdjecia w toku + `koszt_w_kolejce`)
+  i `saldo - rezerwa - nowe >= min_kredyty`; odmowa = `Odmowa(kod)` (cena wzrosla / limit dzienny / min_kredyty / max/zdjecie), nic nie
+  powstaje. Rolki tez widza rezerwe kolejki (`wydano_z_rezerwa`).
+- Wysyla `_Obsluga`: panel = `KOLEJKA` (dyspozytor w tle, `app.start_kolejki_zdjec` przy starcie, budzony przez `zlec`), CLI/testy =
+  `generuj()` (zlec + `do_konca`). Max `zdjecia_rownolegle` (ustawienie GLOBALNE, domyslnie 4, Ustawienia -> Zdjecia) zdjec w_toku naraz,
+  liczone z dysku pod blokada kolejki, FIFO. Konsola (rolki/autopilot) NIE blokuje zdjec, zdjecia nie biora `blokada_generacji` -
+  jeden wlasciciel = `baza.BlokadaZdjecia` (rejestr + `modelki/<slug>/blokady/zdjecie_<id>.lock`) + atomowe `baza.przejmij_zdjecie`.
+  Watek (`_obsluz_z_kolejki`): swieza cena (wyzsza = blad 0 kr), max, swieze saldo minus inne w toku, limit -> straznik w
+  `fabryka._WYSYLANIE` + `KOLEJKA.zamykanie` (/api/zamknij: niewyslane wraca do kolejki) -> `_wyslij` jak 3.2 -> `_dokoncz`.
+- **"Za duzo naraz"** (`za_duzo_naraz`; tekstu Higgsfield nie dokumentuje - skill: "HTTP 429 - too many requests", CLI drukuje
+  "Higgsfield API error (HTTP %d)."): HTTP 429 / too many / concurren / rate limit / parallel / max..jobs..in progress, ale NIE NSFW/IP,
+  blad trwaly ani siec (timeout/connection/socket = nie wiadomo). Przed `wysylam` -> do kolejki; po `wysylam` -> `generate list --image`
+  po `obraz_id`: job jest = ten job, lista dziala i joba nie ma = do kolejki (30/60/.. max 300 s, po 10 odmowach blad 0 kr), listy nie
+  widac = niepewne (JobTrwa 60 min, NIGDY drugi raz).
+- Seria: NSFW/IP albo niepewne wysylanie = reszta serii z KOLEJKI -> `anulowane` (wyslane rownolegle maja wlasne wyniki). STOP strony
+  Zdjecia (`POST /api/swap/stop`): kolejka -> `anulowane`, watki przestaja czekac (job zostaje w toku), osieroconych nie dokanczamy do
+  nastepnego sprawdzenia (Generuj, przebieg autopilota, restart, `fabryka.py wznow`). Restart: przejete bez `wysylam` wracaja do kolejki.
+  DELETE w kolejce = wyjecie (atomowo), w toku 409. Windows: odczyt JSON w chwili `os.replace` = PermissionError -> do 20 prob.
+- **Autopilot rolek z promptu** (`autopilot.krok_z_promptu`, "opcja A" usera): `ustawienia_globalne.json` (obok stan.json, poza gitem)
+  `autopilot_z_promptu` {dziennie 1 (0 = wyl., LACZNIE dla person), model seedance_2_5 (720p 10 s ~70 kr) | wan3_0_prime (~30 kr),
+  persony [] = wszystkie ze zdjeciami, od_godziny "10:00"}; panel: Ustawienia -> Autopilot -> "Rolki z promptu". Krok w
+  `przebieg_wszystkich` (bez --modelka) po swapie; petla kreci sie tez bez person z autopilot=true. Licznik: pomysly
+  `autopilot_z_promptu: true` z dnia LOKALNEGO (utworzono), osobny od swapu (`autopilot_max_rolek_dziennie` ich nie liczy). Jedna naraz
+  (w toku = `fabryka.wznow_w_toku`, 0 kr); max 2 nieudane dziennie (NSFW/IP/blad/cena wzrosla) na pule; persony na zmiane
+  (`nastepna_persona`, bez pauzy) -> `losuj_pomysl` + `asystent.dobierz` (model/10 s/720p zablokowane) -> darmowa `wycena_z_promptu`
+  (nie `mozna` = wpis "uwaga" raz dziennie + 15 min przerwy) -> `dodaj_z_promptu(autopilot_z_promptu=True)` -> `fabryka.generuj(ids=[pid],
+  potwierdz=cena<=wycena, lipsync=False)` -> ElevenLabs, Media Tool, `tu rolki zrobione`, Telegram. `STAN["opis"]` dla widgetu
+  (claudzik/jarvis/widget.py), linijka na Starcie `/api/stan.autopilot_z_promptu.tekst`.
+- Testy: tests/test_zdjecia_rownolegle.py, tests/test_autopilot_z_promptu.py. conftest: UdawaneCLI pod blokada (watki), autouse
+  `bez_kolejki_zdjec_w_tle` konczy dyspozytora PRZED cofnieciem monkeypatcha, `dane` ustawia rolki z promptu na 0 dziennie.
 
 ## Postprodukcja
 
@@ -313,13 +348,13 @@ asystent.py         "agent w tle" zakladki Z promptu: dobierz() (OpenRouter free
 komentarz_glos.py   komentarz zza kamery z ElevenLabs dograny po generacji (ffmpeg miks z otoczeniem w sekundzie reakcji)
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
                     -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
-                    glowny; `czat_persony`) -> raport dnia po 20:00. BEZ lipsyncu.
+                    glowny; `czat_persony`) -> rolki z promptu (3.3, krok_z_promptu) -> raport dnia po 20:00. BEZ lipsyncu.
                     Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
                     Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
                     (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
 zdjecia.py          zdjecia persony z OPISU (autopilot): zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt
 zdjecia_swap.py     zdjecia 3.2: podmiana postaci na wstawionym zdjeciu (strona Zdjecia, CLI zdjecie-swap) - modele, chipy, prompt,
-                    wycena bez mediow, generacja z w_toku/job_id/wznawianiem jak rolki
+                    wycena bez mediow, generacja z w_toku/job_id/wznawianiem jak rolki; 3.3: kolejka + KOLEJKA (kilka naraz), STOP
 lipsync.py          zrob(slug, wideo, audio, styl=) -> przygotuj_glos (ffmpeg: styl telefon = pasmo mikrofonu + krotkie odbicia pokoju +
                     kompresja + szum + loudnorm -16 LUFS; czysty = loudnorm; brak = bez zmian; ogg z Telegrama -> mp3) -> sync.so
                     (multipart <20 MB, wieksze zmniejsza ffmpeg) albo model Higgsfield -> wyniki/<n>_lipsync.raw.mp4 -> Media Tool
