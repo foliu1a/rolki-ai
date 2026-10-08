@@ -355,6 +355,67 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
 - Testy: tests/test_instagram.py (parsowanie Apify, dedup, heurystyki, AI z/bez OpenRouter, krok: round-robin/limit/0/brak klucza/
   blad CDN/konkretna persona, pobieranie bez polpliku, endpointy + konto). Wszystko na mockach, zero sieci.
 
+## 3.5 (2026-10-08): pierwsza klatka (start frame) rolek z promptu + dokanczanie w_toku wszystkich person
+
+- **Po co** (feedback po #7 Noemi, sklepik pod blokiem, Seedance t2v): kamera ~2 m (persona wypelnia kadr, statycznie), wymyslone
+  wnetrze zamiast polskiego sklepu, polamane napisy ("OTVORNE", "KAVA", "19.99"). Teraz rolka z promptu = 2 kroki:
+  1) ZDJECIE (klatka startowa) z modelu obrazu, 2) wideo Seedance rusza DOKLADNIE od tego zdjecia.
+- **Klatka** (`pierwsza_klatka.py` = pieniadze/generacja/kontrola; prompt = `scenariusz.prompt_klatki`, czysta funkcja): model
+  `pierwsza_klatka.MODELE` gpt_image_2_5 (DOMYSLNY, high 2k 9:16, 2,75 kr - najlepiej pisze tekst) | nano_banana_pro (2 kr) |
+  gpt_image_2 (6,5 kr) | seedream_v5_pro (2,5 kr). Obrazy: [tlo usera] + WSZYSTKIE referencje (limit modelu jak w swapie) + stroj
+  z biblioteki (tylko ubranie). Prompt: persona 6-10 m, 1/4-1/3 wysokosci kadru, zaslonieta pierwszym planem (`ZASLONY` wg kamery),
+  telefon na wysokosci klatki, krzywo, szum, bez bokeh/sesji; `KLATKA_MIEJSC` = konkretne polskie realia + krotkie polskie napisy dla
+  WSZYSTKICH 41 miejsc (sklepik: lada z kasa, sciana papierosow, zdrapki, roller z hot-dogami, lodowki, etykiety "4,99 zł",
+  'OTWARTE'/'PROMOCJA'/'KAWA'/'PIECZYWO'/'ZAPRASZAMY'), ceny z PRZECINKIEM ("never with a dot"), bez marek (szyld sieci = zwykly
+  zielony/czerwony bez nazwy), napisy male i daleko. Sylwetka/wlosy/wzrost jak 3.1/3.2, opisy przez `bez_slow_ryzykownych`.
+- **Prawdziwe tla**: user wrzuca zdjecia z telefonu do `Pulpit\ROLKI AI\tla\<id miejsca>\` (np. `tla\sklep_osiedlowy`); panel przy
+  starcie tworzy podfoldery dla wszystkich miejsc (`pierwsza_klatka.przygotuj_foldery_tel`, ROLKI_PULPIT w testach). Opcja `tlo`
+  "auto" (losuje jedno, gdy sa; `ustalone.tlo` = ta sama przy "Zrob") | "bez" | nazwa pliku. Zdjecie = image 1, prompt KLATKA_TLO:
+  "wstaw persone DO TEGO zdjecia, daleko; tlo i wszystkie napisy dokladnie jak sa". Przy "Zrob" (`dodaj_z_promptu`) idzie KOPIA
+  obrocona wg EXIF i BEZ metadanych (GPS!) w `modelki/<slug>/tla_kopie/` (`zdjecia_swap.zapisz_zrodlo(folder=)`).
+- **Kontrola klatki** (`pierwsza_klatka.ocen`, tylko z kluczem OpenRouter, darmowe modele wizyjne jak `instagram_rolki`): JPEG 1280 px
+  -> {ok, powod}: persona daleko i mala (nie zblizenie), jedna postac, czytelne napisy po polsku, zdjecie z telefonu (nie sesja).
+  Zla = nowa klatka, max `max_dodatkowych` (2) dodatkowe, kazda platna i w budzecie; po limicie rolka `blad`, powod "klatka", wideo
+  NIE idzie (0 kr na wideo), panel: miniatura + "Zrob wideo z tej klatki" (`POST /api/pomysly/<id>/klatka {"uzyj": true}` ->
+  `akceptuj`, rolka 'nowy') albo "Sprobuj jeszcze raz" (`wyczysc_odrzucona` -> nowe klatki). Bez klucza / blad AI = bez kontroli +
+  wpis w dzienniku ("bez kontroli AI").
+- **Wideo**: `fabryka._zlecenie_z_promptu`: gotowa klatka (`pierwsza_klatka.gotowa(p)`) -> `start_image` (CLI `--start-image <plik>`,
+  zlec wgrywa ja swiezo, id = `w_toku.klatka_id`, `znajdz(klatka_id=)` szuka po nim, potem po prompcie) + `mode` z klatka:
+  Seedance `omni_reference` + image_references (persona); Wan 3.0 Prime / Gemini (`image-to-video`): start_image NIE laczy sie z
+  referencjami (regula `model get` 2026-10-08) -> sama klatka, ostrzezenie. Prompt `SZABLON_PELNY_KLATKA` / `SZABLON_KROTKI_KLATKA`:
+  "continues EXACTLY from the start frame", nie zmieniac/dodawac/animowac tekstu, kamera zostaje daleko, trzesie sie, czasem cos
+  zaslania; akcja/reakcje ze scenariusza; dzwiek bez mowy (3.1).
+- **Pieniadze**: wycena (`wycena_z_promptu`) = `kr_wideo` (generate cost BEZ klatki - `do_wyceny=True`; cena ta sama) + klatka w gore
+  (2,75 -> 3) = `kr` (panel "Zrob rolke (73 kr)"); `kr_max` = z dodatkowymi klatkami (gdy kontrola dziala). `_generuj_z_promptu`:
+  potwierdz/max/min/limit na SUMIE, `_rolka(k0=k_wideo)`. Klatka: `_wyslij` - swieza cena (wyzsza niz `z_promptu.klatka.wycena` =
+  nic), limit dnia (wydane + rezerwy + klatka + wideo), saldo-rezerwy-klatka-wideo >= min, znacznik `w_toku` z `faza: "klatka"`
+  (koszt = klatka + wideo, `koszt_klatki`, `obraz_id` = swiezy upload 1. obrazu) PRZED wyslaniem, create bez --wait, job_id od razu,
+  blad po wysylam = `znajdz(obraz_id)`, nie ma = JobTrwa (60 min, potem "sprawdz w apce", klatka wliczona). Rozliczenie raz na job;
+  joby klatek w `p.klatka.proby` (+ `baza.znane_job_id`). Koszt rolki w karcie = wideo + klatki.
+- **Wznawianie**: klatka gotowa, wideo przerwane = TA SAMA klatka (`p.klatka.plik`), cena juz bez klatki. Znacznik klatki po restarcie /
+  STOP: wznowienie dokancza TYLKO klatke (0 kr ponad nia), rolka -> 'nowy' z gotowa klatka; wideo (~70 kr) rusza dopiero po swiezej
+  zgodzie ("Zrob te rolke" albo autopilot `czeka`). Tani podglad (draft, 30 kr dla 10 s 720p) tylko z gotowa klatka.
+- **Ustawienia** (globalne `pierwsza_klatka` {wlaczona True, model gpt_image_2_5, kontrola True, max_dodatkowych 2}; panel: Ustawienia ->
+  Autopilot -> "Rolki z promptu - pierwsza klatka"); per rolka "Z promptu -> Zmien szczegoly": Pierwsza klatka tak/nie, model, tlo.
+  CLI: `z-promptu ... --klatka wl|wyl --klatka-model X --tlo auto|bez|plik --sucho` (drukuje tez prompt klatki i cene). Wylaczona =
+  stary sposob; prompty wideo i tak trzymaja dystans (`DYSTANS_UKRYTEJ`, kolejka = koniec kolejki 6-8 m, z biodra 6-8 m).
+- **Ceny `generate cost` 2026-10-08 (darmowe)**: Seedance 2.5 omni 10 s 720p = 70 z start_image i bez (tylko start_image tez 70),
+  8 s 1080p = 96, 480p = 30, t2v 720p = 70; `draft=true` = 30 (jak 480p, start_image bez znaczenia); Wan 3.0 Prime 10 s 720p ze
+  start_image = 30 (start+ref = blad walidacji). Klatki 9:16 2k: GPT Image 2.5 high 2,75, Nano Banana Pro 2, GPT Image 2 high 6,5,
+  Seedream 5.0 Pro 2,5. Rolka z klatka ~73 kr (do 79 z dwiema powtorkami).
+- **Poprawka w_toku** (#7 Noemi wisiala, bo wznawialy tylko persony z autopilotem): `autopilot.dokoncz_w_toku_wszystkich` na poczatku
+  KAZDEGO `przebieg_wszystkich` dokancza rolki (`fabryka.wznow_w_toku`) i zdjecia (`zdjecia_swap.wznow_w_toku`) WSZYSTKICH person
+  (0 kr, ten sam job, blokada generacji); `petla` kreci sie tez, gdy `cos_w_toku()` mimo braku person z autopilotem.
+- NIESPRAWDZONE do pierwszej platnej proby: czy Seedance trzyma twarz z referencji, gdy persona jest mala na klatce; czy lista
+  `generate list` pokazuje media start_image (inaczej zostaje szukanie po prompcie); jaki URL/rozszerzenie oddaje GPT Image 2.5
+  (zapis `.klatka.png|.jpg|.webp`); jak darmowe modele wizyjne oceniaja male napisy (falszywe odrzucenia = "Zrob wideo z tej klatki").
+- Testy: tests/test_pierwsza_klatka.py (prompt klatki: dystans, polskie realia, ceny z przecinkiem, wszystkie miejsca bez marek i slow
+  ryzykownych, tlo usera jako baza + kopia bez EXIF; wycena laczna i kr_max; bezpiecznik limitu; klatka -> wideo ze start_image i
+  zdjeciami; kontrola: zla -> nowa, 3x zla -> bez wideo + "uzyj klatki", 0 dodatkowych; NSFW klatki; cena klatki wyzsza; wznowienie
+  wideo i "Ponow" bez nowej klatki; restart w trakcie klatki; zgubione id klatki; wylaczona = stary sposob; Wan sama klatka; model
+  klatki; autopilot dokancza w_toku persony BEZ autopilota + petla; panel). conftest: `dane` wylacza pierwsza klatke (stare testy),
+  UdawaneCLI zapisuje media start_image w `params.medias`.
+
 ## Postprodukcja
 
 - Wideo: `mediatool.py` odpala worker Media Tool headless (`ELECTRON_RUN_AS_NODE=1 "Media Tool.exe" worker.cjs <json>`,
@@ -388,6 +449,8 @@ autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dz
                     Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
                     (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
 zdjecia.py          zdjecia persony z OPISU (autopilot): zdjecia_model + referencje (albo soul_id dla modeli *soul*), prompty/zdjecia.txt
+pierwsza_klatka.py  3.5: pierwsza klatka rolek z promptu - modele obrazu, tla usera (Pulpit/ROLKI AI/tla), wycena
+                    wideo+klatka, generacja klatki (w_toku faza klatka, job_id od razu, wznawianie), kontrola AI (OpenRouter)
 zdjecia_swap.py     zdjecia 3.2: podmiana postaci na wstawionym zdjeciu (strona Zdjecia, CLI zdjecie-swap) - modele, chipy, prompt,
                     wycena bez mediow, generacja z w_toku/job_id/wznawianiem jak rolki; 3.3: kolejka + KOLEJKA (kilka naraz), STOP
 instagram_rolki.py  3.4: zrodlo klipow z IG (orkiestracja): dedup (instagram_widziane.json) + dzienny licznik, heurystyki (ffprobe),

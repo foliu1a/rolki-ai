@@ -778,22 +778,35 @@ def z_promptu(p):
     return isinstance(p, dict) and p.get("typ") == "prompt"
 
 
-def _zlecenie_z_promptu(slug, p):
-    """Zlecenie rolki z promptu: model/tryb/dlugosc/rozdzielczosc/zdjecia z pomyslu (p['z_promptu']), nie z ustawien persony."""
+def _zlecenie_z_promptu(slug, p, do_wyceny=False):
+    """Zlecenie rolki z promptu: model/tryb/dlugosc/rozdzielczosc/zdjecia z pomyslu (p['z_promptu']), nie z ustawien persony.
+    3.5: z pierwsza klatka (z_promptu.klatka) - start_image = gotowa klatka (p['klatka']['plik']), tryb wideo z klatka (Seedance
+    omni_reference + zdjecia persony; Wan/Gemini - sama klatka, bez zdjec). do_wyceny=True: bez klatki (cena ta sama - `generate
+    cost` 2026-10-08: 70 kr z start_image i bez; Gemini image-to-video bez klatki by nie przeszedl walidacji)."""
     zp = p.get("z_promptu") or {}
-    return {
+    z = {
         "slug": slug, "pomysl": p.get("id"), "prompt": p.get("prompt_higgsfield") or "", "video": None, "video_czas": None,
         "images": [o for o in (zp.get("obrazy") or []) if o], "duration": int(zp.get("dlugosc") or 10),
         "aspect_ratio": "9:16", "resolution": zp.get("rozdzielczosc") or "720p", "model": zp.get("model") or "seedance_2_5",
         "mode": zp.get("mode"), "generate_audio": zp.get("generate_audio"), "soul_id": "",
         "parametry": dict(zp.get("parametry") or {}), "dostawca": DOSTAWCA_Z_PROMPTU, "yapper": {}, "wavespeed": {},
     }
+    kl = zp.get("klatka") if isinstance(zp.get("klatka"), dict) else None
+    if kl and not do_wyceny:
+        import pierwsza_klatka
+        plik = pierwsza_klatka.gotowa(p)
+        if plik:
+            z["start_image"] = plik
+            z["mode"] = kl.get("mode_wideo")
+            if not kl.get("refy_w_wideo"):
+                z["images"] = []
+    return z
 
 
-def zlecenie(slug, p, ust=None):
+def zlecenie(slug, p, ust=None, do_wyceny=False):
     """Generyczne zlecenie dla dostawcy (dostawcy/__init__.py opisuje pola)."""
     if z_promptu(p):
-        return _zlecenie_z_promptu(slug, p)
+        return _zlecenie_z_promptu(slug, p, do_wyceny=do_wyceny)
     ust = ust or baza.ustawienia_modelki(slug)
     ma_zrodlo = bool(p.get("zrodlo"))
     dur = ust.get("duration")
@@ -936,8 +949,11 @@ def koszt(slug, ids=None, limit=None, log=None):
             continue
         dp = dostawcy.dostawca(DOSTAWCA_Z_PROMPTU) if z_promptu(p) else d     # rolka z promptu: zawsze Higgsfield
         try:
-            z = zlecenie(slug, p, ust)
+            z = zlecenie(slug, p, ust, do_wyceny=True)
             k = dp.koszt(z)
+            if z_promptu(p) and k is not None:
+                import pierwsza_klatka          # 3.5: + pierwsza klatka, gdy jeszcze jej nie ma
+                k = pierwsza_klatka.wycena_rolki(p, k)[0]
         except dostawcy.BladDostawcy as e:
             log(f"#{p['id']}: [BLAD] {e}")
             wynik["pozycje"].append((p["id"], None, dp.NAZWA))
@@ -1255,7 +1271,7 @@ def _szukaj_wyslanego(slug, p, d, z, model, klucz, marker, blad, log):
         try:
             znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=z.get("prompt"),
                                   od=marker.get("wysylam_od") or marker.get("od"), klucz=klucz,
-                                  pomin=_pomin_przy_szukaniu(p, d, marker))
+                                  pomin=_pomin_przy_szukaniu(p, d, marker), klatka_id=marker.get("klatka_id"))
         except dostawcy.BladDostawcy as e:
             log(f"#{pid}: nie moge sprawdzic listy jobow ({e})")
             break
@@ -1472,7 +1488,9 @@ def _sukces(slug, p, d, w, kr, krok, ust, log, lipsync, wynik):
         wynik["w_toku"].append(pid)
         return False
     zapas = krok > 0
-    baza.aktualizuj_pomysl(slug, pid, status="wygenerowany", w_toku=None, krok_startowy=None, job_id=w.get("job_id"), koszt=kr,
+    kr_klatek = int(((p.get("klatka") or {}).get("kr") or 0)) if z_promptu(p) and isinstance(p.get("klatka"), dict) else 0
+    baza.aktualizuj_pomysl(slug, pid, status="wygenerowany", w_toku=None, krok_startowy=None, job_id=w.get("job_id"),
+                           koszt=kr + kr_klatek,
                            dostawca=d.NAZWA, model=model, zapas=zapas, wynik_url=urls[0], plik_wynikowy=surowy)
     wynik["wygenerowane"] += 1
     limit_dnia = baza.limit_dzienny(d.NAZWA)
@@ -1603,6 +1621,33 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
         return
     krok = int((marker or {}).get("krok") or 0) if marker else krok_start
     powod, w, kr_razem, d, zapas_info = None, None, 0, d0, ""
+    if z_promptu(p) and (p.get("z_promptu") or {}).get("klatka") and (not marker or marker.get("faza") == "klatka"):
+        # 3.5: najpierw pierwsza klatka (gotowa = od razu; znacznik klatki = TEN job; inaczej nowa, z cena i bezpiecznikami),
+        # dopiero potem wideo od tej klatki. Zla klatka / filtr / bezpiecznik = blad BEZ wideo (0 kr na wideo).
+        import pierwsza_klatka
+        k_wideo = k0 if k0 is not None else int((p.get("z_promptu") or {}).get("wycena_wideo") or 0)
+        try:
+            plik_klatki = pierwsza_klatka.przygotuj(slug, pid, log=log, stop=stop, timeout=timeout, k_wideo=k_wideo)
+        except JobTrwa as e:
+            _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka - {e}; zostaje w toku, dokoncze przy nastepnym przebiegu (nic nie "
+                       f"wysylam drugi raz)", pomysl=pid)
+            wynik["w_toku"].append(pid)
+            return
+        except pierwsza_klatka.WrocDoKolejki:
+            return
+        except pierwsza_klatka.NieWyszla as e:
+            q = baza.pomysl(slug, pid)
+            _niepowodzenie(slug, q, dostawcy.dostawca(DOSTAWCA_Z_PROMPTU), {"job_id": e.job_id, "status": e.status, "blad": e.tekst},
+                           int(pierwsza_klatka.stan(q).get("kr") or 0), e.powod, ust, log, wynik)
+            return
+        if d0 is None:
+            # wznowienie (start panelu, autopilot, `wznow`, STOP wczesniej): dokonczylismy TYLKO klatke (0 kr ponad nia) - wideo
+            # (~70 kr) nie rusza samo bez swiezej zgody: rolka czeka jako 'nowy' z gotowa klatka ("Zrob te rolke" / autopilot)
+            baza.aktualizuj_pomysl(slug, pid, status="nowy", w_toku=None)
+            _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka gotowa ({os.path.basename(plik_klatki)}) - wideo nie rusza samo po "
+                       f"wznowieniu; 'Zrob te rolke' wezmie TE klatke (bez nowej oplaty za klatke)", pomysl=pid)
+            return
+        p, marker, krok = baza.pomysl(slug, pid), None, 0
     while krok <= len(kroki):
         _sprawdz_stop(stop)
         if marker:
@@ -1624,7 +1669,7 @@ def _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=None, k0=None, k
                 try:
                     znaleziony = d.znajdz(model, wideo_id=marker.get("wideo_id"), prompt=_prompt_wyslany(slug, p, ust),
                                           od=od_wyslania, klucz=marker.get("klucz"),
-                                          pomin=_pomin_przy_szukaniu(p, d, marker))
+                                          pomin=_pomin_przy_szukaniu(p, d, marker), klatka_id=marker.get("klatka_id"))
                 except dostawcy.BladDostawcy as e:
                     if wiek is not None and wiek > MAX_GODZIN_W_TOKU * 3600:
                         _niepewne_wyslanie(slug, p, d, marker, f"od {MAX_GODZIN_W_TOKU} h nie da sie sprawdzic listy jobow: {e}", log, wynik)
@@ -1960,15 +2005,23 @@ def _generuj_z_promptu(slug, lista, ust, potwierdz, timeout, log, stop, max_role
             continue
         z = zlecenie(slug, p, ust)
         try:
-            k = d.koszt(z)
+            k = d.koszt(zlecenie(slug, p, ust, do_wyceny=True))
+            if k is None:
+                k = max_na_rolke
+                log(f"#{p['id']}: Higgsfield nie podal kosztu, zakladam {k} kr")
+            k_wideo = k
+            # 3.5: pierwsza klatka (gdy jeszcze jej nie ma) - cena razem = wideo + klatka (w gore); bezpieczniki i potwierdz()
+            # patrza na sume, a gotowa klatka (wznowienie, "Sprobuj jeszcze raz" po bledzie wideo) nie kosztuje drugi raz
+            import pierwsza_klatka
+            if pierwsza_klatka.potrzebna(p):
+                k, _k_kl, _k_max = pierwsza_klatka.wycena_rolki(p, k_wideo)
+                if k is None:
+                    raise dostawcy.BladDostawcy("Higgsfield nie podal ceny pierwszej klatki")
         except dostawcy.BladDostawcy as e:
             _zdarzenie(log, slug, "blad", f"#{p['id']}: koszt nieznany ({e}) - pomijam", pomysl=p["id"])
             baza.aktualizuj_pomysl(slug, p["id"], status="blad", notatki=f"koszt: {e}")
             wynik["bledy"].append(p["id"])
             continue
-        if k is None:
-            k = max_na_rolke
-            log(f"#{p['id']}: Higgsfield nie podal kosztu, zakladam {k} kr")
         baza.aktualizuj_pomysl(slug, p["id"], koszt=k, resolution=z["resolution"])
         wydano = baza.wydano_z_rezerwa(nazwa)
         try:
@@ -1994,7 +2047,7 @@ def _generuj_z_promptu(slug, lista, ust, potwierdz, timeout, log, stop, max_role
             log(f"#{p['id']}: pominieto (cena {k} kr nie zostala potwierdzona)")
             wynik["pominiete"].append(p["id"])
             continue
-        _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=d, k0=k, potwierdz=potwierdz)
+        _rolka(slug, p, ust, log, stop, timeout, lipsync, wynik, d0=d, k0=k_wideo, potwierdz=potwierdz)
     log(f"rolki z promptu: {wynik['wygenerowane']} wygenerowanych, dzis wydano {baza.wydano_dzis(nazwa)}/{limit_dnia} kr"
         + (f", w toku: {', '.join('#%s' % i for i in wynik['w_toku'])}" if wynik["w_toku"] else ""))
 
@@ -2007,7 +2060,7 @@ def _dane_z_promptu(sc):
                                    "pomysl_id", "miejsce", "miejsce_nazwa", "wlosy_zmienione", "stroj_plik", "komentarz",
                                    "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje", "glos", "wymowa",
                                    "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy", "stroj_id", "stroj_tryb", "reakcja",
-                                   "stroj_nazwa", "nagrywa", "sylwetka")}
+                                   "stroj_nazwa", "nagrywa", "sylwetka", "klatka")}
 
 
 def _rozstrzygnij_glos(opcje):
@@ -2054,16 +2107,41 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     wynik.update({"obrazy": [os.path.basename(o) for o in sc["obrazy"]], "kr": None, "saldo": None,
                   "stroj_plik": os.path.basename(sc["stroj_plik"]) if sc.get("stroj_plik") else None,
                   "dzis": {"wydano": baza.wydano_z_rezerwa(nazwa), "limit": baza.limit_dzienny(nazwa)},
-                  "min_kredyty": min_k, "max_kredyty_na_rolke": max_k, "mozna": False, "powody": [], "dostawca": nazwa})
+                  "min_kredyty": min_k, "max_kredyty_na_rolke": max_k, "mozna": False, "powody": [], "dostawca": nazwa,
+                  "kr_wideo": None, "kr_klatka": None, "kr_max": None, "klatka": None})
+    kl = sc.get("klatka")
+    if kl:
+        import pierwsza_klatka
+        import sekrety
+        kontrola = bool(kl.get("kontrola")) and bool(sekrety.klucz("openrouter"))
+        wynik["klatka"] = {"model": kl["model"], "nazwa_modelu": kl.get("nazwa_modelu"), "prompt": kl["prompt"],
+                           "znaki": kl.get("znaki"), "obrazy": [os.path.basename(o) for o in kl["obrazy"]],
+                           "tlo": os.path.basename(kl["tlo"]) if kl.get("tlo") else None,
+                           "folder_tel": os.path.join(pierwsza_klatka.folder_tel(), sc["miejsce"]),
+                           "kontrola": kontrola, "kontrola_ustawiona": bool(kl.get("kontrola")),
+                           "max_dodatkowych": int(kl.get("max_dodatkowych") or 0) if kontrola else 0}
     if not z_cena:
         return wynik
     d = dostawcy.dostawca(nazwa)
     p = {"id": None, "typ": "prompt", "prompt_higgsfield": sc["prompt"], "z_promptu": _dane_z_promptu(sc)}
     try:
-        k = d.koszt(zlecenie(slug, p, ust))
+        k = d.koszt(zlecenie(slug, p, ust, do_wyceny=True))
     except dostawcy.BladDostawcy as e:
         wynik["powody"].append(f"Higgsfield nie podal ceny: {e}")
         return wynik
+    wynik["kr_wideo"] = k
+    if kl and k is not None:
+        # 3.5: cena = wideo + JEDNA klatka (w gore: 2,75 -> 3); z kontrola AI moze dojsc do max_dodatkowych klatek (kr_max)
+        import pierwsza_klatka
+        try:
+            k, k_kl, k_max = pierwsza_klatka.wycena_rolki(p, k)
+        except dostawcy.BladDostawcy as e:
+            wynik["powody"].append(f"Higgsfield nie podal ceny pierwszej klatki: {e}")
+            return wynik
+        if k_kl is None:
+            wynik["powody"].append("Higgsfield nie podal ceny pierwszej klatki - sprobuj jeszcze raz.")
+            return wynik
+        wynik["kr_klatka"], wynik["kr_max"] = k_kl, k_max
     try:
         saldo = d.saldo()
     except dostawcy.BladDostawcy as e:
@@ -2083,7 +2161,8 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     wynik["mozna"] = not wynik["powody"]
     if log:
         log(f"z promptu: {sc['model']} {sc['dlugosc']} s {sc['rozdzielczosc']}, {len(sc['obrazy'])} zdjec, "
-            f"{sc['znaki']} znakow -> {k} kr" + ("" if wynik["mozna"] else f" ({'; '.join(wynik['powody'])})"))
+            f"{sc['znaki']} znakow -> {k} kr" + (f" (wideo {wynik['kr_wideo']} + klatka {wynik['kr_klatka']})" if kl else "")
+            + ("" if wynik["mozna"] else f" ({'; '.join(wynik['powody'])})"))
     return wynik
 
 
@@ -2099,6 +2178,22 @@ def dodaj_z_promptu(slug, opcje, prompt=None, kr=None, **pola):
         if bledy:
             raise ValueError(" ".join(bledy))
     zp = _dane_z_promptu(sc)
+    if zp.get("klatka"):
+        # 3.5: pierwsza klatka - zdjecie usera (tlo) jako KOPIA bez EXIF/GPS; zatwierdzona cena klatki (przed kazda klatka
+        # cena jeszcze raz - wyzsza = nic nie idzie); cena samego wideo do wznowienia po restarcie
+        import pierwsza_klatka
+        kl = dict(zp["klatka"])
+        if kl.get("tlo"):
+            kopia = pierwsza_klatka.kopia_tla(slug, kl["tlo"])
+            kl["tlo_oryginal"], kl["tlo"] = kl["tlo"], kopia
+            kl["obrazy"] = [kopia] + list(kl["obrazy"][1:])
+        try:
+            kl["wycena"] = pierwsza_klatka.cena(kl)
+        except dostawcy.BladDostawcy:
+            kl["wycena"] = None
+        zp["klatka"] = kl
+        if kr is not None and kl["wycena"] is not None:
+            zp["wycena_wideo"] = int(kr) - pierwsza_klatka.do_limitu(kl["wycena"])
     zp["opcje"] = {k: v for k, v in (opcje or {}).items() if k not in ("ustalone", "asystent")}
     if isinstance((opcje or {}).get("asystent"), dict):
         zp["asystent"] = {k: opcje["asystent"].get(k) for k in ("dlaczego", "zrodlo", "podsumowanie")}
@@ -2124,6 +2219,9 @@ def cmd_z_promptu(args):
              "wlosy": {"kolor": args.wlosy, "fryzura": args.fryzura, "grzywka": args.grzywka}}
     if args.nagrywa:
         opcje["nagrywa"] = args.nagrywa
+    for k, v in (("klatka", args.klatka), ("klatka_model", args.klatka_model), ("tlo", args.tlo)):
+        if v:
+            opcje[k] = v
     if args.gotowy and not args.tekst:
         import scenariusz
         opcje["tekst"] = scenariusz.POMYSLY_PO_ID[args.gotowy]["pl"] if args.gotowy in scenariusz.POMYSLY_PO_ID else ""
@@ -2141,6 +2239,13 @@ def cmd_z_promptu(args):
           f"miejsce: {w['miejsce_nazwa']}")
     for u in w["ostrzezenia"]:
         print(f"[UWAGA] {u}")
+    if w.get("klatka"):
+        kl = w["klatka"]
+        print(f"\n--- pierwsza klatka ({kl['nazwa_modelu']}, {kl['znaki']} znakow, zdjecia: {', '.join(kl['obrazy'])}; tlo: "
+              f"{kl['tlo'] or 'generowane (brak zdjec w ' + kl['folder_tel'] + ')'}; kontrola AI: "
+              f"{'tak' if kl['kontrola'] else 'nie'}):\n{kl['prompt']}")
+        print(f"cena: wideo {w['kr_wideo']} kr + klatka {w['kr_klatka']} kr" + (f" (z dodatkowymi klatkami max {w['kr_max']} kr)"
+                                                                               if w.get("kr_max") and w["kr_max"] != w["kr"] else ""))
     print(f"cena: {w['kr']} kr | saldo {w['saldo']} | dzis {w['dzis']['wydano']}/{w['dzis']['limit']} | "
           f"max/rolka {w['max_kredyty_na_rolke']} | min_kredyty {w['min_kredyty']}")
     if not w["mozna"]:
@@ -2174,6 +2279,11 @@ def podglad(slug, pid, log=None):
         raise ValueError("Tani podglad dziala tylko dla Higgsfield (Seedance draft).")
     if z_promptu(p) and (p.get("z_promptu") or {}).get("model") != "seedance_2_5":
         raise ValueError("Tani podglad (draft) jest tylko dla Seedance 2.5.")
+    if z_promptu(p) and (p.get("z_promptu") or {}).get("klatka"):
+        import pierwsza_klatka          # 3.5: prompt "rusz od pierwszej klatki" bez klatki nie ma sensu
+        if not pierwsza_klatka.gotowa(p):
+            raise ValueError("Tani podglad rolki z pierwsza klatka dziala dopiero z gotowa klatka - zrob rolke (najpierw powstanie "
+                             "zdjecie) albo zrob nowa rolke z wylaczona pierwsza klatka.")
     d = dostawcy.dostawca(nazwa_dostawcy)
     if not p.get("prompt_higgsfield"):
         raise ValueError(f"#{pid} nie ma promptu.")
@@ -2543,6 +2653,9 @@ def main(argv=None):
     s.add_argument("--wymowa", default="zwykla", choices=("zwykla", "fonetyczna"))
     s.add_argument("--nazwy", default="prawdziwe", choices=("prawdziwe", "opisowe")); s.add_argument("--obiekt", help="np. posnania")
     s.add_argument("--asystent", action="store_true", help="asystent dobiera miejsce/stroj/kamere/reakcje/komentarz (OpenRouter albo reguly)")
+    s.add_argument("--klatka", choices=("wl", "wyl"), help="3.5: pierwsza klatka (zdjecie -> wideo od niego); domyslnie z ustawien")
+    s.add_argument("--klatka-model", help="gpt_image_2_5 | nano_banana_pro | gpt_image_2 | seedream_v5_pro")
+    s.add_argument("--tlo", help="auto (zdjecie z Pulpit/ROLKI AI/tla/<miejsce>, gdy jest) | bez | <nazwa pliku>")
     s.add_argument("--sucho", action="store_true", help="tylko prompt i darmowa wycena")
     s.add_argument("--tak", "-y", action="store_true", help="bez pytania o cene"); s.add_argument("--timeout", default="30m")
     s.set_defaults(f=cmd_z_promptu)

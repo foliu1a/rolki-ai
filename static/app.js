@@ -1810,6 +1810,17 @@ function kartaRolki(p) {
     }
     strojBlok = `<div class="rolka-stroj">${mini}${wybor}</div>`;
   }
+  // 3.5: pierwsza klatka rolki z promptu - miniatura (od czego ruszyło wideo), wynik sprawdzania, „Zrób wideo z tej klatki”
+  let klatkaBlok = '';
+  if (zPromptu && p.ma_klatke && (p.klatka_url || (p.klatka_info || {}).proby)) {
+    const ki = p.klatka_info || {};
+    const ocena = ki.zaakceptowana ? 'zaakceptowana ręcznie' : (ki.ok === true ? 'sprawdzona – OK'
+      : (ki.ok === false ? `odrzucona przy sprawdzaniu: ${ki.powod || 'bez powodu'}` : 'bez sprawdzania AI'));
+    const img = p.klatka_url ? `<a href="${esc(p.klatka_url)}" target="_blank" rel="noopener" title="Otwórz pierwszą klatkę"><img class="rolka-klatka-mini" src="${esc(p.klatka_url)}" alt="Pierwsza klatka" loading="lazy"></a>` : '';
+    klatkaBlok = `<div class="rolka-klatka">${img}<span>Pierwsza klatka${ki.model ? ` (${esc(ki.model)})` : ''}: <b>${esc(ocena)}</b>`
+      + `${ki.proby > 1 ? ` · ${esc(String(ki.proby))} ${odmiana(ki.proby, 'próba', 'próby', 'prób')}` : ''}${ki.kr ? ` · ${esc(liczba(ki.kr))} kr` : ''}`
+      + `${ki.tlo ? ` · tło: Twoje zdjęcie ${esc(ki.tlo)}` : ''}</span></div>`;
+  }
   const mini = miniaturaRolki(p);
   const obraz = mini ? `<img src="${esc(mini)}" alt="" loading="lazy">` : ikona('film');
   // miniatura gotowej rolki = przycisk „Odtwórz” (klik otwiera film na karcie); rolki z tanim podglądem = przycisk „Zobacz podgląd”
@@ -1831,6 +1842,7 @@ function kartaRolki(p) {
   else if (podgladMozliwy) drugi += przyciskRolki('podglad', id, `Tani podgląd (~${KOSZT_PODGLADU} kr)`);
   if (telefon && !p.telegram_wyslano) drugi += przyciskRolki('telegram-wyslij', id, `${ikona('telefon')}Wyślij na telefon`);
   if (p.mozna_dograc_glos) drugi += przyciskRolki('dograj-glos', id, `${ikona('audio')}Dograj głos (ElevenLabs)`);
+  if (p.mozna_uzyc_klatki) drugi += przyciskRolki('klatka-uzyj', id, 'Zrób wideo z tej klatki');
   const menu = [przyciskRolki('prompt-pokaz', id, p.prompt_higgsfield ? 'Pokaż / zmień prompt' : 'Wpisz prompt')];
   if (status === 'nowy') menu.push(przyciskRolki('koszt-pomysl', id, 'Ile kosztuje?'));
   if (podgladMozliwy && maPodglad) menu.push(przyciskRolki('podglad', id, `Tani podgląd jeszcze raz (~${KOSZT_PODGLADU} kr)`));
@@ -1880,6 +1892,7 @@ function kartaRolki(p) {
       ${zPromptu && ['gotowe', 'wygenerowany'].includes(status) ? `<div class="rolka-ocena"><span>Jak wyszła?</span><button class="btn btn-maly${p.ocena === 'dobra' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="dobra" aria-pressed="${p.ocena === 'dobra'}">${ikona('ok')}Dobra – więcej takich</button><button class="btn btn-maly${p.ocena === 'slaba' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="slaba" aria-pressed="${p.ocena === 'slaba'}">Słaba</button></div>` : ''}
       <div class="rolka-fakty">${fakty.map(f => `<span class="fakt">${f}</span>`).join('')}</div>
       ${strojBlok}
+      ${klatkaBlok}
       ${zPromptu && p.glos_blad && !p.glos_dograny ? `<div class="rolka-meta zle">Bez komentarza zza kamery: ${esc(prostyBlad(p.glos_blad))}. Napraw ElevenLabs (Ustawienia → Konta) i kliknij „Dograj głos”.</div>` : ''}
       ${powod}
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
@@ -1972,6 +1985,14 @@ async function taniPodglad(id) {
   });
   if (!w) return;
   await akcja({ typ: 'podglad', id }, 'robię tani podgląd');
+}
+
+// 3.5: „Zrób wideo z tej klatki” - klatka odrzucona przez sprawdzanie AI idzie jednak do wideo (cenę i zgodę pokaże „Zrób tę rolkę”)
+async function uzyjKlatki(id) {
+  await api(`/api/pomysly/${id}/klatka`, 'POST', { uzyj: true });
+  toast('Ta klatka pójdzie do wideo (bez nowego zdjęcia). Teraz cena i zgoda.', 'info');
+  await ladujRolki(false);
+  await generujPomysl(id);
 }
 
 async function ponowPomysl(id) {
@@ -2143,6 +2164,12 @@ function renderZpFormularz() {
   $('#zp-sezon').innerHTML = opcjeHtml([['auto', `Jak teraz (${sezonTeraz ? sezonTeraz[1].toLowerCase() : 'wg daty'})`]].concat(k.sezony || []), 'auto');
   $('#zp-pora').innerHTML = opcjeHtml([['auto', 'Dobierz do miejsca']].concat(k.pory || []), 'auto');
   renderZpGlosInfo();
+  // 3.5: pierwsza klatka (zdjęcie -> wideo od niego); domyślne z Ustawienia → Autopilot → „Rolki z promptu – pierwsza klatka”
+  const kl = k.klatka || {}, kld = kl.domyslne || {};
+  $('#zp-klatka').innerHTML = opcjeHtml([['wl', 'Tak – najpierw zdjęcie, potem wideo (zalecane)'], ['wyl', 'Nie – stary sposób (sam opis)']], kld.wlaczona === false ? 'wyl' : 'wl');
+  $('#zp-klatka-model').innerHTML = opcjeHtml((kl.modele || []).map(([v, n, o]) => [v, `${n} – ${o}`]), kld.model || 'gpt_image_2_5');
+  $('#zp-tlo').innerHTML = opcjeHtml([['auto', 'Twoje zdjęcie miejsca, jeśli jest (inaczej wygeneruję)'], ['bez', 'Zawsze wygeneruj miejsce']], 'auto');
+  renderZpKlatkaInfo();
   let info = 'Domyślnie jej własne włosy ze zdjęć. Zmiana włosów nie zmienia twarzy.';
   if (!per.wzrost_cm) info += ` Wpisz wzrost (Ustawienia → Persona) – rolka będzie lepiej wyskalowana obok ludzi.`;
   $('#zp-wlosy-info').textContent = info;
@@ -2214,6 +2241,25 @@ function ustawZpZOpcji(o) {
   $('#zp-komentarz-tekst').hidden = $('#zp-komentarz').value !== 'wlasny';
 }
 
+// 3.5: gdzie wrzucać prawdziwe zdjęcia miejsc (tła pierwszej klatki) i ile ich jest dla wybranego miejsca
+function renderZpKlatkaInfo(w) {
+  const el = $('#zp-klatka-info');
+  if (!el) return;
+  const kl = (state.zp.katalog || {}).klatka || {};
+  const tla = kl.tla || {};
+  const wl = $('#zp-klatka').value !== 'wyl';
+  $('#zp-klatka-model').disabled = !wl; $('#zp-tlo').disabled = !wl;
+  if (!wl) { el.textContent = 'Stary sposób: wideo z samego opisu (napisy i miejsce wymyśla model wideo).'; return; }
+  const miejsce = (w && w.miejsce) || $('#zp-miejsce').value;
+  const ile = miejsce && (tla.miejsca || {})[miejsce];
+  const podfolder = miejsce && miejsce !== 'losowe' ? miejsce : '<miejsce>';
+  const folder = (tla.folder || 'Pulpit\\ROLKI AI\\tla') + '\\' + podfolder;
+  let t = `Najpierw zdjęcie (ok. 3 kr): persona daleko, prawdziwe polskie napisy – potem wideo od tego zdjęcia. Prawdziwe tło: wrzuć zdjęcia z telefonu do ${folder} – wstawię personę w TO zdjęcie, a napisy zostaną prawdziwe.`;
+  if (ile) t += ` Dla tego miejsca masz ${ile} ${odmiana(ile, 'zdjęcie', 'zdjęcia', 'zdjęć')}.`;
+  if (!kl.kontrola_ai) t += ' Sprawdzanie zdjęcia przez AI ruszy po wklejeniu klucza OpenRouter (Konta).';
+  el.textContent = t;
+}
+
 function zbierzZp() {
   const o = {
     slug: state.aktywna, tekst: $('#zp-pomysl').value.trim(), pomysl_id: state.zp.pomyslId || '',
@@ -2224,6 +2270,7 @@ function zbierzZp() {
     glos: 'auto', nagrywa: $('#zp-nagrywa').value,     // 3.1: komentarz zawsze ElevenLabs (model wideo nic nie mówi)
     wlosy: { kolor: $('#zp-wlosy-kolor').value, fryzura: $('#zp-wlosy-fryzura').value, grzywka: $('#zp-wlosy-grzywka').value },
     sezon: $('#zp-sezon').value, pora: $('#zp-pora').value, kamera: $('#zp-kamera').value,
+    klatka: $('#zp-klatka').value || 'wl', klatka_model: $('#zp-klatka-model').value, tlo: $('#zp-tlo').value || 'auto',
   };
   if (state.zp.ustalone) o.ustalone = state.zp.ustalone;
   const a = state.zp.asystent;
@@ -2329,6 +2376,10 @@ function renderZpWynik(w, zCena) {
   $('#zp-prompt').readOnly = !state.pelny;
   $('#zp-znaki').textContent = liczba(w.znaki || 0);
   $('#zp-prompt-wrap').hidden = false;
+  const kl = w.klatka;
+  $('#zp-prompt-klatki').value = kl ? (kl.prompt || '') : '';
+  $('#zp-prompt-klatki').hidden = !kl; $('#zp-prompt-klatki-etykieta').hidden = !kl;
+  renderZpKlatkaInfo(w);
   const uwagi = (state.pelny ? (w.ostrzezenia || []) : (w.ostrzezenia || []).filter(u => !/znakow \(zalecane/.test(u)))
     .concat(zCena ? (w.powody || []).map(p => `Nie da się teraz: ${p}`) : []);
   $('#zp-uwagi').innerHTML = uwagi.map(u => `<li>${esc(u)}</li>`).join('');
@@ -2342,8 +2393,13 @@ function renderZpWynik(w, zCena) {
   const d = w.dzis || {};
   const saldo = w.saldo !== null && w.saldo !== undefined ? ` Masz ${esc(liczba(w.saldo))} kr.` : '';
   const limit = d.limit ? ` Dziś wydane ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))}.` : '';
+  const zKlatka = kl && w.kr_klatka !== null && w.kr_klatka !== undefined
+    ? ` Wideo ${esc(liczba(w.kr_wideo))} kr + zdjęcie (pierwsza klatka, ${esc(kl.nazwa_modelu || kl.model)}) ${esc(String(w.kr_klatka).replace('.', ','))} kr`
+      + (w.kr_max && w.kr_max !== w.kr ? `; jeśli sprawdzanie odrzuci zdjęcie – najwyżej ${esc(liczba(w.kr_max))} kr` : '')
+      + `. Tło: ${kl.tlo ? 'Twoje zdjęcie ' + esc(kl.tlo) : 'wygenerowane'}.`
+    : '';
   $('#zp-cena').innerHTML = w.kr
-    ? `Cena: <b>${esc(liczba(w.kr))} kr</b> <span class="muted">(${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}; sprawdzone w Higgsfield, nic nie zeszło).${limit}${saldo}</span>`
+    ? `Cena: <b>${esc(liczba(w.kr))} kr</b> <span class="muted">(${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}; sprawdzone w Higgsfield, nic nie zeszło).${zKlatka}${limit}${saldo}</span>`
     : 'Nie udało się sprawdzić ceny – spróbuj jeszcze raz za chwilę.';
   $('#zp-cena').className = 'zp-cena ' + (w.mozna ? 'ok' : 'zle');
 }
@@ -2388,7 +2444,8 @@ async function zpZrob() {
   const d = w.dzis || {};
   const tresc = `<p><b>${esc(w.tytul || w.miejsce_nazwa || '')}</b></p>`
     + `<p class="muted">${esc(zpPodsumowanie())}</p>`
-    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b> (Higgsfield, ${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}).`
+    + `<p>To będzie kosztować <b>${esc(liczba(w.kr))} kr</b> (Higgsfield, ${esc(String(w.dlugosc))} s, ${esc(w.rozdzielczosc || '')}`
+    + (w.klatka ? `: najpierw zdjęcie – pierwsza klatka, potem wideo od niego${w.kr_max && w.kr_max !== w.kr ? `; gdy sprawdzanie odrzuci zdjęcie, zrobię nowe – razem najwyżej ${esc(liczba(w.kr_max))} kr` : ''}` : '') + ').'
     + (w.saldo !== null && w.saldo !== undefined ? ` Po zrobieniu zostanie około <b>${esc(liczba(w.saldo - w.kr))} kr</b>.` : '') + '</p>'
     + (d.limit ? `<p>Dziś wydano ${esc(liczba(d.wydano || 0))} z ${esc(liczba(d.limit))} dozwolonych.</p>` : '')
     + '<p class="dialog-uwaga">To wyda kredyty. Jeśli tuż przed wysłaniem cena wyjdzie wyższa – nic nie wyślę.</p>';
@@ -3399,6 +3456,15 @@ function renderGlobalne() {
   const wybrane = new Set(zp.persony || []);
   $('#g-zp-persony').innerHTML = (d.persony || []).map(p => `<label class="check${p.referencje ? '' : ' bez-zdjec'}"${p.referencje ? '' : ' title="Ta persona nie ma zdjęć – autopilot jej nie użyje"'}><input type="checkbox" value="${esc(p.slug)}"${wybrane.has(p.slug) ? ' checked' : ''}><span>${esc(p.nazwa || p.slug)}${p.referencje ? '' : ' <small>(bez zdjęć)</small>'}</span></label>`).join('')
     || '<span class="muted">Brak person.</span>';
+  // 3.5: pierwsza klatka - modele z backendu, folder z prawdziwymi zdjęciami miejsc
+  const selKl = $('#g-kl-model');
+  if (selKl) {
+    selKl.innerHTML = (d.modele_klatki || []).map(m => `<option value="${esc(m.id)}">${esc(m.nazwa)} – ${esc(m.opis)}</option>`).join('');
+    ustawSelectWartosc(selKl, (u.pierwsza_klatka || {}).model || 'gpt_image_2_5');
+  }
+  const tlaEl = $('#g-kl-tla');
+  if (tlaEl) tlaEl.textContent = `Prawdziwe tła: wrzuć zdjęcia z telefonu (np. ze sklepu pod blokiem) do ${(d.folder_tel || 'Pulpit\\ROLKI AI\\tla') + '\\<miejsce>'} – np. „sklep_osiedlowy”, „dyskont”, „tramwaj”. Wtedy wstawię personę w TO zdjęcie, a napisy zostaną prawdziwe.`
+    + (d.ma_klucz_openrouter ? '' : ' Sprawdzanie zdjęcia przez AI ruszy po wklejeniu klucza OpenRouter (Konta).');
   const s = d.z_promptu || {};
   $('#g-zp-stan').textContent = s.tekst ? `${s.tekst}${(s.persony || []).length ? ` Persony: ${s.persony.map(x => nazwaPersony(x) || x).join(', ')}.` : ''}` : '';
   // 3.4: rolki z Instagrama (profile w textarea - po jednym w linii; select „do której persony”)
@@ -4003,6 +4069,7 @@ document.addEventListener('click', async e => {
       case 'zp-przywroc': state.zp.reczne = {}; await zpAsystent(true); break;
       case 'ocena': await ocenRolke(id, el.dataset.ocena); break;
       case 'dograj-glos': await akcja({ typ: 'dograj_glos', id }, 'dogrywam komentarz'); break;
+      case 'klatka-uzyj': await uzyjKlatki(id); break;
       // zdjęcia, lipsync
       case 'fokus-zdjecia': { const inp = $('#zd-prompt'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } break; }
       case 'usun-zdjecie': await usunZdjecie(id); break;
@@ -4081,7 +4148,8 @@ document.addEventListener('change', e => {
   else if (el.matches && el.matches('select[data-stroj-pomysl]')) zmienStrojRolki(Number(el.dataset.strojPomysl), el.value).catch(err => { bladToast(err); ladujRolki(false).catch(() => {}); });
   else if (el.closest && el.closest('#form-zp') && el.id !== 'zp-prompt') {
     if (el.id === 'zp-model') renderZpModel();
-    if (el.id === 'zp-miejsce') { delete state.zp.reczne.obiekt; renderZpObiekt(); }
+    if (el.id === 'zp-miejsce') { delete state.zp.reczne.obiekt; renderZpObiekt(); renderZpKlatkaInfo(); }
+    if (el.id === 'zp-klatka') renderZpKlatkaInfo();
     if (el.id === 'zp-nazwy') renderZpObiekt($('#zp-obiekt').value);
     if (el.id === 'zp-nagrywa') { renderZpKomentarze($('#zp-komentarz').value === 'wlasny' ? $('#zp-komentarz-tekst').value.trim() : $('#zp-komentarz').value); renderZpGlosInfo(); }
     if (el.id === 'zp-stroj') { $('#zp-stroj-tekst').hidden = el.value !== 'wlasny'; renderZpStrojMini(); }

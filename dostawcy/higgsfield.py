@@ -155,13 +155,17 @@ def zlec(z, klucz=None, znacznik=None, log=None):
     if swiezy and not obraz_id:
         # bez swiezego id nie odnajdziemy joba po przerwaniu - nic nie wysylamy (job na pewno nie powstal)
         raise BladDostawcy(f"brak pliku {os.path.basename(str(swiezy))} - nic nie wyslalem")
+    klatka_id = None
     for rola in ("audio", "start_image", "end_image"):
         if media.get(rola) and os.path.isfile(str(media[rola])):
-            media[rola] = wgraj(media[rola])
+            media[rola] = wgraj(media[rola])            # swiezy upload per proba (bez cache)
+            if rola == "start_image":
+                klatka_id = media[rola]                 # 3.5: unikalne id pierwszej klatki - po nim odnajdziemy job wideo
     if znacznik:
-        # od tej chwili job MOZE powstac (wszystko juz wgrane) - po przerwaniu szukamy go po wideo_id / obraz_id, zamiast
-        # wysylac drugi
-        znacznik(wysylam=True, wideo_id=wideo_id, **({"obraz_id": obraz_id} if obraz_id else {}))
+        # od tej chwili job MOZE powstac (wszystko juz wgrane) - po przerwaniu szukamy go po wideo_id / obraz_id / klatka_id,
+        # zamiast wysylac drugi
+        znacznik(wysylam=True, wideo_id=wideo_id, **({"obraz_id": obraz_id} if obraz_id else {}),
+                 **({"klatka_id": klatka_id} if klatka_id else {}))
     try:
         job = hf.generuj(model, params, media, wait=False)
     except hf.HiggsfieldBlad as e:
@@ -209,11 +213,13 @@ def koszt_joba(wynik, wycena=None):
     return int(wycena or 0)
 
 
-def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, **_):
+def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, klatka_id=None, **_):
     """Szuka na `generate list` joba wyslanego przez przerwane wysylanie: ten sam model i ten sam wgrany filmik (media
     role=video, data.id == wideo_id - id jest swiezy dla kazdej proby, wiec BEZ filtra czasu: zegar komputera i serwera
     moze sie rozjechac) albo - bez filmiku - ten sam prompt i utworzony nie wczesniej niz `od` - 2 min.
     obraz_id (swap zdjec, 3.2): job obrazu (`generate list --image`), w ktorego mediach jest swiezo wgrane zdjecie usera.
+    klatka_id (3.5, rolka z promptu z pierwsza klatka): job wideo, w ktorego mediach jest swiezo wgrana klatka (start_image) -
+    sprawdzane najpierw; gdy lista nie pokazuje takiego medium, zostaje dawne szukanie po prompcie i czasie.
     Zwraca znormalizowany job albo None. Rzuca BladDostawcy, gdy listy nie da sie pobrac (wtedy NIE wolno wysylac ponownie)."""
     from datetime import datetime, timedelta, timezone
     try:
@@ -229,6 +235,14 @@ def znajdz(model, wideo_id=None, prompt=None, od=None, pomin=(), obraz_id=None, 
         except ValueError:
             granica = None
     drut = _prompt_na_drut(prompt) if prompt else None
+    if klatka_id and not obraz_id:
+        for job in lista if isinstance(lista, list) else []:
+            if not isinstance(job, dict) or hf.job_id_z(job) in pomin:
+                continue
+            params = job.get("params") if isinstance(job.get("params"), dict) else {}
+            media = params.get("medias") if isinstance(params.get("medias"), list) else []
+            if str(klatka_id) in {str((m.get("data") or {}).get("id")) for m in media if isinstance(m, dict)}:
+                return _normalizuj(job)
     for job in lista if isinstance(lista, list) else []:
         if not isinstance(job, dict) or hf.job_id_z(job) in pomin:
             continue

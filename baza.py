@@ -625,6 +625,12 @@ USTAWIENIA_GLOBALNE_DOMYSLNE = {
         "do_person": "round-robin", # round-robin (po kolei po personach z referencjami) albo slug konkretnej persony
         "pobieranie_przez_apify": False,  # HACZYK: pobieraj plik przez Apify (gdy CDN IG blokuje Mullvada) - NIESPRAWDZONE
     },
+    "pierwsza_klatka": {            # 3.5: rolki z promptu - najpierw ZDJECIE (klatka startowa), potem wideo od tej klatki
+        "wlaczona": True,           # False = stary sposob (sam prompt, t2v/omni bez klatki)
+        "model": "gpt_image_2_5",   # gpt_image_2_5 (najlepiej pisze tekst) | nano_banana_pro | gpt_image_2 | seedream_v5_pro
+        "kontrola": True,           # darmowy model wizyjny OpenRouter ocenia klatke przed wideo (bez klucza - bez kontroli)
+        "max_dodatkowych": 2,       # ile NOWYCH klatek, gdy kontrola odrzuci (kazda ~3 kr, liczona w budzecie); 0-2
+    },
 }
 
 
@@ -1178,6 +1184,11 @@ def znane_job_id(dostawca=None):
                 wynik.add(str(marker["job_id"]))
             for w in p.get("proby") or []:
                 if isinstance(w, dict) and w.get("job_id") and (dostawca is None or w.get("dostawca") == dostawca):
+                    wynik.add(str(w["job_id"]))
+            # 3.5: joby pierwszej klatki rolek z promptu (zawsze Higgsfield)
+            kl = p.get("klatka") if isinstance(p.get("klatka"), dict) else {}
+            for w in (kl.get("proby") or []) + (kl.get("proby_poprzednie") or []):
+                if isinstance(w, dict) and w.get("job_id") and dostawca in (None, "higgsfield"):
                     wynik.add(str(w["job_id"]))
     return wynik
 

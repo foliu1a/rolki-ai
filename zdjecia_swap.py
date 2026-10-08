@@ -251,13 +251,13 @@ def nazwa_zrodla(plik):
     return _bezpieczna_nazwa(_PREFIKS_CZASU.sub("", stem))[:60]
 
 
-def zapisz_zrodlo(slug, zrodlo, nazwa=None):
+def zapisz_zrodlo(slug, zrodlo, nazwa=None, folder=None):
     """Wstawione zdjecie -> modelki/<slug>/swap_zrodla/<czas>_<nazwa>.jpg|png: obrocone wg EXIF, bez metadanych (GPS z telefonu nie
     leci do Higgsfielda), dluzszy bok max MAX_BOK_ZRODLA. zrodlo = sciezka albo plik-strumien. ValueError = to nie jest zdjecie.
-    Nic nie wysyla - to tylko lokalna kopia."""
+    Nic nie wysyla - to tylko lokalna kopia. folder (3.5): inny cel kopii (tla usera do pierwszej klatki: modelki/<slug>/tla_kopie)."""
     nazwa = nazwa or (zrodlo if isinstance(zrodlo, str) else "zdjecie.jpg")
     stem = _bezpieczna_nazwa(os.path.splitext(os.path.basename(str(nazwa)))[0])[:60]
-    folder = baza.folder_swap_zrodel(slug)
+    folder = folder or baza.folder_swap_zrodel(slug)
     try:
         from PIL import Image, ImageOps
     except ImportError:

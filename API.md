@@ -160,6 +160,19 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
   promptu dopisuje ją do `modelki/<slug>/asystent_archiwum.json` (gotowa bez oceny = słaba).
 - Akcja `{"typ": "dograj_glos", "id": 7}` – komentarz ElevenLabs do gotowej rolki z głosem `tts` (tylko znaki ElevenLabs).
   Karta rolki: `z_promptu_dlaczego`, `mozna_dograc_glos`, `ocena`, `glos_dograny`, `glos_blad`.
+- **3.5 pierwsza klatka** (rolka z promptu: najpierw zdjęcie, potem wideo od niego). Nowe opcje wszystkich endpointów z-promptu:
+  `klatka: "wl" | "wyl"` (brak = `pierwsza_klatka.wlaczona` z ustawień wspólnych), `klatka_model` (`gpt_image_2_5` | `nano_banana_pro`
+  | `gpt_image_2` | `seedream_v5_pro`), `tlo: "auto" | "bez" | "<plik z Pulpit/ROLKI AI/tla/<miejsce>>"` (`ustalone.tlo` zamraża
+  wybór). `GET /api/z-promptu` → dodatkowo `klatka: {modele: [[id, nazwa, opis]], domyslne: {wlaczona, model, kontrola,
+  max_dodatkowych}, tla: {folder, miejsca: {id_miejsca: liczba_zdjęć}}, kontrola_ai: bool}`. Wycena → `kr` = wideo + klatka (w górę,
+  np. 70 + 3 = 73), `kr_wideo`, `kr_klatka` (ułamek, np. 2.75), `kr_max` (z dodatkowymi klatkami, gdy działa kontrola AI), `klatka:
+  {model, nazwa_modelu, prompt, znaki, obrazy, tlo, folder_tel, kontrola, kontrola_ustawiona, max_dodatkowych}` albo `null`.
+  `POST /api/z-promptu` wymaga `kr` = ta suma. Karta rolki: `ma_klatke`, `klatka_url` (miniatura klatki), `klatka_info {ok, powod,
+  zaakceptowana, proby, kr, model, tlo, kontrola}`, `mozna_uzyc_klatki`; `w_toku_opis` zaczyna się od „pierwsza klatka:” w fazie
+  zdjęcia. `koszt` gotowej rolki = wideo + klatki.
+- `POST /api/pomysly/<id>/klatka {"uzyj": true}` (3.5) – „Zrób wideo z tej klatki”: klatka odrzucona przez kontrolę AI idzie jednak
+  do wideo (rolka `blad` → `nowy`, nic nie wysyła; wideo dopiero po „Zrób tę rolkę” z ceną). Bez `uzyj` → 400, rolka w toku → 409.
+  `POST /api/pomysly/<id>/ponow` przy klatce odrzuconej przez kontrolę = następnym razem nowe klatki; klatka dobra zostaje.
 - Konta: `openrouter` (klucz `sk-or-…`, test = `GET /api/v1/key`, darmowe). `POST /api/konta` odrzuca klucz ElevenLabs bez `sk_`
   i OpenRouter bez `sk-or-` (400).
 
@@ -328,7 +341,11 @@ sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Hi
   `{"zdjecia_rownolegle": 1-8}` / `{"autopilot_z_promptu": {dowolne z pól}}` (dziennie 0-20, 0 = wyłączone, ŁĄCZNIE dla person;
   model `seedance_2_5` | `wan3_0_prime`; persony = istniejące slugi; od_godziny GG:MM) / `{"autopilot_rolki_ig": {dowolne z pól}}`
   (3.4: `profile` = lista albo tekst po @ w linii/przecinku; dziennie 0-50; kandydatow_na_profil 1-50; do_person `round-robin`|slug)
+  / `{"pierwsza_klatka": {dowolne z pól}}` (3.5: `wlaczona` bool, `model` jak `klatka_model`, `kontrola` bool, `max_dodatkowych` 0-2;
+  GET oddaje też `modele_klatki [{id, nazwa, opis}]`, `folder_tel` (Pulpit/ROLKI AI/tla), `ma_klucz_openrouter`)
   – złe wartości → 400. Limitów budżetu tu nie ma.
+- 3.5: każdy przebieg autopilota (i start panelu) dokańcza rolki ORAZ zdjęcia w toku WSZYSTKICH person, także bez włączonego
+  autopilota (ten sam job, 0 kr). Rolka z pierwszą klatką przerwana w fazie zdjęcia: dokańcza się tylko klatka, rolka wraca do `nowy`.
 - Autopilot rolek z promptu (3.3): co przebieg (po rolkach ze swapu), od `od_godziny`, aż `dziennie` rolek z promptu autopilota
   dziś (dzień lokalny, osobny licznik od swapu): persony na zmianę → losowy pomysł + asystent → darmowa wycena i bezpieczniki →
   ta sama ścieżka co „Zrób rolkę” → ElevenLabs, Media Tool, Telegram. Max 2 nieudane dziennie; pominięcie (limit/saldo) = wpis

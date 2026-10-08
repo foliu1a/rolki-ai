@@ -39,6 +39,9 @@ def dane(tmp_path, monkeypatch):
     # rolki z promptu robione przez autopilota (3.3, domyslnie 1 dziennie od 10:00) - w testach wylaczone, zeby przebieg
     # autopilota nie generowal nic ponad to, co sprawdza dany test (o 10:00 wynik zalezalby od godziny); testy 3.3 wlaczaja same
     baza.zapisz_ustawienia_globalne(autopilot_z_promptu={"dziennie": 0})
+    # pierwsza klatka (3.5, domyslnie WL.) - w starych testach wylaczona (rolka z promptu jak dawniej: jedno zlecenie wideo);
+    # testy 3.5 (test_pierwsza_klatka.py) wlaczaja ja same
+    baza.zapisz_ustawienia_globalne(pierwsza_klatka={"wlaczona": False})
     import time
     monkeypatch.setattr(time, "sleep", lambda s: None)
     from dostawcy import wavespeed, yapper
@@ -148,7 +151,9 @@ class UdawaneCLI:
             wynik.setdefault("created_at", datetime.now(timezone.utc).isoformat())
             wynik.setdefault("params", {"prompt": (params or {}).get("prompt"),
                                         "medias": ([{"role": "video", "data": {"id": wideo}}] if wideo else [])
-                                        + [{"role": "image", "data": {"id": o}} for o in obrazy]})
+                                        + [{"role": "image", "data": {"id": o}} for o in obrazy]
+                                        + [{"role": r, "data": {"id": (media or {})[r]}} for r in ("start_image", "end_image")
+                                           if (media or {}).get(r)]})
             self.serwer[wynik["id"]] = wynik
         if wait:
             return wynik

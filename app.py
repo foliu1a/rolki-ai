@@ -20,6 +20,7 @@ import baza
 import dostawcy
 import fabryka
 import asystent
+import pierwsza_klatka
 import scenariusz
 import sekrety
 import zdjecia_swap
@@ -34,7 +35,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.4"
+WERSJA = "3.5"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -574,13 +575,28 @@ def _pomysl_dla_panelu(p):
         p["z_promptu_dlaczego"] = (zp.get("asystent") or {}).get("dlaczego") or ""
         p["mozna_dograc_glos"] = (zp.get("glos") == "tts" and bool(zp.get("komentarz")) and not p.get("glos_dograny")
                                   and p.get("status") in ("gotowe", "wygenerowany"))
+        # 3.5: pierwsza klatka - miniatura (od czego ruszylo wideo), ocena kontroli, "Zrob wideo z tej klatki"
+        kl_cfg = zp.get("klatka") if isinstance(zp.get("klatka"), dict) else None
+        st = p.get("klatka") if isinstance(p.get("klatka"), dict) else {}
+        p["ma_klatke"] = bool(kl_cfg)
+        if kl_cfg:
+            plik = st.get("plik") if st.get("plik") and os.path.isfile(st.get("plik") or "") else None
+            p["klatka_url"] = _url_pliku(plik) if plik else None
+            p["klatka_info"] = {"ok": st.get("ok"), "powod": st.get("powod") or "", "zaakceptowana": bool(st.get("zaakceptowana")),
+                                "proby": len([x for x in st.get("proby") or [] if x.get("job_id")]), "kr": st.get("kr") or 0,
+                                "model": kl_cfg.get("nazwa_modelu") or kl_cfg.get("model"),
+                                "tlo": os.path.basename(kl_cfg.get("tlo_oryginal") or kl_cfg.get("tlo") or "") or None,
+                                "kontrola": st.get("zrodlo") or ""}
+            p["mozna_uzyc_klatki"] = bool(plik and st.get("ok") is False and not st.get("zaakceptowana")
+                                          and p.get("status") in ("blad", "nowy"))
         p.pop("info_zrodla", None)
     # rozdzielczosc tej rolki (zasada: <= 8 s -> 1080p, dluzsze -> 720p) - zapisana przy generacji albo wyliczona z dlugosci klipu
     if not p.get("resolution") and fabryka.czas_klipu(p):
         p["resolution"] = fabryka.rozdzielczosc_dla_czasu(fabryka.czas_klipu(p))
     marker = p.get("w_toku") if p.get("status") == "w_toku" else None
     if marker:
-        p["w_toku_opis"] = (f"{marker.get('dostawca')} {marker.get('model') or ''}".strip()
+        p["w_toku_opis"] = (("pierwsza klatka: " if marker.get("faza") == "klatka" else "")
+                            + f"{marker.get('dostawca')} {marker.get('model') or ''}".strip()
                             + (f", job {marker['job_id']}" if marker.get("job_id") else ", wysylanie"))
     if p.get("zapas") and p.get("model"):
         p["zapas_opis"] = f"zrobione na {p['model']} (zapas)"
@@ -645,10 +661,29 @@ def api_ponow_pomysl(pid):
         zapas = baza.ustawienia_modelki(aktywna).get("zapas_nsfw") or []
         krok = 1 if (p.get("powod") in fabryka.POWODY_ZAPASU and zapas and not fabryka.z_promptu(p)
                      and (not p.get("stroj") or fabryka.zapas_dla_stroju(zapas))) else None
+        if fabryka.z_promptu(p):
+            pierwsza_klatka.wyczysc_odrzucona(aktywna, pid)     # 3.5: klatka odrzucona przez kontrole -> nowe klatki
         pomysl = baza.aktualizuj_pomysl(aktywna, pid, status="nowy", notatki="", krok_startowy=krok)
     except ValueError as e:
         return _blad(e)
     return _ok(pomysl=_pomysl_dla_panelu(pomysl), od_zapasu=bool(krok))
+
+
+@app.route("/api/pomysly/<int:pid>/klatka", methods=["POST"])
+def api_klatka_pomyslu(pid):
+    """3.5: {"uzyj": true} = "Zrob wideo z tej klatki" - klatka odrzucona przez kontrole AI idzie jednak do wideo (rolka wraca
+    do 'nowy'; wideo dopiero po "Zrob te rolke" z cena). Nic nie wysyla."""
+    try:
+        aktywna = _wymaga_modelki()
+        p = baza.pomysl(aktywna, pid)
+        if p.get("status") == "w_toku":
+            return _blad(GENERUJE_SIE, 409)
+        if not (request.json or {}).get("uzyj"):
+            return _blad("Podaj {\"uzyj\": true}.")
+        pomysl = pierwsza_klatka.akceptuj(aktywna, pid)
+    except ValueError as e:
+        return _blad(e)
+    return _ok(pomysl=_pomysl_dla_panelu(pomysl))
 
 
 @app.route("/api/pomysly/<int:pid>/stroj", methods=["POST"])
@@ -751,7 +786,7 @@ def api_usun_pomysl(pid):
 
 OPCJE_Z_PROMPTU = ("pomysl_id", "tekst", "miejsce", "model", "dlugosc", "rozdzielczosc", "wlosy", "stroj", "stroj_tekst", "reakcja",
                    "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone", "obiekt", "nazwy", "glos", "wymowa",
-                   "asystent", "nagrywa")
+                   "asystent", "nagrywa", "klatka", "klatka_model", "tlo")
 
 
 def _slug_z_promptu(dane):
@@ -789,6 +824,10 @@ def api_z_promptu_katalog():
     kat["glos_tts"] = _stan_tts()
     kat["stroje_biblioteka"] = _biblioteka_dla_panelu()
     kat["asystent_llm"] = bool(sekrety.klucz("openrouter"))
+    # 3.5: pierwsza klatka - modele, domyslne (ustawienia wspolne), gdzie user wrzuca prawdziwe zdjecia miejsc
+    kat["klatka"] = {"modele": [[k, v["nazwa"], v["opis"]] for k, v in pierwsza_klatka.MODELE.items()],
+                     "domyslne": pierwsza_klatka.ustawienia(), "tla": pierwsza_klatka.stan_tel(),
+                     "kontrola_ai": bool(sekrety.klucz("openrouter"))}
     return _ok(**kat)
 
 
@@ -1172,7 +1211,9 @@ def _globalne_dla_panelu():
             "persony": [{"slug": s, "nazwa": baza.profil_modelki(s).get("nazwa") or s, "referencje": len(baza.sciezki_referencji(s))}
                         for s in baza.lista_modelek()],
             "z_promptu": autopilot.stan_z_promptu(wlaczony=_autopilot_wlaczony()), "max_rownolegle": zdjecia_swap.ROWNOLEGLE_MAX,
-            "rolki_ig": autopilot.stan_rolki_ig(wlaczony=_autopilot_wlaczony()), "ma_klucz_apify": bool(sekrety.klucz("apify"))}
+            "rolki_ig": autopilot.stan_rolki_ig(wlaczony=_autopilot_wlaczony()), "ma_klucz_apify": bool(sekrety.klucz("apify")),
+            "modele_klatki": [{"id": k, "nazwa": v["nazwa"], "opis": v["opis"]} for k, v in pierwsza_klatka.MODELE.items()],
+            "folder_tel": pierwsza_klatka.folder_tel(), "ma_klucz_openrouter": bool(sekrety.klucz("openrouter"))}
 
 
 @app.route("/api/ustawienia/globalne")
@@ -1199,6 +1240,8 @@ def api_zapisz_ustawienia_globalne():
                 zmiany[k] = autopilot.sprawdz_ustawienia_z_promptu(v)
             elif k == "autopilot_rolki_ig":
                 zmiany[k] = autopilot.sprawdz_ustawienia_rolki_ig(v)
+            elif k == "pierwsza_klatka":
+                zmiany[k] = pierwsza_klatka.sprawdz_ustawienia(v)
             else:
                 return _blad(f"Nieznane ustawienie: {k}")
     except (TypeError, ValueError) as e:
@@ -1902,6 +1945,7 @@ def main():
         return 0
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     _foldery_na_pulpicie()
+    print(f"  prawdziwe zdjecia miejsc (pierwsza klatka): {os.path.join(pierwsza_klatka.przygotuj_foldery_tel(), '<miejsce>')}")
     threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
     # chipy strony Zdjecia wg aktualnego schematu modeli (darmowe `model get`); bez CLI zostaje kopia z kodu
     threading.Thread(target=zdjecia_swap.odswiez_schematy, daemon=True, name="schematy-swap").start()

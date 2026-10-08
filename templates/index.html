@@ -295,6 +295,14 @@
               </div>
               <small class="pole-info" id="zp-model-info"></small>
 
+              <!-- 3.5: pierwsza klatka - najpierw zdjęcie (persona daleko, prawdziwe polskie napisy), potem wideo od tego zdjęcia -->
+              <div class="zp-siatka">
+                <div class="pole"><label for="zp-klatka">Pierwsza klatka</label><select id="zp-klatka" data-zp-pole="klatka"></select></div>
+                <div class="pole"><label for="zp-klatka-model">Model pierwszej klatki</label><select id="zp-klatka-model" data-zp-pole="klatka_model"></select></div>
+                <div class="pole"><label for="zp-tlo">Tło klatki</label><select id="zp-tlo" data-zp-pole="tlo"></select></div>
+              </div>
+              <small class="pole-info" id="zp-klatka-info"></small>
+
               <div class="pole">
                 <label for="zp-gotowe">Gotowe pomysły</label>
                 <select id="zp-gotowe" aria-label="Gotowe pomysły"><option value="">…wybierz gotowy pomysł</option></select>
@@ -338,6 +346,8 @@
               <details class="zp-prompt" id="zp-prompt-wrap" hidden>
                 <summary><span class="ikona" data-ikona="chevron-dol"></span><span>Prompt dla AI (<span id="zp-znaki">0</span> znaków)</span></summary>
                 <textarea id="zp-prompt" class="mono" rows="14" readonly spellcheck="false"></textarea>
+                <label class="zp-prompt-klatki-etykieta" for="zp-prompt-klatki" id="zp-prompt-klatki-etykieta" hidden>Prompt pierwszej klatki (zdjęcie, od którego rusza wideo)</label>
+                <textarea id="zp-prompt-klatki" class="mono" rows="10" readonly spellcheck="false" hidden></textarea>
                 <small class="pole-info" data-zaawansowane>Tryb pełny: możesz go poprawić przed „Zrób rolkę” (cena się nie zmienia, numery zdjęć &lt;&lt;&lt;image_N&gt;&gt;&gt; zostaw).</small>
               </details>
 
@@ -793,6 +803,21 @@
               <div class="callout info" id="autostart-info" data-zaawansowane><span class="ikona" data-ikona="info"></span><span>Na pulpicie masz skrót <b>„Rolki AI”</b> (tworzy go <b>aktualizuj.bat</b>; jeśli go nie ma, kliknij dwa razy <b>skrot-na-pulpit.bat</b>). Chcesz, żeby fabryka włączała się sama po uruchomieniu komputera? Kliknij dwa razy <b>autostart.bat</b> (nie wymaga uprawnień administratora). Wyłączenie: <b>autostart-usun.bat</b>.</span></div>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
             </form>
+            <!-- 3.5: pierwsza klatka rolek z promptu - wspólne dla wszystkich person (ustawienia_globalne.json) -->
+            <form class="sekcja-tresc" data-ustawienia-globalne novalidate id="form-pierwsza-klatka">
+              <div class="podsekcja">
+                <h3>Rolki z promptu – pierwsza klatka</h3>
+                <p class="muted">Najpierw robię <b>zdjęcie</b> (ok. 3 kr): persona daleko od aparatu i częściowo zasłonięta, prawdziwe polskie wnętrze i napisy po polsku (ceny z przecinkiem). Dopiero od tego zdjęcia rusza wideo – miejsce i napisy już się nie psują. Każdą rolkę możesz też przestawić w „Z promptu → Zmień szczegóły”.</p>
+                <label class="check"><input type="checkbox" name="pierwsza_klatka.wlaczona"><span>Najpierw zdjęcie, potem wideo (zalecane)<small>Wyłączone = stary sposób: wideo z samego opisu.</small></span></label>
+                <div class="pola-siatka">
+                  <div class="pole"><label for="g-kl-model">Model zdjęcia</label><select id="g-kl-model" name="pierwsza_klatka.model"></select><small class="pole-info">GPT Image 2.5 najlepiej pisze polskie napisy.</small></div>
+                  <div class="pole"><label for="g-kl-dod">Ile razy powtórzyć złe zdjęcie</label><input type="number" id="g-kl-dod" name="pierwsza_klatka.max_dodatkowych" min="0" max="2" data-domyslne="2"><small class="pole-info">Każde kolejne ok. 3 kr. 0 = bez powtórek.</small></div>
+                </div>
+                <label class="check"><input type="checkbox" name="pierwsza_klatka.kontrola"><span>Sprawdź zdjęcie, zanim wydam kredyty na wideo<small>Darmowy model AI (OpenRouter) patrzy, czy persona jest daleko, czy jest jedna i czy napisy są po polsku. Bez klucza OpenRouter – bez sprawdzania.</small></span></label>
+                <p class="muted" id="g-kl-tla"></p>
+                <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
+              </div>
+            </form>
             <!-- rolki z promptu robione przez autopilota (3.3) - wspólne dla wszystkich person (ustawienia_globalne.json) -->
             <form class="sekcja-tresc" data-ustawienia-globalne novalidate id="form-autopilot-z-promptu">
               <div class="podsekcja">
@@ -800,7 +825,7 @@
                 <p class="muted">Autopilot sam wymyśla i robi rolki jak „Losuj” w zakładce <a href="#z-promptu">Z promptu</a>: miejsce, strój z biblioteki, kamera z ukrycia, reakcja ludzi i komentarz zza kamery (ElevenLabs). Potem pranie w Media Tool, folder „tu rolki zrobione” i Telegram. Pilnuje wspólnego dziennego limitu kredytów; gdy filtr odrzuci 2 rolki w ciągu dnia – próbuje dopiero jutro.</p>
                 <div class="pola-siatka">
                   <div class="pole"><label for="g-zp-dziennie">Rolki z promptu dziennie (łącznie)</label><input type="number" id="g-zp-dziennie" name="autopilot_z_promptu.dziennie" min="0" max="20" data-domyslne="1"><small class="pole-info">Razem dla wszystkich person, nie na każdą. 0 = wyłączone.</small></div>
-                  <div class="pole"><label for="g-zp-model">Model</label><select id="g-zp-model" name="autopilot_z_promptu.model"><option value="seedance_2_5">Seedance 2.5 · 720p · 10 s (ok. 70 kr)</option><option value="wan3_0_prime">Wan 3.0 Prime · 720p · 10 s (ok. 30 kr)</option></select><small class="pole-info">Seedance – najlepsza twarz. Wan – ponad 2× taniej.</small></div>
+                  <div class="pole"><label for="g-zp-model">Model</label><select id="g-zp-model" name="autopilot_z_promptu.model"><option value="seedance_2_5">Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)</option><option value="wan3_0_prime">Wan 3.0 Prime · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)</option></select><small class="pole-info">Seedance – najlepsza twarz. Wan – ponad 2× taniej.</small></div>
                   <div class="pole"><label for="g-zp-od">Nie wcześniej niż o</label><input type="time" id="g-zp-od" name="autopilot_z_promptu.od_godziny" step="60"><small class="pole-info">Godzina na tym komputerze.</small></div>
                 </div>
                 <div class="pole"><span class="etykieta-pola">Persony – na zmianę, po kolei</span><div class="g-zp-persony" id="g-zp-persony"></div><small class="pole-info">Nic nie zaznaczone = wszystkie, które mają zdjęcia. Robi tylko wtedy, gdy autopilot jest włączony (Start).</small></div>

@@ -19,6 +19,12 @@ Zasady (sprawdzone na przewodniku Seedance 2.5 i na rolkach usera z 6.10, PROJEK
   prompcie, zdjecie stroju (gdy jest i model ma miejsce) jako ostatni obraz z jasnym zdaniem "tylko ubranie - ignoruj wlosy, twarz,
   skore, tatuaze i sylwetke osoby/manekina"; sylwetka persony (profil.sylwetka) tuz po wlosach/wzroscie; model wideo NIGDY nie
   mowi (zawsze DZWIEK_BEZ_MOWY) - komentarz mowi osoba nagrywajaca (`nagrywa`: chlopak / dziewczyna, gramatyka linii pod nia).
+- (zp-4, 3.5, feedback po #7 Noemi: kamera ~2 m, wymyslone wnetrze, "OTVORNE"/"KAVA"/"19.99") PIERWSZA KLATKA: zbuduj() oddaje
+  tez `klatka` = prompt ZDJECIA (prompt_klatki: persona 6-10 m, 1/4-1/3 kadru, zaslonieta pierwszym planem, KLATKA_MIEJSC = polskie
+  realia i napisy, ceny "4,99 zł", bez marek) + zdjecia (tlo usera z Pulpit/ROLKI AI/tla/<miejsce> jako image 1, persona, stroj);
+  prompt wideo z klatka (SZABLON_*_KLATKA) rusza DOKLADNIE od klatki i nie rusza napisow. Kamery z ukrycia daleko (kolejka = koniec
+  kolejki 6-8 m, DYSTANS_UKRYTEJ) takze bez klatki. Opcje: klatka "wl"/"wyl" (domyslnie pierwsza_klatka.ustawienia()), klatka_model,
+  tlo "auto"/"bez"/<plik>. Pieniadze i generacja klatki: pierwsza_klatka.py.
 """
 import os
 import random
@@ -28,7 +34,7 @@ from datetime import date
 
 import baza
 
-WERSJA_SZABLONU = "zp-3"
+WERSJA_SZABLONU = "zp-4"
 
 # ---------------- modele (wszystkie przez CLI Higgsfield, wyceny `generate cost` z 2026-10-07) ----------------
 
@@ -38,18 +44,21 @@ MODELE = {
         "mode": "omni_reference", "szablon": "pelny", "tokeny": True, "max_obrazow": 30,
         "dlugosci": (8, 10, 15), "rozdzielczosci": ("480p", "720p", "1080p"),
         "parametry": {"bitrate_mode": "high"}, "generate_audio": True, "limit_znakow": 8000, "zalecane_znaki": 5000,
+        "klatka": {"mode": "omni_reference", "refy": True},     # start_image + image_references razem (max 30 obrazow)
     },
     "wan3_0_prime": {
         "nazwa": "Wan 3.0 Prime – taniej", "opis": "ok. 2,3× taniej (10 s 720p ≈ 30 kr); twarz i polska mowa do sprawdzenia",
         "mode": None, "szablon": "krotki", "tokeny": False, "max_obrazow": 10,
         "dlugosci": (8, 10, 15), "rozdzielczosci": ("480p", "720p", "1080p"),
         "parametry": {}, "generate_audio": True, "limit_znakow": 5000, "zalecane_znaki": 3000,
+        "klatka": {"mode": None, "refy": False},                # regula: start_image NIE laczy sie z referencjami
     },
     "gemini_omni_flash_1_1": {
         "nazwa": "Gemini Omni Flash – taniej, max 10 s", "opis": "10 s 720p ≈ 30 kr, najtańsze 1080p; max 7 zdjęć",
         "mode": "reference-to-video", "szablon": "krotki", "tokeny": False, "max_obrazow": 7,
         "dlugosci": (8, 10), "rozdzielczosci": ("720p", "1080p"),
         "parametry": {}, "generate_audio": None, "limit_znakow": 4000, "zalecane_znaki": 2600,
+        "klatka": {"mode": "image-to-video", "refy": False},    # image-to-video: start_image bez referencji
     },
 }
 MODEL_DOMYSLNY = "seedance_2_5"
@@ -382,12 +391,14 @@ KAMERY = {
     "stoi_obok": ("Ktoś stoi kilka metrów obok", "standing 3-4 m away",
                   "The person filming stays in place and only turns the phone to keep her in frame, sometimes losing her for a "
                   "moment behind passers-by."),
-    "siedzi_naprzeciw": ("Siedzi naprzeciwko (tramwaj, pociąg)", "sitting a few seats away from her",
+    "siedzi_naprzeciw": ("Siedzi daleko naprzeciwko (tramwaj, pociąg)", "sitting at the other end of the carriage, 6-8 m away from her",
                          "The phone rests low near their lap, tilted up at her; the view shakes with the vehicle and is partly "
-                         "blocked by other passengers' shoulders."),
-    "kolejka": ("Stoi za nią w kolejce (ukradkiem)", "standing two people behind her in the queue",
-                "The phone is held at chest height between other people's shoulders; at about {t1} s the person filming leans "
-                "sideways once to get a clearer view."),
+                         "blocked by other passengers' shoulders and heads; she stays a small figure and never becomes a close-up."),
+    # 3.5 (feedback usera po #7 Noemi: "kamera za blisko, ok. 2 m, wypelnia kadr"): z kolejki = z KONCA kolejki / od drzwi, daleko
+    "kolejka": ("Stoi daleko za nią w kolejce (ukradkiem)", "standing far back at the end of the queue or by the door, 6-8 m behind her",
+                "The phone is held at chest height between other people's shoulders, which keep covering the edges of the frame; at "
+                "about {t1} s the person filming leans sideways once to get a clearer view; she stays a small figure in the "
+                "distance and never becomes a close-up."),
     # z ukrycia (feedback usera 2026-10-07): tak wygladaja prawdziwe nagrania "ludzie reaguja" - nagrywajacy udaje, ze nie nagrywa,
     # telefon nisko, czesc kadru zaslonieta, z daleka, lekki zoom, nigdy nie podchodzi
     "ukradkiem": ("Ukradkiem z daleka (udaje, że pisze SMS-a)", "standing still 6-10 m away, pretending to read their own phone",
@@ -398,7 +409,7 @@ KAMERY = {
                    "The blurred edge of the pillar or shelf, very close to the lens, covers one side of the frame; the phone "
                    "peeks out at chest height; at about {t1} s a short 2x digital zoom; the person filming stays hidden and does "
                    "not move."),
-    "z_biodra": ("Z biodra, w przejściu", "walking slowly past her 4-6 m away with the phone held low at hip height",
+    "z_biodra": ("Z biodra, w przejściu", "walking slowly past her 6-8 m away with the phone held low at hip height",
                  "The lens points at her as if by accident: the horizon is tilted, the top of her head is sometimes cut off, and "
                  "a passer-by's shoulder briefly covers half of the frame; the person filming never stops next to her."),
 }
@@ -1572,8 +1583,11 @@ KAMERA_KLASYCZNA = ("Ordinary iPhone, main 1x lens (about 24 mm), hand-held at c
                     "motion or cinematic moves.")
 KAMERA_Z_UKRYCIA = ("Ordinary iPhone (1x lens, a little digital zoom), secretly filmed by someone {OPERATOR} who pretends not to "
                     "be filming. {RUCH} They keep their distance the whole time and never walk up to her; she never notices the "
-                    "phone. Constant small hand shake, deep phone focus, the background as sharp as she is. No tripod, gimbal, "
-                    "drone, slow motion or cinematic moves.")
+                    "phone. {DYSTANS} Constant hand-held shake, deep phone focus, the background as sharp as she is. No tripod, "
+                    "gimbal, drone, slow motion or cinematic moves.")
+# 3.5: odleglosc tez w samym prompcie wideo (gdy pierwsza klatka wylaczona) - user: "kamera za blisko, wypelnia caly kadr"
+DYSTANS_UKRYTEJ = ("She stays 6-10 m away the whole clip: a small full-body figure (a quarter to a third of the frame height), "
+                   "often partly covered by something in the foreground; never a close-up or a photo-shoot framing.")
 # [Sound] (3.1): wideo ZAWSZE tylko z dzwiekiem otoczenia - nikt w kadrze nic nie mowi, komentarz osoby nagrywajacej dogrywa
 # ElevenLabs po generacji (komentarz_glos.py). Mowa z modelu wideo wylaczona: mowila nie ta osoba i przekrecala polskie slowa.
 DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}. Nobody in the clip speaks clearly: {IMIE} says nothing at all, nobody "
@@ -1595,9 +1609,52 @@ SZABLON_KROTKI = (
 )
 KAMERA_KROTKA = "ordinary iPhone, 1x lens, hand-held by someone {OPERATOR}: small shake, off-centre framing, deep focus, no cinematic moves. {RUCH}"
 KAMERA_KROTKA_UKRYTA = ("ordinary iPhone, secretly filmed by someone {OPERATOR} who pretends not to film and never walks up to "
-                        "her: {RUCH} Small shake, deep focus, no cinematic moves.")
+                        "her: {RUCH} She stays far away (6-10 m), a small figure about a quarter to a third of the frame height, "
+                        "sometimes partly covered by something in the foreground; never a close-up or a photo-shoot framing. "
+                        "Hand-held shake, deep focus, no cinematic moves.")
 DZWIEK_KROTKI_BEZ_MOWY = ("ambience only ({DZWIEKI}); nobody speaks clearly: she says nothing, nobody talks to the camera, the "
                           "person filming stays silent, people nearby only murmur indistinctly. No dialogue, no music.")
+
+
+# 3.5: wideo z pierwszej klatki - Seedance (omni_reference + start_image + zdjecia persony) rusza DOKLADNIE od klatki: miejsce,
+# ludzie, swiatlo i napisy sa juz na obrazie, wiec prompt nie opisuje ich od nowa (model nie ma czego "przepisywac"), tylko
+# pilnuje: te same napisy (nic nie zmieniac, nie dodawac, nie animowac), kamera zostaje daleko, trzesie sie w dloni, czasem cos
+# zaslania; akcja i reakcje ze scenariusza; dzwiek bez mowy (komentarz dogrywa ElevenLabs, 3.1).
+SZABLON_PELNY_KLATKA = (
+    "Real vertical phone video, not a film: a candid {SEK}-second 9:16 clip that a passer-by secretly filmed on an iPhone in "
+    "{KROTKO}, Poland, on an ordinary {PORA} in {SEZON}. It continues EXACTLY from the start frame (the first-frame image): the "
+    "same place, the same people, the same light and the same camera distance. {STRESZCZENIE}\n"
+    "[References] {REF} show one and the same young woman, {IMIE}: the only source of her face, eyes, skin, {WLOSY_REF}piercings "
+    "and body proportions. She is the small figure far from the camera in the start frame. Keep her exactly recognizable, never "
+    "blend her with anyone, only one of her.{LINIA_STROJU}\n"
+    "[{IMIE}] {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ} - exactly as in the start frame.\n"
+    "[Text] Keep every sign, label and price exactly as it is in the start frame: do not change, add, move, translate or animate "
+    "any text and do not invent new signs or prices; letters stay the same when the camera moves.\n"
+    "[Action] {AKCJA}\n"
+    "She acts like a normal person busy with her own task: relaxed posture, small weight shifts, natural hand movements; she "
+    "never looks into the lens and never poses. Bystanders react only briefly and naturally: {REAKCJE}.{SUBTELNIE}\n"
+    "[Camera] {KAMERA} The camera stays as far away as in the start frame for the whole clip: she stays a small figure and never "
+    "becomes a close-up; the phone shakes like it is held by someone quietly filming, and now and then a passer-by or the edge "
+    "of something in the foreground briefly covers part of the frame. One continuous take, no cuts.\n"
+    "[Phone look] The same look as the start frame: {SWIATLO}; auto exposure readjusts a little as the phone moves, fine "
+    "digital noise, natural slightly flat colours, compression like an Instagram upload. Realistic skin, no beauty filter, no "
+    "colour grading.\n"
+    "[Sound] {DZWIEK}\n"
+    "[Result] A real clip someone filmed in Poland and posted on Instagram: natural scale and perspective, real-world physics. "
+    "No subtitles, captions, added text, stickers or watermarks."
+)
+# Wan 3.0 Prime / Gemini: start_image NIE laczy sie ze zdjeciami persony (regula `model get`) - twarz tylko z klatki
+SZABLON_KROTKI_KLATKA = (
+    "Candid vertical 9:16 smartphone video, real footage, not a film. It continues EXACTLY from the start image: the same place, "
+    "people, light, signs and prices in {KROTKO}, Poland - do not change, add or animate any text. The young woman standing far "
+    "away in the start image is {IMIE}: keep her face, hair, body and outfit exactly as in the start image; only one of her. "
+    "{WZROST}\n"
+    "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.{SUBTELNIE}\n"
+    "Camera: {KAMERA} The camera stays as far away as in the start image; she never becomes a close-up.\n"
+    "Look: the same light and phone look as the start image; realistic skin, no beauty filter.\n"
+    "Sound: {DZWIEK}\n"
+    "No subtitles, captions, text overlays or watermarks."
+)
 
 
 def szyldy(miejsce_id, nazwy="prawdziwe", obiekt_id=None):
@@ -1611,6 +1668,253 @@ def szyldy(miejsce_id, nazwy="prawdziwe", obiekt_id=None):
     if nazwy != "prawdziwe":
         zdanie += "; no brand logos"
     return zdanie + "."
+
+
+
+# ---------------- 3.5: pierwsza klatka (start frame) rolki z promptu ----------------
+# Feedback usera po #7 Noemi (sklepik pod blokiem, Seedance t2v): kamera za blisko (~2 m, wypelnia kadr, statycznie), wymyslone
+# wnetrze zamiast prawdziwego polskiego sklepu, polamane napisy ("OTVORNE", "KAVA", "19.99"). Dlatego najpierw ZDJECIE (model
+# obrazu, ktory dobrze pisze tekst): persona daleko i mala, zaslonieta pierwszym planem, prawdziwe polskie detale i napisy (ceny z
+# PRZECINKIEM), potem Seedance rusza DOKLADNIE od tej klatki. Detale klatki per miejsce (EN + krotkie polskie napisy). Bez marek
+# (filtr IP): szyld sieci = zwykly zielony/czerwony szyld bez nazwy. Bez slow z fabryka.SLOWA_RYZYKOWNE.
+KLATKA_MIEJSC = {
+    "osiedle": ("a yellow parcel locker with no logo, a small corner grocery under one block with a plain sign, a bus shelter, big "
+                "painted block numbers on the gable walls, a paper notice taped to a lamp post",
+                ("SKLEP SPOŻYWCZY", "ZAKAZ PARKOWANIA", "OGŁOSZENIE")),
+    "klatka": ("dented metal mailboxes with flat numbers, a cork board with handwritten notices from the housing cooperative, an "
+               "intercom with numbered buttons, a lift door with a small sign",
+               ("OGŁOSZENIE", "WINDA", "ZAMYKAĆ DRZWI")),
+    "sklep_osiedlowy": ("the till counter at the back with the cashier, a whole wall of cigarette packs behind her, a rack of "
+                        "scratch-off lottery cards and chewing gum at the till, a hot-dog roller grill and a coffee machine on the "
+                        "counter, glass-door fridges full of drinks along one wall, low shelves of crisps and sweets, prices on small "
+                        "yellow and white shelf labels like '4,99 zł' and '12,49 zł', a paper card on the glass door and paper "
+                        "posters on the windows; the shop front is a plain generic green sign with no name or logo",
+                        ("OTWARTE", "PROMOCJA", "KAWA", "PIECZYWO", "ZAPRASZAMY")),
+    "dyskont": ("long aisles with goods still on pallets, a bakery corner with self-service bread bins, fruit and vegetables in "
+                "crates with prices on yellow labels like '3,99 zł/kg', red-and-yellow promo signs hanging from the ceiling, a row "
+                "of tills with conveyor belts and numbered till lamps, a bottle return machine by the entrance; the shop sign is a "
+                "plain generic red sign with no name or logo",
+                ("PROMOCJA", "PIECZYWO", "KASA 2", "OWOCE I WARZYWA")),
+    "drogeria": ("long white shelves of shampoos and cosmetics with small price tags like '19,99 zł', red promo signs hanging from "
+                 "the ceiling, a make-up stand with testers and small mirrors, security gates at the door, a till sign above the "
+                 "counter; no brand names on the products facing the camera",
+                 ("PROMOCJA", "-30%", "NOWOŚĆ", "KASA")),
+    "galeria_foodcourt": ("a row of fast-food kiosks with backlit menu boards showing Polish dishes and prices like '24,99 zł', "
+                          "plastic trays, rows of tables and chairs, people queuing; the kiosks show only food words, no famous "
+                          "brands",
+                          ("ZAMÓW TUTAJ", "ODBIÓR ZAMÓWIEŃ", "PIEROGI", "ZAPIEKANKI", "WYJŚCIE")),
+    "galeria_pasaz": ("shop windows with big sale posters, escalators with glass balustrades, a mall directory board, potted plants, "
+                      "benches; shop signs without real brand names",
+                      ("WYPRZEDAŻ", "-50%", "INFORMACJA", "TOALETY", "WYJŚCIE")),
+    "bazar": ("metal stalls under blue and green tarps, crates of fruit and vegetables with handwritten cardboard price cards like "
+              "'TRUSKAWKI 15 zł/kg' and 'POMIDORY 9,99 zł', old scales, plastic bags, an older stallholder in a fleece",
+              ("TRUSKAWKI", "ZIEMNIAKI", "JAJKA WIEJSKIE")),
+    "piekarnia": ("a glass counter with doughnuts, sweet buns and loaves, prices on small white cards like 'PĄCZEK 3,50 zł' and "
+                  "'CHLEB 6,99 zł', paper bags, a lady in an apron behind the counter",
+                  ("PIEKARNIA", "PIECZYWO", "ZAPRASZAMY")),
+    "stacja_paliw": ("inside the station shop: a till counter with a hot-dog grill and a coffee machine, a fridge with drinks, car "
+                     "accessories on a shelf; through the window a big fuel price board with prices like '6,49' next to 'PB 95', "
+                     "'ON' and 'LPG'; the canopy is plain red and white with no logo",
+                     ("KAWA", "KASA", "MYJNIA", "HOT DOG")),
+    "kebab": ("a small counter with a rotating meat spit, a backlit menu with Polish prices like 'KEBAB W BUŁCE 24 zł' and "
+              "'ZAPIEKANKA 14 zł', squeeze bottles of garlic and spicy sauce, high stools by the window",
+              ("KEBAB", "ZAPIEKANKI", "FRYTKI")),
+    "poczta": ("service counters with numbered windows, a queue ticket machine, shelves with envelopes and boxes for sale, forms on "
+               "a side counter, a red-and-white sign",
+               ("POCZTA", "NUMEREK", "OKIENKO 1")),
+    "przystanek": ("a tram stop shelter with an electronic board showing tram numbers and minutes like '4 min', a paper timetable, "
+                   "a ticket machine, tram tracks and overhead wires",
+                   ("ROZKŁAD JAZDY", "BILETY")),
+    "tramwaj": ("inside a tram: yellow handrails and straps, a display with the next stop, a ticket validator, small stickers by "
+                "the seats, a route map above the windows",
+                ("NASTĘPNY PRZYSTANEK", "KASOWNIK")),
+    "metro": ("a platform with tiled walls, direction signs, a digital board with minutes to the next train, escalators going up",
+              ("KIERUNEK", "WYJŚCIE")),
+    "dworzec": ("a big departure board with Polish city names and times, ticket machines, a newspaper kiosk, signs to the "
+                "platforms",
+                ("ODJAZDY", "KASY BILETOWE", "PERONY")),
+    "peron": ("blue platform signs, a yellow safety line along the edge, an electronic display announcing a train to 'KRAKÓW "
+              "GŁÓWNY', benches and a roofed shelter",
+              ("PERON 2", "TOR 3")),
+    "pociag": ("inside a long-distance carriage: blue-grey seats, small tables, luggage racks, seat numbers above the windows, a "
+               "small display with the carriage number",
+               ("WAGON 7", "WC")),
+    "przejscie_podziemne": ("small kiosks selling keys, flowers and phone cases, yellowish fluorescent tubes, tiled walls, exit "
+                            "signs with arrows",
+                            ("KLUCZE", "KWIATY", "KANTOR", "WYJŚCIE")),
+    "przejscie_dla_pieszych": ("a zebra crossing, traffic lights with a green walking figure, a yellow pedestrian button box, a "
+                               "city bus, shop signs along the street",
+                               ("APTEKA", "KANTOR")),
+    "rynek_krakow": ("the arcades of the Cloth Hall, the towers of St Mary's church, a blue cart selling bagel pretzels for '3 zł', "
+                     "flower stalls, horse carriages, pigeons",
+                     ("OBWARZANKI", "KWIATY")),
+    "plac_nowy": ("the round brick market hall with windows selling zapiekanki, menus like 'ZAPIEKANKA 18 zł', queues, bars and "
+                  "cobblestones",
+                  ("ZAPIEKANKI",)),
+    "plac_zamkowy": ("the Royal Castle, Sigismund's Column, colourful Old Town tenements, cobblestones, a café umbrella",
+                     ("KAWIARNIA",)),
+    "nowy_swiat": ("low classic tenements, café gardens, a pharmacy and a currency exchange, people walking",
+                   ("KAWIARNIA", "APTEKA", "LODY")),
+    "palac_kultury": ("the huge Palace of Culture in the background, a wide square, glass towers, a metro entrance sign",
+                      ("METRO",)),
+    "bulwary": ("a riverside promenade by the Vistula, concrete steps to the water, food trucks, bikes, a bridge in the background",
+                ("LODY", "KAWA")),
+    "lazienki": ("park alleys, the palace on the water, peacocks and squirrels, green benches, a small sign by the path",
+                 ("NIE KARMIĆ ZWIERZĄT",)),
+    "rynek_wroclaw": ("the Gothic town hall, colourful tenements, small bronze dwarf figurines on the pavement, café umbrellas",
+                      ("KAWIARNIA", "LODY")),
+    "gdansk": ("tall narrow tenements of the Long Market, Neptune's Fountain, amber shops",
+               ("BURSZTYN", "LODY")),
+    "poznan": ("the Renaissance town hall, colourful merchants' houses, café umbrellas, a bakery window with croissants",
+               ("ROGALE", "KAWIARNIA")),
+    "piotrkowska": ("a long pedestrian street of 19th-century tenements, bike rickshaws, café gardens, neon signs",
+                    ("KAWIARNIA", "PUB")),
+    "spodek": ("the round saucer-shaped arena, a wide roundabout with trams, modern glass buildings",
+               ("PRZYSTANEK",)),
+    "miasteczko": ("a small market square with a town hall and a church tower, a pharmacy, a grocery with a plain sign, parked cars, "
+                   "benches, flower beds",
+                   ("APTEKA", "SKLEP SPOŻYWCZY", "LODY")),
+    "park": ("a park alley, benches, a pond with ducks, an ice-cream kiosk with a price board like 'LODY 6 zł'",
+             ("LODY", "ZAKAZ WPROWADZANIA PSÓW")),
+    "molo_sopot": ("the long wooden pier, seagulls, the grand hotel by the beach, a kiosk with waffles",
+                   ("GOFRY", "LODY")),
+    "plaza": ("windbreaks in many colours, beach towels, a waffle stand with a board like 'GOFRY 12 zł', a lifeguard tower",
+              ("GOFRY", "LODY", "RATOWNIK")),
+    "jezioro": ("a wooden jetty, sailing boats, reeds, a small fried-fish kiosk and a boat rental",
+                ("SMAŻALNIA RYB", "WYPOŻYCZALNIA ŁODZI")),
+    "krupowki": ("wooden highlander houses, stalls with smoked sheep cheese 'OSCYPKI 10 zł', souvenir shops, mountains in the "
+                 "background",
+                 ("OSCYPKI", "PAMIĄTKI")),
+    "silownia_plenerowa": ("an information board with exercise pictograms, a bench, a bin, blocks of flats behind",
+                           ("REGULAMIN",)),
+    "orlik": ("a small changing-room building, floodlight poles, school windows behind, a board with the pitch rules",
+              ("REGULAMIN BOISKA",)),
+    "dzialki": ("a wooden gate with a small sign of the allotment association, a notice board, wheelbarrows",
+                ("ZAMYKAĆ FURTKĘ",)),
+}
+# gdzie stoi persona na klatce - zeby byla daleko, ale wyraznie wpisana w miejsce
+GDZIE_W_KLATCE = {
+    "sklep_osiedlowy": "at the till at the far end of the shop, seen past the shelves and other customers",
+    "dyskont": "at a checkout far down the row of tills, seen past other shoppers and trolleys",
+    "piekarnia": "at the counter at the back, seen past other customers",
+    "stacja_paliw": "at the till at the back of the station shop, seen past a shelf",
+    "kebab": "at the counter, seen from the far side of the small bar",
+    "poczta": "at a counter window far across the hall, seen past people waiting",
+    "drogeria": "far down an aisle, seen past the end of a shelf",
+}
+ZASLONY = {
+    "kolejka": "Blurred shoulders and the back of a jacket of people in the queue, very close to the lens, cover the lower and "
+               "side edges of the frame.",
+    "zza_filaru": "The blurred edge of a pillar or the end of a shelf, very close to the lens, covers one side of the frame.",
+    "z_biodra": "The horizon is tilted and a passer-by's blurred shoulder covers one corner of the frame.",
+    "siedzi_naprzeciw": "Blurred shoulders and heads of other passengers cover the lower edge of the frame.",
+}
+ZASLONA_DOMYSLNA = "Something blurred in the foreground - a passer-by's shoulder or the edge of an object - covers one corner of the frame."
+CENY_KLATKI = ("Every price is written the Polish way with a comma and 'zł', like '4,99 zł' or '12,49 zł' - never with a dot.")
+BEZ_MAREK_KLATKI = ("No brand names or logos anywhere: a chain shop's sign is a plain generic green or red sign without a name, "
+                    "and products show no readable brands.")
+
+KLATKA_SCENA = (
+    "A real, unedited vertical 9:16 photo from an ordinary iPhone: the very first frame of a short clip someone is secretly "
+    "filming in {KROTKO}, Poland, on an ordinary {PORA} in {SEZON}. Not a photo shoot, not a portrait, not an advert.\n"
+    "[Distance] {IMIE} is far from the camera, about 6-10 metres away: a small full-body figure that fills only about a quarter "
+    "to a third of the frame height, {GDZIE}. Most of the frame shows the place around her. The phone is held at chest height "
+    "by someone {OPERATOR}, slightly tilted, framing a bit off-centre. {ZASLONA} She does not look at the camera and does not "
+    "pose; she is busy: {CZYNNOSC}.\n"
+    "[{IMIE}] {REF} {SA} the only source of her face, eyes, skin, hair, piercings and figure - keep her recognizable even this "
+    "small, only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ}.{LINIA_STROJU}\n"
+    "[Place] {OPIS} Real Polish details: {DETALE}; {POLSKIE}. {POGODA}Ordinary Polish people of all ages in {SEZON} clothes go "
+    "about their business; nobody looks like a model.\n"
+    "[Text] All text belongs to the place and is small and far from the camera - no big sign close to the lens, only a few short "
+    "signs readable. Every word is correct Polish with Polish letters, like {NAPISY}. {CENY} {BEZ_MAREK}\n"
+    "[Light] {SWIATLO}; just the ordinary light of the place, no studio light.\n"
+    "[Phone look] Deep phone focus (the background as sharp as she is, no bokeh), fine digital noise and grain, slightly flat "
+    "colours, auto exposure with bright windows and sky clipping to white, a touch of hand-shake softness. No colour grading, "
+    "no beauty filter, no professional photography look.\n"
+    "[Check] Exactly one {IMIE}, far away and small in the frame - not a close-up, not a medium shot; no captions, overlays or "
+    "watermarks."
+)
+KLATKA_TLO = (
+    "Insert {IMIE} into image 1 (the first image), a real phone photo of {KROTKO}, Poland. Keep image 1 exactly as it is: the "
+    "framing, camera angle, lens perspective, light, colours, grain, every object and person, and every sign, label, price and "
+    "letter - do not change, add, remove or re-write any text. Add only {IMIE}: far from the camera, about 6-10 metres away, a "
+    "small full-body figure about a quarter to a third of the frame height, standing naturally in a believable free spot on the "
+    "floor of that place, with correct scale and perspective, feet on the ground, light, shadows, grain and sharpness matching "
+    "image 1. If something in the foreground of image 1 is between the camera and that spot, it may cover part of her. She does "
+    "not look at the camera and does not pose; she is busy: {CZYNNOSC}.\n"
+    "[{IMIE}] {REF} {SA} the only source of her face, eyes, skin, hair, piercings and figure - keep her recognizable even this "
+    "small, only one of her. {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ}.{LINIA_STROJU}\n"
+    "[Look] Photorealistic, like an ordinary unedited phone photo: no beauty filter, no studio light, no colour grading.\n"
+    "[Check] Image 1 is unchanged except that {IMIE} is now in it, far away and small; exactly one of her; no new text, "
+    "captions or watermarks."
+)
+
+
+def detale_klatki(miejsce_id):
+    """(detale EN, napisy PL) dla klatki - konkretne polskie realia miejsca (KLATKA_MIEJSC), bez marek."""
+    return KLATKA_MIEJSC.get(miejsce_id) or ("", ())
+
+
+def _obrazy_klatki_tekst(od, do):
+    if do <= od:
+        return f"image {od}"
+    if do == od + 1:
+        return f"images {od} and {do}"
+    return f"images {od}-{do}"
+
+
+def prompt_klatki(d):
+    """Prompt pierwszej klatki (obraz, angielski, numeracja 'image N' jak w swapie zdjec 3.2). d = dane z zbuduj():
+    imie, miejsce_id, krotko, pora_en, sezon_en, opis, detale, swiatlo, pogoda, kamera, operator, czynnosc, toz (z tokenami
+    <<<image_N>>> wg zdjec persony), wlosy, wzrost, sylwetka, stroj (bez tokenow), stroj_plik (bool), n_ref (ile zdjec persony),
+    tlo (bool - zdjecie usera jako image 1). Zwraca (prompt, [zamienione slowa ryzykowne])."""
+    import zdjecia_swap
+    przesun = 1 if d.get("tlo") else 0
+    n = int(d["n_ref"])
+    ref = _obrazy_klatki_tekst(1 + przesun, n + przesun)
+    zamienione = []
+
+    def czysto(t):
+        w, z = zdjecia_swap.bez_slow_ryzykownych(t or "")
+        zamienione.extend(z)
+        return w
+    toz = czysto(zdjecia_swap._numery_obrazow(d.get("toz") or "", przesun)).rstrip(". ") or f"{d['imie']} looks exactly like in {ref}"
+    wlosy = czysto((d.get("wlosy") or "").replace("the reference photos", ref)).rstrip(". ")
+    syl = czysto(_numery_obrazow_proste(d.get("sylwetka") or "", przesun).replace("the reference photos", ref)).rstrip(". ")
+    stroj = czysto((d.get("stroj") or "").replace("the reference photos", ref)).rstrip(". ")
+    linia = ""
+    if d.get("stroj_plik"):
+        k = n + przesun + 1
+        stroj += f" - exactly the clothing shown in image {k} (the last image)"
+        linia = (f" Image {k} shows ONLY the outfit: ignore the hair, face, skin, tattoos and body shape of the person or mannequin "
+                 f"wearing it - her hair, face and body come only from {ref}.")
+    wzrost = d.get("wzrost") or ""
+    pola = dict(IMIE=d["imie"], KROTKO=d["krotko"], REF=ref[:1].upper() + ref[1:], SA="is" if n == 1 else "are", TOZ=toz,
+                WLOSY=wlosy, WZROST=(wzrost + " ") if wzrost else "",
+                SYLWETKA=(f"Body shape (highest priority after her face): {syl}. " if syl else ""), STROJ=stroj,
+                LINIA_STROJU=linia, CZYNNOSC=(d.get("czynnosc") or "an ordinary errand").rstrip(". "))
+    if d.get("tlo"):
+        tekst = KLATKA_TLO.format(**pola)
+    else:
+        detale_pl, napisy = detale_klatki(d["miejsce_id"])
+        napisy = list(napisy) or ["OTWARTE", "ZAPRASZAMY"]
+        if d.get("nazwa_obiektu"):
+            napisy = [d["nazwa_obiektu"]] + napisy      # prawdziwa nazwa galerii/dworca (tryb "prawdziwe") na szyldach miejsca
+        tekst = KLATKA_SCENA.format(
+            PORA=d["pora_en"], SEZON=d["sezon_en"], GDZIE=GDZIE_W_KLATCE.get(d["miejsce_id"]) or "in the middle distance",
+            OPERATOR=d.get("operator") or "standing far away", ZASLONA=ZASLONY.get(d.get("kamera"), ZASLONA_DOMYSLNA),
+            OPIS=d.get("opis") or "", DETALE=(d.get("detale") or "").rstrip(". "), POLSKIE=detale_pl or "Polish shop signs and prices",
+            POGODA=d.get("pogoda") or "", NAPISY=", ".join(f"'{x}'" for x in napisy[:5]), CENY=CENY_KLATKI,
+            BEZ_MAREK=BEZ_MAREK_KLATKI if d.get("nazwy") != "prawdziwe" or not d.get("nazwa_obiektu") else
+            BEZ_MAREK_KLATKI.replace("No brand names", "No other brand names"),
+            SWIATLO=(d.get("swiatlo") or "ordinary light")[:1].upper() + (d.get("swiatlo") or "ordinary light")[1:], **pola)
+    tekst = re.sub(r"[ \t]{2,}", " ", tekst)
+    return re.sub(r"[ \t]+\n", "\n", tekst).strip(), sorted(set(zamienione))
+
+
+def _numery_obrazow_proste(tekst, przesun):
+    import zdjecia_swap
+    return zdjecia_swap._numery_obrazow(tekst, przesun)
 
 
 def _pierwsze_zdanie(tekst):
@@ -1668,11 +1972,14 @@ def zbuduj(slug, opcje=None, los=None):
         obiekt (id z obiekty_miejsca, "" = wg miasta z pomyslu / losowo), glos ("auto" | "tts" - zawsze ElevenLabs po
         generacji, model wideo nic nie mowi; stare "model" = "tts"), wymowa (bez znaczenia od 3.1). zp-3: stroj "biblioteka" |
         "biblioteka:<id ze stroje_biblioteka>" (DOMYSLNY w panelu/asystencie), nagrywa ("chlopak" | "dziewczyna"; brak = z
-        ustawien persony) - gramatyka komentarza pod mowiacego.
+        ustawien persony) - gramatyka komentarza pod mowiacego. zp-4 (3.5): klatka ("wl" | "wyl"; brak = ustawienia globalne
+        pierwsza_klatka), klatka_model (pierwsza_klatka.MODELE), tlo ("auto" = zdjecie usera z tla/<miejsce>, gdy jest | "bez" |
+        nazwa pliku).
     Zwraca {"prompt", "obrazy" (sciezki), "znaki", "limit", "ostrzezenia", "ustalone", "model", "mode", "parametry",
             "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon", "glos", "komentarz",
             "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja",
-            "stroj_nazwa", "nagrywa", "sylwetka" (pelna/krotka/pominieta/brak)}.
+            "stroj_nazwa", "nagrywa", "sylwetka" (pelna/krotka/pominieta/brak), "klatka" (None albo {model, nazwa_modelu, parametry,
+            prompt, znaki, obrazy, tlo, mode_wideo, refy_w_wideo, kontrola, max_dodatkowych})}.
     Rzuca ValueError przy zlych opcjach (model, dlugosc, brak zdjec persony, za dlugi prompt...)."""
     o = dict(opcje or {})
     u = dict(o.get("ustalone") or {})
@@ -1758,6 +2065,7 @@ def zbuduj(slug, opcje=None, los=None):
         beaty = pomysl.get("beaty") or m["akcje"]
         os_tekst, granice = os_czasu(dlugosc, beaty)
         akcja = os_tekst
+        czynnosc = beaty[0]
         streszczenie = (pomysl.get("streszczenie") or m["streszczenie"]).format(IMIE=imie)
         t_kom = min(granice[1][0] + 2, dlugosc - 2)
         t1 = granice[1][0]
@@ -1767,6 +2075,7 @@ def zbuduj(slug, opcje=None, los=None):
                  + (f" In short: {hint}." if hint else "")
                  + f" It all happens naturally in one continuous take over the whole {dlugosc} seconds, at an everyday pace.")
         streszczenie = f"{imie} goes about an ordinary errand while people around notice her."
+        czynnosc = analiza["czynnosci"][0] if analiza["czynnosci"] else f"the start of this scene (written in Polish): „{tekst}”"
         t1 = max(2, dlugosc // 3)
         t_kom = max(3, int(dlugosc * 0.45))
 
@@ -1862,6 +2171,10 @@ def zbuduj(slug, opcje=None, los=None):
                      "skin, tattoos and body of the person or mannequin wearing it)")
     else:
         raise ValueError(f"Nieznany wybor stroju '{stroj_wybor}'.")
+    if stroj_plik:
+        stroj_klatki = (bib["opis_en"].rstrip(".") + ", a bold goth street look") if bib else "her outfit"
+    else:
+        stroj_klatki = _WZORZEC_TOKENU.sub("the reference photos", stroj)
 
     # --- wlosy, wzrost, tozsamosc ---
     wlosy, wlosy_zmienione = wlosy_opis(slug, o.get("wlosy"))
@@ -1892,7 +2205,7 @@ def zbuduj(slug, opcje=None, los=None):
     elif kom == "losowy":
         pula = komentarze_dla(nagrywa) + (KOMENTARZE_COSPLAY if stroj_wybor == "cosplay" else [])
         kom_tekst = u.get("komentarz") if u.get("komentarz_tryb") == "losowy" and u.get("komentarz") else (
-            (pomysl or {}).get("komentarz") if stroj_wybor != "cosplay" and pomysl else _wybierz(los, pula))
+            ((pomysl or {}).get("komentarz") if stroj_wybor != "cosplay" and pomysl else None) or _wybierz(los, pula))
         u["komentarz_tryb"] = "losowy"
     else:
         kom_tekst = kom
@@ -1932,21 +2245,37 @@ def zbuduj(slug, opcje=None, los=None):
     subtelnie = SUBTELNE_REAKCJE if zdziwienie else ""
     napisy = szyldy(miejsce_id, nazwy, obiekt)
     kamera_blok = ((KAMERA_Z_UKRYCIA if ukryta else KAMERA_KLASYCZNA) if mi["szablon"] == "pelny"
-                   else (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA)).format(OPERATOR=operator, RUCH=ruch)
+                   else (KAMERA_KROTKA_UKRYTA if ukryta else KAMERA_KROTKA)).format(OPERATOR=operator, RUCH=ruch,
+                                                                                     DYSTANS=DYSTANS_UKRYTEJ)
+
+    # --- 3.5: pierwsza klatka (start frame) - domyslnie wl. (ustawienia globalne `pierwsza_klatka`), per rolka opcje
+    #     klatka "wl"/"wyl" i klatka_model; zdjecie usera z Pulpit/ROLKI AI/tla/<miejsce>/ jako baza (ustalone.tlo) ---
+    import pierwsza_klatka
+    kl_ust = pierwsza_klatka.ustawienia()
+    kl_wybor = (o.get("klatka") or "").strip() or ("wl" if kl_ust["wlaczona"] else "wyl")
+    if kl_wybor not in ("wl", "wyl"):
+        raise ValueError("Pierwsza klatka: wl albo wyl.")
+    klatka_wl = kl_wybor == "wl" and bool(mi.get("klatka"))
+    kl_model = (o.get("klatka_model") or kl_ust["model"]).strip()
+    if klatka_wl and kl_model not in pierwsza_klatka.MODELE:
+        raise ValueError(f"Nieznany model pierwszej klatki '{kl_model}' (mozna: {', '.join(pierwsza_klatka.MODELE)}).")
+    if klatka_wl:
+        kamera_blok = kamera_blok.replace(" " + DYSTANS_UKRYTEJ, "")    # szablon z klatka ma wlasne zdanie o odleglosci
 
     def skladaj(syl):
         blok_syl = f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""
         if mi["szablon"] == "pelny":
-            tekst_p = SZABLON_PELNY.format(
+            tekst_p = (SZABLON_PELNY_KLATKA if klatka_wl else SZABLON_PELNY).format(
                 SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
                 REF=_lista_tokenow(obrazy_n), IMIE=imie, WLOSY_REF="" if wlosy_zmienione else "hair, ",
                 LINIA_STROJU=linia_stroju, TOZ=toz.rstrip("."), WLOSY=wlosy, WZROST=(wzrost + " ") if wzrost else "",
                 SYLWETKA=blok_syl, STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], SZYLDY=napisy, POGODA=pogoda,
-                UBRANIA=sz["ubrania"], AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok, SWIATLO=swiatlo,
+                UBRANIA=sz["ubrania"], AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok,
+                SWIATLO=(swiatlo[:1].lower() + swiatlo[1:]) if klatka_wl else swiatlo,
                 DZWIEK=DZWIEK_BEZ_MOWY.format(DZWIEKI=m["dzwieki"], IMIE=imie))
         else:
             # zdjecie stroju jest ostatnim "reference photo" - twarz, wlosy i cialo tylko z pierwszych N (ref_k)
-            tekst_p = SZABLON_KROTKI.format(
+            tekst_p = (SZABLON_KROTKI_KLATKA if klatka_wl else SZABLON_KROTKI).format(
                 IMIE=imie, REF_K=ref_k, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"],
                 TOZ=_WZORZEC_TOKENU.sub(ref_k, toz).rstrip("."), WLOSY=wlosy.replace("the reference photos", ref_k),
                 WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "",
@@ -1979,6 +2308,49 @@ def zbuduj(slug, opcje=None, los=None):
     if bledy:
         raise ValueError(" ".join(bledy))
     ostrzezenia += uwagi
+
+    # --- 3.5: pierwsza klatka - prompt obrazu (persona daleko, polskie realia) + zdjecia (tlo usera?, persona, stroj) ---
+    klatka = None
+    if klatka_wl:
+        tla = pierwsza_klatka.tla_miejsca(miejsce_id)
+        tlo_wybor = (o.get("tlo") or "auto").strip()
+        tlo = None
+        if tlo_wybor not in ("bez",) and tla:
+            po_nazwie = {os.path.basename(t): t for t in tla}
+            chce = tlo_wybor if tlo_wybor in po_nazwie else (u.get("tlo") if u.get("tlo") in po_nazwie else None)
+            tlo = po_nazwie[chce] if chce else _wybierz(los, tla)
+        u["tlo"] = os.path.basename(tlo) if tlo else ""
+        refy_kl = list(baza.sciezki_referencji(slug))
+        max_kl = pierwsza_klatka.max_obrazow(kl_model)
+        if max_kl:
+            miejsce_kl = max_kl - (1 if tlo else 0) - (1 if stroj_plik else 0)
+            if len(refy_kl) > miejsce_kl:
+                ostrzezenia.append(f"{pierwsza_klatka.MODELE[kl_model]['nazwa']} przyjmuje max {max_kl} zdjec - do klatki ide z "
+                                   f"pierwszymi {miejsce_kl} zdjeciami persony (z {len(refy_kl)}).")
+                refy_kl = refy_kl[:max(1, miejsce_kl)]
+        nazwa_obiektu = (obiekty_miejsca(miejsce_id)[obiekt][0].split(" (")[0]
+                         if nazwy == "prawdziwe" and obiekt and miejsce_id in ("galeria_foodcourt", "galeria_pasaz", "dworzec",
+                                                                              "peron", "metro") else None)
+        kp, zamienione = prompt_klatki({
+            "imie": imie, "miejsce_id": miejsce_id, "krotko": krotko, "pora_en": PORY_DNIA[pora][1], "sezon_en": sz["en"],
+            "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
+            "operator": operator, "czynnosc": czynnosc, "toz": tozsamosc(slug, bez_wlosow=True, limit=700),
+            "wlosy": wlosy, "wzrost": wzrost, "sylwetka": sylwetka, "stroj": stroj_klatki, "stroj_plik": bool(stroj_plik),
+            "n_ref": len(refy_kl), "tlo": bool(tlo), "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
+        if zamienione:
+            ostrzezenia.append("W opisie persony do klatki zamienilem slowa, ktore filtr NSFW lubi blokowac: "
+                               + ", ".join(zamienione) + ".")
+        klatka = {"model": kl_model, "nazwa_modelu": pierwsza_klatka.MODELE[kl_model]["nazwa"],
+                  "parametry": dict(pierwsza_klatka.MODELE[kl_model]["parametry"]), "prompt": kp, "znaki": len(kp),
+                  "obrazy": ([tlo] if tlo else []) + refy_kl + ([stroj_plik] if stroj_plik else []), "tlo": tlo,
+                  "mode_wideo": mi["klatka"]["mode"], "refy_w_wideo": bool(mi["klatka"]["refy"]),
+                  "kontrola": bool(kl_ust["kontrola"]), "max_dodatkowych": int(kl_ust["max_dodatkowych"])}
+        if not mi["klatka"]["refy"]:
+            ostrzezenia.append(f"{mi['nazwa']} nie laczy pierwszej klatki ze zdjeciami persony (tak ma model) - twarz w wideo "
+                               f"bierze tylko z klatki.")
+    elif kl_wybor == "wl" and not mi.get("klatka"):
+        ostrzezenia.append(f"{mi['nazwa']} nie ma pierwszej klatki - rolka idzie po staremu (sam prompt).")
+    u["klatka"] = "wl" if klatka else "wyl"
     tytul = (pomysl["pl"] if pomysl else tekst)[:120]
     u.update({"ziarno": ziarno, "pomysl_id": (pomysl or {}).get("id"), "miejsce": miejsce_id, "sezon": sezon, "pora": pora,
               "kamera": kamera})
@@ -1997,7 +2369,7 @@ def zbuduj(slug, opcje=None, los=None):
         "sezon": sezon, "pora": pora, "kamera": kamera, "glos": glos if kom_tekst else "bez", "wymowa": wymowa,
         "komentarz_t": t_kom if kom_tekst else None, "obiekt": obiekt, "obiekt_nazwa": obiekt_nazwa, "nazwy": nazwy,
         "stroj_id": stroj_id, "stroj_tryb": stroj_wybor.split(":")[0], "reakcja": rk, "stroj_nazwa": stroj_nazwa,
-        "nagrywa": nagrywa, "sylwetka": sylwetka_wersja,
+        "nagrywa": nagrywa, "sylwetka": sylwetka_wersja, "klatka": klatka,
     }
 
 

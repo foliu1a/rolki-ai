@@ -472,8 +472,8 @@ def wyslij_zdjecia(slug, log=None):
 # komentarz ElevenLabs, Media Tool, folder "tu rolki zrobione", Telegram. Jedna rolka naraz; w toku = czekamy (wznowienie 0 kr).
 
 MODELE_Z_PROMPTU = {
-    "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr)", "szacunek": 70},
-    "wan3_0_prime": {"nazwa": "Wan 3.0 Prime · 720p · 10 s (ok. 30 kr)", "szacunek": 30},
+    "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)", "szacunek": 70},
+    "wan3_0_prime": {"nazwa": "Wan 3.0 Prime · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)", "szacunek": 30},
 }
 DLUGOSC_Z_PROMPTU = 10
 ROZDZIELCZOSC_Z_PROMPTU = "720p"
@@ -1061,12 +1061,64 @@ def _hamulec(slug, ust, w, log, pods):
         wyslij_na_telefon(f"STOP {slug}: {powod}. Nie robie dalej, zeby nie palic kredytow. Sprawdz w panelu (Rolki) i kliknij Wznow, albo wyslij /wznow.")
 
 
+def cos_w_toku(tylko=None):
+    """Czy jakas persona (albo `tylko`) ma rolke albo zdjecie W TOKU (job wyslany / wysylany, jeszcze nie pobrany)."""
+    for slug in ([tylko] if tylko else baza.lista_modelek()):
+        try:
+            if baza.pomysly_w_toku(slug) or baza.zdjecia_w_toku(slug):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def dokoncz_w_toku_wszystkich(log=None, stop=None, tylko=None):
+    """3.5 (poprawka po #7 Noemi: rolka z wyslanym jobem wisiala w_toku, bo wznawialy ja tylko persony z wlaczonym autopilotem):
+    KAZDY przebieg dokancza rolki ORAZ zdjecia w toku WSZYSTKICH person - takze bez autopilota. Ten sam job (0 kr), nic nie
+    wysyla drugi raz; blokada generacji persony jak zawsze (persona zajeta = pominieta, dokonczy ten, kto ja trzyma).
+    Rolka z pierwsza klatka w toku: dokancza sie TYLKO klatka (wideo czeka na "Zrob te rolke"). Zwraca {slug: {"rolki", "zdjecia"}}."""
+    log = log or _log
+    wyniki = {}
+    import zdjecia_swap
+    for slug in ([tylko] if tylko else baza.lista_modelek()):
+        if stop is not None and stop.is_set():
+            break
+        w = {"rolki": 0, "zdjecia": 0}
+        if baza.pomysly_w_toku(slug):
+            STAN["modelka"], STAN["etap"] = slug, "generuj"
+            STAN["opis"] = f"kończę rolki w toku: {_nazwa(slug)}"
+            try:
+                r = fabryka.wznow_w_toku(slug, log=log, stop=stop, lipsync=False)
+                w["rolki"] = r.get("wygenerowane", 0)
+            except fabryka.Przerwano:
+                raise
+            except Exception as e:
+                log(f"{slug}: dokonczenie rolek w toku nie wyszlo: {e}")
+                baza.dziennik_zapisz("blad", f"autopilot: dokonczenie rolek w toku: {type(e).__name__}: {e}", modelka=slug)
+        if baza.zdjecia_w_toku(slug):
+            try:
+                r = zdjecia_swap.wznow_w_toku(slug, log=log, stop=stop)
+                w["zdjecia"] = r.get("zrobione", 0)
+            except fabryka.Przerwano:
+                raise
+            except Exception as e:
+                log(f"{slug}: dokonczenie zdjec w toku nie wyszlo: {e}")
+                baza.dziennik_zapisz("blad", f"autopilot: dokonczenie zdjec w toku: {type(e).__name__}: {e}", modelka=slug)
+        if w["rolki"] or w["zdjecia"]:
+            wyniki[slug] = w
+    STAN["modelka"], STAN["etap"], STAN["opis"] = None, "", ""
+    return wyniki
+
+
 def przebieg_wszystkich(tylko=None, log=None, stop=None):
     wyniki = []
     STAN["trwa"] = True
     try:
         STAN["etap"] = "telefon"
         z_telefonu = obsluz_telegram(log)
+        if not (stop is not None and stop.is_set()):
+            # 3.5: rolki i zdjecia w toku WSZYSTKICH person (takze bez autopilota) - ten sam job, 0 kr
+            dokoncz_w_toku_wszystkich(log=log or _log, stop=stop, tylko=tylko)
         if not tylko and not (stop is not None and stop.is_set()):
             # rolki z IG (3.4): pobierz NAJPIERW, zeby skanuj w ponizszym przebiegu od razu je podjal; osobny dzienny licznik
             try:
@@ -1136,7 +1188,7 @@ def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
         z_promptu = not tylko and ustawienia_z_promptu()["dziennie"] > 0      # rolki z promptu nie potrzebuja filmikow ani person z autopilot
         u_ig = ustawienia_rolki_ig()
         ig = not tylko and u_ig["wlaczone"] and u_ig["dziennie"] > 0          # pobieranie rolek z IG tez nie potrzebuje person z autopilot
-        if not modelki and not _telegram() and not z_promptu and not ig:
+        if not modelki and not _telegram() and not z_promptu and not ig and not cos_w_toku(tylko):
             log("zadna modelka nie ma autopilot=true - czekam 5 min")
         else:
             try:
