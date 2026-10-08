@@ -111,6 +111,20 @@ def archiwizuj_usuniety(slug, p):
         baza._zapisz_json(plik, dane)
 
 
+def zapisz_odrzucenie(slug, p, wynik="nsfw", zrodlo=""):
+    """3.5.1: filtr odrzucil KROK rolki (np. pierwsza klatke), a rolka idzie dalej zapasem (inny model klatki) - asystent i tak
+    zapamietuje odrzucenie tych wyborow (stroj -> nsfw), jak przy rolce zakonczonej bledem nsfw. Wpis w archiwum nauki."""
+    if not (isinstance(p, dict) and p.get("typ") == "prompt") or wynik not in ("nsfw", "ip"):
+        return
+    plik = _plik_archiwum(slug)
+    with baza._rmw(plik):
+        dane = baza._wczytaj_json(plik, {"wyniki": []})
+        dane.setdefault("wyniki", []).append({"pid": p.get("id"), "czas": baza._teraz(), "wybory": _wybory_pomyslu(p),
+                                              "wynik": wynik, "zrodlo": zrodlo})
+        dane["wyniki"] = dane["wyniki"][-300:]
+        baza._zapisz_json(plik, dane)
+
+
 def historia(slug):
     """[{wybory, wynik}] rolek z promptu persony (z kolejki + archiwum usunietych)."""
     wpisy = [{"wybory": _wybory_pomyslu(p), "wynik": _wynik_pomyslu(p), "pid": p.get("id")}

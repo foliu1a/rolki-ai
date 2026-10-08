@@ -298,5 +298,36 @@ def test_api_ustawienia_rolek_z_promptu_i_linijka_na_starcie(klient, slug):
                                                                   "od_godziny": "09:30"}
     s = klient.get("/api/stan").get_json()["autopilot_z_promptu"]
     assert s["dziennie"] == 2 and s["tekst"].startswith("Rolki z promptu: dziś 0 z 2 (")
-    assert s["model_nazwa"].startswith("Wan 3.0 Prime")
+    assert s["model_nazwa"].startswith("Wan 3.0 Premium")
     assert baza.budzet()["max_kredyty_dziennie"] == 300            # limity budzetu nietkniete
+
+
+# ---------------- 3.5.1: wybor modelu na Starcie przy przelaczniku + potwierdzenie wlaczenia ----------------
+
+def test_start_wybor_modelu_z_cena_i_zapis_od_razu(klient, slug):
+    _wlacz()
+    baza.zapisz_ustawienia_globalne(pierwsza_klatka={"wlaczona": True})
+    s = klient.get("/api/stan").get_json()["autopilot_z_promptu"]
+    assert [(m["id"], m["nazwa"], m["kr"]) for m in s["modele"]] == [("seedance_2_5", "Seedance 2.5", 73),
+                                                                        ("wan3_0_prime", "Wan 3.0 Premium", 33)]
+    assert "twarz tylko z pierwszej klatki" in s["modele"][1]["opis"] and "zdjęcia persony" in s["modele"][0]["opis"]
+    assert s["kr_rolki"] == 73 and s["limit_dzienny"] == baza.limit_dzienny("higgsfield")
+    # chip "Wan 3.0 Premium" na Starcie = ten sam zapis co Ustawienia -> Autopilot; odpowiedz niesie nowy stan dla Startu
+    d = klient.post("/api/ustawienia/globalne", json={"autopilot_z_promptu": {"model": "wan3_0_prime"}}).get_json()
+    assert d["ustawienia"]["autopilot_z_promptu"]["model"] == "wan3_0_prime" and d["z_promptu"]["kr_rolki"] == 33
+    assert d["ustawienia"]["autopilot_z_promptu"]["dziennie"] == 1                 # reszta bez zmian
+    # bez pierwszej klatki - sama cena wideo
+    baza.zapisz_ustawienia_globalne(pierwsza_klatka={"wlaczona": False})
+    s = klient.get("/api/stan").get_json()["autopilot_z_promptu"]
+    assert [m["kr"] for m in s["modele"]] == [70, 30] and s["kr_rolki"] == 30
+
+
+def test_panel_ma_potwierdzenie_wlaczenia_autopilota_bez_confirm():
+    folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = open(os.path.join(folder, "templates", "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(folder, "static", "app.js"), encoding="utf-8").read()
+    assert 'id="autopilot-potwierdz"' in html and 'id="autopilot-wybor"' in html
+    for kawalek in ("autopilot-potwierdz-wlacz", "autopilot-potwierdz-anuluj", "pokazPotwierdzenieAutopilota",
+                    "if (wlacz && !potwierdzone) { pokazPotwierdzenieAutopilota(); return; }", "kosztPotwierdzenia"):
+        assert kawalek in js, kawalek
+    assert "confirm(" not in js.split("function pokazPotwierdzenieAutopilota")[1].split("function renderWpisy")[0]

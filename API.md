@@ -42,7 +42,11 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
  "zdjecia_kolejka": {"w_toku": 2, "w_kolejce": 1, "limit": 4, "dziala": true, "zatrzymane": false,
                      "persona": {"w_toku": 2, "w_kolejce": 1}},           // 3.3: zdjęcia (wszystkie persony + aktywna)
  "autopilot_z_promptu": {"dziennie": 1, "dzis": 0, "nieudane": 0, "model": "seedance_2_5", "od_godziny": "10:00", "persony": ["noemi"],
-                         "stan": "przed_godzina", "tekst": "Rolki z promptu: dziś 0 z 1 (następna po 10:00)"},
+                         "stan": "przed_godzina", "tekst": "Rolki z promptu: dziś 0 z 1 (następna po 10:00)",
+                         // 3.5.1: wybór modelu na Starcie (kr = wideo + 3 za pierwszą klatkę, gdy włączona)
+                         "modele": [{"id": "seedance_2_5", "nazwa": "Seedance 2.5", "opis": "…", "kr": 73},
+                                    {"id": "wan3_0_prime", "nazwa": "Wan 3.0 Premium", "opis": "…", "kr": 33}],
+                         "kr_rolki": 73, "limit_dzienny": 300},
  "rolki_ig": {"wlaczone": false, "dziennie": 3, "dzis": 0, "profile": [], "persony": ["noemi"], "do_person": "round-robin",
               "ma_klucz": false, "stan": "wylaczone", "tekst": "Rolki z Instagrama: wyłączone (…)"}}   // 3.4: źródło klipów z IG
 ```
@@ -342,6 +346,7 @@ sylwetka, wzrost, piercing i tatuaże persony z referencji i profilu). Zawsze Hi
   model `seedance_2_5` | `wan3_0_prime`; persony = istniejące slugi; od_godziny GG:MM) / `{"autopilot_rolki_ig": {dowolne z pól}}`
   (3.4: `profile` = lista albo tekst po @ w linii/przecinku; dziennie 0-50; kandydatow_na_profil 1-50; do_person `round-robin`|slug)
   / `{"pierwsza_klatka": {dowolne z pól}}` (3.5: `wlaczona` bool, `model` jak `klatka_model`, `kontrola` bool, `max_dodatkowych` 0-2;
+  3.5.1: `zapas_nsfw` lista modeli klatki po odrzuceniu przez filtr NSFW, domyślnie `["seedream_v5_pro", "nano_banana_pro"]`, [] = bez;
   GET oddaje też `modele_klatki [{id, nazwa, opis}]`, `folder_tel` (Pulpit/ROLKI AI/tla), `ma_klucz_openrouter`)
   – złe wartości → 400. Limitów budżetu tu nie ma.
 - 3.5: każdy przebieg autopilota (i start panelu) dokańcza rolki ORAZ zdjęcia w toku WSZYSTKICH person, także bez włączonego

@@ -177,6 +177,10 @@
                 </label>
               </div>
               <div class="autopilot-status" id="autopilot-status">—</div>
+              <!-- 3.5.1: przy włączaniu autopilota najpierw krótkie potwierdzenie (model, ile dziennie, od której, koszt, IG) -->
+              <div class="autopilot-potwierdz" id="autopilot-potwierdz" hidden role="group" aria-label="Potwierdź włączenie autopilota"></div>
+              <!-- 3.5.1: model rolek z promptu i ile dziennie – widoczne przy przełączniku (to samo co Ustawienia → Autopilot) -->
+              <div class="autopilot-wybor" id="autopilot-wybor"></div>
               <div class="autopilot-z-promptu" id="autopilot-z-promptu"></div>
               <div class="autopilot-z-promptu" id="autopilot-rolki-ig"></div>
               <div class="autopilot-telefon" id="autopilot-telefon"></div>
@@ -825,7 +829,7 @@
                 <p class="muted">Autopilot sam wymyśla i robi rolki jak „Losuj” w zakładce <a href="#z-promptu">Z promptu</a>: miejsce, strój z biblioteki, kamera z ukrycia, reakcja ludzi i komentarz zza kamery (ElevenLabs). Potem pranie w Media Tool, folder „tu rolki zrobione” i Telegram. Pilnuje wspólnego dziennego limitu kredytów; gdy filtr odrzuci 2 rolki w ciągu dnia – próbuje dopiero jutro.</p>
                 <div class="pola-siatka">
                   <div class="pole"><label for="g-zp-dziennie">Rolki z promptu dziennie (łącznie)</label><input type="number" id="g-zp-dziennie" name="autopilot_z_promptu.dziennie" min="0" max="20" data-domyslne="1"><small class="pole-info">Razem dla wszystkich person, nie na każdą. 0 = wyłączone.</small></div>
-                  <div class="pole"><label for="g-zp-model">Model</label><select id="g-zp-model" name="autopilot_z_promptu.model"><option value="seedance_2_5">Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)</option><option value="wan3_0_prime">Wan 3.0 Prime · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)</option></select><small class="pole-info">Seedance – najlepsza twarz. Wan – ponad 2× taniej.</small></div>
+                  <div class="pole"><label for="g-zp-model">Model</label><select id="g-zp-model" name="autopilot_z_promptu.model"><option value="seedance_2_5">Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)</option><option value="wan3_0_prime">Wan 3.0 Premium (Prime) · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)</option></select><small class="pole-info">Seedance – twarz persony pewna (zdjęcia persony + pierwsza klatka). Wan Premium – ok. 2× taniej, tło tak samo realistyczne, ale twarz tylko z pierwszej klatki (może wyjść ogólna). To samo wybierasz na Starcie przy autopilocie.</small></div>
                   <div class="pole"><label for="g-zp-od">Nie wcześniej niż o</label><input type="time" id="g-zp-od" name="autopilot_z_promptu.od_godziny" step="60"><small class="pole-info">Godzina na tym komputerze.</small></div>
                 </div>
                 <div class="pole"><span class="etykieta-pola">Persony – na zmianę, po kolei</span><div class="g-zp-persony" id="g-zp-persony"></div><small class="pole-info">Nic nie zaznaczone = wszystkie, które mają zdjęcia. Robi tylko wtedy, gdy autopilot jest włączony (Start).</small></div>

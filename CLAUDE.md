@@ -416,6 +416,38 @@ Wlasciciel prowadzi wlasne AI-persony (np. @uroczanoemi) na materialach, do ktor
   klatki; autopilot dokancza w_toku persony BEZ autopilota + petla; panel). conftest: `dane` wylacza pierwsza klatke (stare testy),
   UdawaneCLI zapisuje media start_image w `params.medias`.
 
+## 3.5.1 (2026-10-08): poprawki po platnym tescie (Noemi #8/#9, sklepik, Wan 3.0 Prime + klatka, 33 kr)
+
+- **`--klatka-model` / `--klatka` / `--tlo` z CLI** ginely przy `--asystent` (`cmd_z_promptu` podmienial opcje na opcje asystenta) ->
+  teraz przezywaja (`klatka_cli`); cena klatki z wybranego modelu (Nano Banana Pro = 2 kr).
+- **Zapas po NSFW klatki** (`pierwsza_klatka.lancuch_modeli`): filtr tresci odrzucil klatke (status nsfw albo odmowa przy create,
+  0 kr) -> od razu kolejny model: wybrany -> `pierwsza_klatka.zapas_nsfw` (ustawienie globalne, domyslnie seedream_v5_pro,
+  nano_banana_pro; bez powtorek, max 2). Zapas pomijany, gdy nie miesci zdjec albo jest drozszy niz zatwierdzona klatka (w gore do
+  pelnych kr) - wpis "zapas klatki X pominiety". Dziennik: "klatka odrzucona przez filtr X (NSFW, 0 kr) - probuje Y". Proby z
+  `filtr: "nsfw"` i `model`; do limitu kontroli AI (1 + max_dodatkowych) licza sie tylko klatki bez filtra; kontrola odrzuci
+  klatke z zapasu = nowa tym samym modelem. W budzecie tylko to, co przeszlo. Asystent: `asystent.zapisz_odrzucenie` (archiwum
+  nauki -> stroj do `nsfw_stroje`), takze gdy zapas sie udal. Wszystkie odrzucone = blad nsfw; "Sprobuj jeszcze raz" = nowa runda
+  (`wyczysc_odrzucona`). Karta: `klatka_info.model` = model, ktory naprawde zrobil klatke, `odrzucone_filtrem`.
+- **Modele wizyjne dynamicznie** (`instagram_rolki.modele_vision` + `ocen_vision` - WSPOLNE dla kontroli klatki i filtra rolek z
+  IG): GET /models (z kluczem, 0 zl, cache 1 h; bez listy = MODELE_VISION na 5 min) -> id `:free` z `image` w
+  input_modalities, bez guard/safety; najpierw MODELE_VISION (gemma-4-31b, gemma-4-26b-a4b, inkling, nemotron-3-nano-omni), potem
+  reszta. `_rodzaj_bledu`: 404 unavailable for free / no endpoints / 403 "only available on agentic harnesses" = wypada z cache;
+  429 chwilowy = nastepny (oba bez liczenia do MAX_PROB_LLM, max 8); zly klucz / brak srodkow / dzienny limit (429 per-day) =
+  koniec. `max_tokens` 1500 (rozumujace zjadaly 200 na myslenie), timeout 60 s. Na zywo 2026-10-08: gemma 4 = 429 upstream
+  (Google AI Studio), inkling = 403 agentic, **nemotron-3-nano-omni dziala** (~10-20 s; klatka #9 -> ok).
+- **Prompt wideo z klatka** (Seedance i Wan): `scenariusz.KAMERA_KLATKA` / `KAMERA_KLATKA_KROTKA` zamiast ruchu kamery (zoom,
+  podchodzenie, mijanie): jedno ciagle ujecie bez ciec i zmiany kadru, telefon zostaje tam, gdzie na klatce (nie podchodzi, nie
+  zoomuje, nie panoramuje, nie goni jej), tylko lekkie drganie; ona moze chodzic / wyjsc z kadru. Kamery w ruchu (idzie_za, mija,
+  z_biodra) -> `OPERATOR_KLATKI` "standing still far away". Beaty z czasami dostaja `AKCJA_JEDNO_UJECIE` (to momenty jednego
+  ujecia, nie osobne ujecia). Bez slow z SLOWA_RYZYKOWNE (test). Wan dalej bez referencji przy start_image (twarz z klatki).
+- **Start: wybor modelu przy autopilocie**: chipy "Seedance 2.5 · ok. 73 kr" / "Wan 3.0 Premium · ok. 33 kr" + ile dziennie
+  (zapis od razu do `autopilot_z_promptu`, ten sam stan co Ustawienia); `stan_z_promptu` daje `modele` [{id, nazwa, opis, kr}],
+  `kr_rolki`, `limit_dzienny` (kr = szacunek + 3 za klatke, gdy wlaczona). Wlaczanie przelacznika = panel potwierdzenia w stronie
+  (model do zmiany, ile dziennie, od godziny, koszt dzienny, IG wl/wyl; "Wlacz" / "Anuluj", bez confirm()); wylaczanie bez pytania.
+- Testy: test_pierwsza_klatka.py (zapas NSFW: seedream, bez powtorek, drozszy pominiety, odmowa przy create + kontrola na zapasie,
+  zapas wylaczony, wszystkie odrzucone; CLI --asystent --klatka-model; prompt jednego ujecia dla 2 modeli x 4 kamer), test_instagram.py
+  (lista z /models, 404/403/429/dzienny limit, kontrola klatki ta sama lista), test_autopilot_z_promptu.py (modele z cena na Starcie).
+
 ## Postprodukcja
 
 - Wideo: `mediatool.py` odpala worker Media Tool headless (`ELECTRON_RUN_AS_NODE=1 "Media Tool.exe" worker.cjs <json>`,

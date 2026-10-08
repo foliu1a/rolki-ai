@@ -313,3 +313,120 @@ def test_api_konto_apify(klient):
     d = klient.post("/api/konta", json={"dostawca": "apify", "klucz": "apify_api_xyz"}).get_json()
     assert d["ok"] and d["konta"]["apify"]["jest"] is True
     assert sekrety.klucz("apify") == "apify_api_xyz"
+
+
+# ---------------- 3.5.1: dynamiczna lista darmowych modeli wizyjnych (wspolna z kontrola pierwszej klatki) ----------------
+
+MODELE_OR = {"data": [
+    {"id": "nowy/vision-x:free", "architecture": {"input_modalities": ["text", "image"]}},
+    {"id": "google/gemma-4-26b-a4b-it:free", "architecture": {"input_modalities": ["text", "image"]}},
+    {"id": "meta-llama/llama-guard-4-12b:free", "architecture": {"input_modalities": ["text", "image"]}},
+    {"id": "nvidia/nemotron-content-safety:free", "architecture": {"input_modalities": ["image", "text"]}},
+    {"id": "google/gemma-4-31b-it:free", "architecture": {"input_modalities": ["text", "image"]}},
+    {"id": "google/gemma-4-31b-it", "architecture": {"input_modalities": ["text", "image"]}},          # platny
+    {"id": "tylko/tekst:free", "architecture": {"input_modalities": ["text"]}},
+    {"id": "stary/format:free", "architecture": {"modality": "text+image->text"}},
+    {"id": "qwen/qwen2.5-vl-72b-instruct:free", "architecture": {"input_modalities": ["text", "image"]}},
+]}
+
+
+class OpenRouterHTTP:
+    """Udawany OpenRouter: GET /models + POST /chat/completions (model z `niedostepne` -> 404 unavailable for free)."""
+
+    def __init__(self, niedostepne=(), modele=MODELE_OR):
+        self.niedostepne, self.modele, self.zapytania = set(niedostepne), modele, []
+
+    def __call__(self, metoda, url, cialo=None, timeout=30):
+        self.zapytania.append((metoda, url, (cialo or {}).get("model")))
+        if url.endswith("/models"):
+            if isinstance(self.modele, Exception):
+                raise self.modele
+            return self.modele
+        assert url == "https://openrouter.ai/api/v1/chat/completions"
+        if cialo["model"] in self.niedostepne:
+            raise RuntimeError("OpenRouter 404: This model is unavailable for free. The paid version is available now")
+        return {"choices": [{"message": {"content": '{"ok": true, "powod": "daleko, napisy ok"}'}}]}
+
+
+def test_modele_vision_dynamicznie_preferowane_potem_reszta_bez_guard(dane, monkeypatch):
+    http_ = OpenRouterHTTP()
+    monkeypatch.setattr(instagram_rolki, "_http_json", http_)
+    assert instagram_rolki.modele_vision() == ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free",
+                                               "nowy/vision-x:free", "stary/format:free", "qwen/qwen2.5-vl-72b-instruct:free"]
+    instagram_rolki.modele_vision()
+    assert len([z for z in http_.zapytania if z[1].endswith("/models")]) == 1          # cache 1 h
+    # lista nie przyszla -> preferowane z kodu (na krotko)
+    instagram_rolki._cache_modeli.update(czas=0.0, modele=None)
+    monkeypatch.setattr(instagram_rolki, "_http_json", OpenRouterHTTP(modele=RuntimeError("brak polaczenia")))
+    assert instagram_rolki.modele_vision() == instagram_rolki.MODELE_VISION
+    assert instagram_rolki._cache_modeli["waznosc"] == instagram_rolki.CACHE_BEZ_LISTY_S
+
+
+def test_404_unavailable_for_free_wypada_z_cache_i_nastepny(dane, monkeypatch):
+    sekrety.zapisz_klucz("openrouter", "sk-or-test")
+    http_ = OpenRouterHTTP(niedostepne={"google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"})
+    monkeypatch.setattr(instagram_rolki, "_http_json", http_)
+    w = instagram_rolki.filtr_ai(_fejk_jpg(dane))
+    assert w["ok"] is True and w["zrodlo"] == "openrouter:nowy/vision-x:free"
+    assert "google/gemma-4-31b-it:free" not in instagram_rolki.modele_vision()
+    assert instagram_rolki.modele_vision()[0] == "nowy/vision-x:free"
+    # zly klucz = koniec od razu (bez przechodzenia po calej liscie)
+    monkeypatch.setattr(instagram_rolki, "_zapytaj_vision", lambda m, d, timeout=30: (_ for _ in ()).throw(
+        RuntimeError("zly klucz OpenRouter")))
+    w, bledy = instagram_rolki.ocen_vision(lambda m, d: instagram_rolki._zapytaj_vision(m, d), "data:x")
+    assert w is None and bledy.count("zly klucz") == 1
+
+
+def test_kontrola_klatki_ta_sama_lista_modeli(dane, monkeypatch):
+    import pierwsza_klatka
+    sekrety.zapisz_klucz("openrouter", "sk-or-test")
+    http_ = OpenRouterHTTP(niedostepne={"google/gemma-4-31b-it:free"})
+    monkeypatch.setattr(instagram_rolki, "_http_json", http_)
+    monkeypatch.setattr(pierwsza_klatka, "_jpg_data_url", lambda plik: "data:image/jpeg;base64,AAAA")
+    ocena, czemu = pierwsza_klatka.ocen("klatka.png")
+    assert czemu == "" and ocena["ok"] is True and ocena["zrodlo"] == "openrouter:google/gemma-4-26b-a4b-it:free"
+    assert [z[2] for z in http_.zapytania if z[0] == "POST"] == ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"]
+
+
+def test_403_agentic_429_przeciazony_i_dzienny_limit(dane, monkeypatch):
+    """Na zywo 2026-10-08: gemma 4 = 429 rate-limited upstream (chwilowe), inkling = 403 'only available on agentic harnesses'
+    (u nas nigdy), nemotron omni = odpowiada. 429/403 nie zjadaja limitu prob; dzienny limit konta = koniec od razu."""
+    sekrety.zapisz_klucz("openrouter", "sk-or-test")
+    instagram_rolki._cache_modeli.update(czas=10 ** 12, modele=["g1:free", "g2:free", "ink:free", "ink2:free", "nemo:free"],
+                                         waznosc=10 ** 12)
+    odp = {"g1:free": RuntimeError("OpenRouter 429: darmowy model chwilowo przeciazony"),
+           "g2:free": RuntimeError("OpenRouter 429: darmowy model chwilowo przeciazony"),
+           "ink:free": RuntimeError("OpenRouter 403: ink:free is only available on agentic harnesses. Try ..."),
+           "ink2:free": RuntimeError("OpenRouter 403: ink2:free is only available on agentic harnesses. Try ...")}
+    pytania = []
+
+    def zapytaj(m, d):
+        pytania.append(m)
+        if m in odp:
+            raise odp[m]
+        return {"ok": False, "powod": "za blisko"}
+    w, bledy = instagram_rolki.ocen_vision(zapytaj, "data:x")
+    assert w["zrodlo"] == "openrouter:nemo:free" and w["ok"] is False and pytania[-1] == "nemo:free"
+    assert instagram_rolki.modele_vision() == ["g1:free", "g2:free", "nemo:free"]        # 403 wypadly, 429 zostaja
+    pytania.clear()
+    w, bledy = instagram_rolki.ocen_vision(lambda m, d: zapytaj(m, d) if m != "g1:free" else (_ for _ in ()).throw(
+        RuntimeError("dzienny limit darmowych zapytan OpenRouter")), "data:x")
+    assert w is None and pytania == [] and "dzienny limit" in bledy
+
+
+def test_http_json_429_dzienny_limit_vs_chwilowy(dane, monkeypatch):
+    import io
+    sekrety.zapisz_klucz("openrouter", "sk-or-test")
+
+    def http_blad(cialo):
+        def otworz(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, io.BytesIO(cialo.encode()))
+        return otworz
+    monkeypatch.setattr(instagram_rolki.urllib.request, "urlopen", http_blad(
+        '{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits","code":429}}'))
+    with pytest.raises(RuntimeError, match="dzienny limit"):
+        instagram_rolki._http_json("POST", instagram_rolki.LLM_API + "/chat/completions", {})
+    monkeypatch.setattr(instagram_rolki.urllib.request, "urlopen", http_blad(
+        '{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"x:free is temporarily rate-limited upstream"}}}'))
+    with pytest.raises(RuntimeError, match="chwilowo przeciazony"):
+        instagram_rolki._http_json("POST", instagram_rolki.LLM_API + "/chat/completions", {})

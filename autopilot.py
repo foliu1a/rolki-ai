@@ -471,10 +471,16 @@ def wyslij_zdjecia(slug, log=None):
 # reczne "Zrob rolke" (fabryka.generuj po id: znacznik w_toku, create bez --wait, job_id od razu, nigdy drugi create) ->
 # komentarz ElevenLabs, Media Tool, folder "tu rolki zrobione", Telegram. Jedna rolka naraz; w toku = czekamy (wznowienie 0 kr).
 
+# 3.5.1: "krotko" + "opis" - wybor modelu na Starcie przy przelaczniku autopilota (user mowi "Wan 3.0 Premium" - w CLI to Prime)
 MODELE_Z_PROMPTU = {
-    "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)", "szacunek": 70},
-    "wan3_0_prime": {"nazwa": "Wan 3.0 Prime · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)", "szacunek": 30},
+    "seedance_2_5": {"nazwa": "Seedance 2.5 · 720p · 10 s (ok. 70 kr + zdjęcie ok. 3 kr)", "szacunek": 70,
+                     "krotko": "Seedance 2.5",
+                     "opis": "Twarz persony pewna – bierze zdjęcia persony i pierwszą klatkę."},
+    "wan3_0_prime": {"nazwa": "Wan 3.0 Premium (Prime) · 720p · 10 s (ok. 30 kr + zdjęcie ok. 3 kr)", "szacunek": 30,
+                     "krotko": "Wan 3.0 Premium",
+                     "opis": "Ok. 2× taniej, tło tak samo realistyczne, ale twarz tylko z pierwszej klatki (może wyjść ogólna)."},
 }
+KR_KLATKI_SZACUNEK = 3              # pierwsza klatka (GPT Image 2.5 ok. 2,75 kr -> 3 w limicie), gdy wlaczona
 DLUGOSC_Z_PROMPTU = 10
 ROZDZIELCZOSC_Z_PROMPTU = "720p"
 MAX_NIEUDANYCH_Z_PROMPTU = 2        # tyle nieudanych prob dziennie (NSFW/IP/blad) na cala pule person - potem koniec na dzis
@@ -747,6 +753,13 @@ def stan_z_promptu(wlaczony=None, teraz=None):
     persony = persony_z_promptu(u)
     wynik = {"dziennie": n, "dzis": x, "nieudane": len(d["nieudane"]), "model": u["model"], "od_godziny": u["od_godziny"],
              "persony": persony, "model_nazwa": MODELE_Z_PROMPTU[u["model"]]["nazwa"]}
+    # 3.5.1: wybor modelu na Starcie (przy przelaczniku) + szacunek na rolke (wideo + pierwsza klatka, gdy wlaczona)
+    import pierwsza_klatka
+    kl = KR_KLATKI_SZACUNEK if pierwsza_klatka.ustawienia()["wlaczona"] else 0
+    wynik["modele"] = [{"id": k, "nazwa": v["krotko"], "opis": v["opis"], "kr": v["szacunek"] + kl}
+                       for k, v in MODELE_Z_PROMPTU.items()]
+    wynik["kr_rolki"] = MODELE_Z_PROMPTU[u["model"]]["szacunek"] + kl
+    wynik["limit_dzienny"] = baza.limit_dzienny("higgsfield")
     if n <= 0:
         wynik.update(stan="wylaczone", tekst="Rolki z promptu: wyłączone (Ustawienia → Autopilot).")
         return wynik

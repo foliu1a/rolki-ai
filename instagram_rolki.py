@@ -34,17 +34,26 @@ STAGING = "_ig_staging"                         # pobieramy tu NAJPIERW (modelki
 MIN_CZAS_S, MAX_CZAS_S = 3.0, 60.0
 MIN_KROTKI_BOK = 360            # najkrotszy bok w px - mniej = za slaba jakosc do swapa
 
-# AI: darmowe modele multimodalne OpenRouter (nazwy bywaja zmieniane - podmien, gdy OpenRouter je wycofa; GET /models
-# odfiltruje te, ktorych juz nie ma albo nie przyjmuja obrazka). Klucz: panel -> Konta -> OpenRouter (bez weryfikacji dowodem).
+# AI: darmowe modele multimodalne OpenRouter. 3.5.1: lista DYNAMICZNA - GET /models (z kluczem, 0 zl, cache 1 h): id konczace
+# sie na ":free" z "image" w architecture.input_modalities, bez modeli typu guard/content-safety; najpierw MODELE_VISION
+# (preferowana kolejnosc, sprawdzone 2026-10-08 jako dostepne za darmo), potem reszta. Stara lista (qwen2.5-vl, llama-3.2-vision,
+# gemini-2.0-flash-exp) dawala juz tylko 404 "unavailable for free". Model z takim 404 wypada z cache (nastepny w kolejce).
+# Wspolne dla filtra rolek z IG i kontroli pierwszej klatki (ocen_vision). Klucz: panel -> Konta -> OpenRouter.
 LLM_API = "https://openrouter.ai/api/v1"
 MODELE_VISION = [
-    "qwen/qwen2.5-vl-72b-instruct:free",
-    "meta-llama/llama-3.2-11b-vision-instruct:free",
-    "google/gemini-2.0-flash-exp:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "thinkingmachines/inkling:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 ]
-TIMEOUT_LLM_S = 30
-MAX_PROB_LLM = 3
-_cache_modeli = {"czas": 0.0, "modele": None}
+POMIJANE_VISION = re.compile(r"guard|safety|shield|moderat", re.I)    # klasyfikatory tresci, nie oceniaja kadru
+TIMEOUT_LLM_S = 60              # modele rozumujace (nemotron omni) odpowiadaja ok. 20 s
+MAX_TOKENOW_VISION = 1500       # rozumujace zjadaja tokeny na myslenie - przy 200 oddawaly pusta tresc (finish=length)
+MAX_PROB_LLM = 3                # tyle modeli z prawdziwym bledem (timeout, zla odpowiedz) na jedna ocene
+MAX_404_LLM = 8                 # + tyle szybkich odmow (404/403 niedostepny za darmo, 429 chwilowo przeciazony)
+CACHE_MODELI_S = 3600
+CACHE_BEZ_LISTY_S = 300         # lista /models nie przyszla -> preferowane na 5 min, potem znow pytamy
+_cache_modeli = {"czas": 0.0, "modele": None, "waznosc": CACHE_MODELI_S}
 
 
 def _log(msg):
@@ -133,34 +142,109 @@ def _http_json(metoda, url, cialo=None, timeout=TIMEOUT_LLM_S):
     except urllib.error.HTTPError as e:
         surowe = e.read().decode("utf-8", errors="replace") if e.fp else ""
         try:
-            msg = json.loads(surowe)["error"]["message"]
-        except (ValueError, KeyError, TypeError):
-            msg = surowe[:200]
-        podpowiedz = {401: "zly klucz OpenRouter", 402: "OpenRouter chce doladowania",
-                      429: "darmowe modele OpenRouter przeciazone albo dzienny limit"}
+            blad = json.loads(surowe)["error"]
+            msg = str(blad.get("message") or "")
+            surowy = str((blad.get("metadata") or {}).get("raw") or "")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            msg, surowy = surowe[:200], ""
+        if e.code == 429:
+            # 3.5.1: dzienny limit darmowych zapytan konta (koniec na dzis) vs chwilowo przeciazony model (nastepny model)
+            dzienny = "per-day" in (msg + surowy).lower() or "per day" in (msg + surowy).lower()
+            raise RuntimeError("dzienny limit darmowych zapytan OpenRouter" if dzienny else
+                               "OpenRouter 429: darmowy model chwilowo przeciazony")
+        podpowiedz = {401: "zly klucz OpenRouter", 402: "OpenRouter chce doladowania"}
         raise RuntimeError(podpowiedz.get(e.code) or f"OpenRouter {e.code}: {msg}"[:200])
     except (OSError, ValueError) as e:
         raise RuntimeError(f"brak polaczenia z OpenRouter ({e})")
 
 
+def _darmowe_obrazkowe(dane):
+    """Z odpowiedzi GET /models: id darmowych (":free") modeli przyjmujacych obrazek, bez guard/content-safety (kolejnosc listy)."""
+    wynik = []
+    for m in dane if isinstance(dane, list) else []:
+        mid = str((m or {}).get("id") or "") if isinstance(m, dict) else ""
+        if not mid.endswith(":free") or POMIJANE_VISION.search(mid) or mid in wynik:
+            continue
+        arch = m.get("architecture") or {}
+        wejscia = arch.get("input_modalities")
+        if wejscia is None:
+            wejscia = (arch.get("modality") or "").split("->")[0]       # stary format "text+image->text"
+        if "image" in (wejscia if isinstance(wejscia, str) else " ".join(map(str, wejscia))):
+            wynik.append(mid)
+    return wynik
+
+
 def modele_vision():
-    """MODELE_VISION, ktore OpenRouter nadal ma i przyjmuja obrazek (GET /models, cache 1 h); blad listy = cala lista."""
+    """Darmowe modele wizyjne OpenRouter do oceny obrazka (cache 1 h): GET /models -> ":free" + "image" na wejsciu, bez
+    guard/safety; najpierw MODELE_VISION (preferowana kolejnosc), potem reszta z listy. Lista nie przyszla = MODELE_VISION
+    (na 5 min). Pusta lista darmowych obrazkowych = tez MODELE_VISION (moze OpenRouter ich nie wypisuje, a dzialaja)."""
     c = _cache_modeli
-    if c["modele"] is not None and time.time() - c["czas"] < 3600:
+    if c["modele"] is not None and time.time() - c["czas"] < c.get("waznosc", CACHE_MODELI_S):
         return c["modele"]
     try:
-        dane = (_http_json("GET", LLM_API + "/models", timeout=15) or {}).get("data") or []
-        obrazkowe = set()
-        for m in dane:
-            arch = m.get("architecture") or {}
-            wejscia = arch.get("input_modalities") or arch.get("modality") or ""
-            if "image" in (wejscia if isinstance(wejscia, str) else " ".join(wejscia)):
-                obrazkowe.add(m.get("id"))
-        modele = [m for m in MODELE_VISION if m in obrazkowe] or list(MODELE_VISION)
+        dostepne = _darmowe_obrazkowe((_http_json("GET", LLM_API + "/models", timeout=15) or {}).get("data") or [])
+        modele = [m for m in MODELE_VISION if m in dostepne] + [m for m in dostepne if m not in MODELE_VISION]
+        waznosc = CACHE_MODELI_S
+        if not modele:
+            modele = list(MODELE_VISION)
     except RuntimeError:
-        modele = list(MODELE_VISION)
-    c.update(czas=time.time(), modele=modele)
+        modele, waznosc = list(MODELE_VISION), CACHE_BEZ_LISTY_S
+    c.update(czas=time.time(), modele=modele, waznosc=waznosc)
     return modele
+
+
+def _rodzaj_bledu(blad):
+    """Klasa bledu modelu wizyjnego (sprawdzone na zywo 2026-10-08):
+    'zniknal'    - 404 "unavailable for free" / "No endpoints found", 403 "only available on agentic harnesses" (inkling):
+                   ten model u nas nie zadziala - wypada z cache, nastepny (nie liczy sie do MAX_PROB_LLM);
+    'przeciazony'- 429 "temporarily rate-limited upstream" (gemma 4 przez Google AI Studio) - nastepny, bez liczenia;
+    'koniec'     - zly klucz, brak srodkow, dzienny limit darmowych zapytan - nie ma sensu pytac innych;
+    'inny'       - timeout, zla odpowiedz (np. model rozumujacy bez JSON) - liczy sie do MAX_PROB_LLM."""
+    t = str(blad).lower()
+    if "zly klucz" in t or "doladowania" in t or "dzienny limit" in t:
+        return "koniec"
+    if ("openrouter 404" in t or "unavailable for free" in t or "no endpoints found" in t
+            or "agentic harness" in t):
+        return "zniknal"
+    if "openrouter 429" in t or "rate-limited" in t:
+        return "przeciazony"
+    return "inny"
+
+
+def odrzuc_model(model):
+    """Model oddal 404 "unavailable for free" - wypada z cache modeli wizyjnych (do nastepnego odswiezenia listy)."""
+    c = _cache_modeli
+    if c["modele"] is not None and model in c["modele"]:
+        c["modele"] = [m for m in c["modele"] if m != model]
+
+
+def ocen_vision(zapytaj, data_url, log=None):
+    """WSPOLNE dla filtra rolek z IG i kontroli pierwszej klatki: kolejne darmowe modele wizyjne (modele_vision), az ktorys
+    odpowie. zapytaj(model, data_url) -> {"ok", "powod"} (RuntimeError/ValueError = blad). Model z 404 "unavailable for free"
+    wypada z cache i nie liczy sie do MAX_PROB_LLM (max MAX_404_LLM takich na raz); zly klucz / brak srodkow = koniec.
+    Zwraca ({"ok", "powod", "zrodlo": "openrouter:<model>"}, "") albo (None, "opis bledow")."""
+    bledy, prawdziwe, szybkie = [], 0, 0
+    for model in list(modele_vision()):
+        if prawdziwe >= MAX_PROB_LLM or szybkie >= MAX_404_LLM:
+            break
+        try:
+            w = zapytaj(model, data_url)
+        except (RuntimeError, ValueError) as e:
+            bledy.append(f"{model.split('/')[-1]}: {e}")
+            rodzaj = _rodzaj_bledu(e) if isinstance(e, RuntimeError) else "inny"
+            if rodzaj == "koniec":
+                break
+            if rodzaj == "zniknal":
+                odrzuc_model(model)
+                if log:
+                    log(f"model wizyjny {model} niedostepny dla nas za darmo - wypada z listy, probuje nastepny")
+            if rodzaj in ("zniknal", "przeciazony"):
+                szybkie += 1
+                continue
+            prawdziwe += 1
+            continue
+        return {"ok": bool(w["ok"]), "powod": w.get("powod") or "", "zrodlo": f"openrouter:{model}"}, ""
+    return None, ("; ".join(bledy) or "brak darmowych modeli wizyjnych na OpenRouter")[:300]
 
 
 SYSTEM_VISION = (
@@ -194,7 +278,7 @@ def _zapytaj_vision(model, data_url, timeout=TIMEOUT_LLM_S):
                 {"type": "image_url", "image_url": {"url": data_url}},
             ]},
         ],
-        "temperature": 0.2, "max_tokens": 200,
+        "temperature": 0.2, "max_tokens": MAX_TOKENOW_VISION,
     }, timeout=timeout)
     if isinstance(odp, dict) and odp.get("error"):
         raise RuntimeError(f"OpenRouter: {str((odp['error'] or {}).get('message', odp['error']))[:200]}")
@@ -224,19 +308,10 @@ def filtr_ai(klatka_jpg, log=None):
         data_url = _data_url(klatka_jpg)
     except OSError:
         return None
-    bledy = []
-    for model in modele_vision()[:MAX_PROB_LLM]:
-        try:
-            w = _zapytaj_vision(model, data_url)
-        except (RuntimeError, ValueError) as e:
-            bledy.append(f"{model.split('/')[-1]}: {e}")
-            if "zly klucz" in str(e) or "doladowania" in str(e):
-                break
-            continue
-        return {"ok": bool(w["ok"]), "powod": w.get("powod") or "", "zrodlo": f"openrouter:{model}"}
-    if bledy:
-        log("AI-ocena niedostepna (" + "; ".join(bledy)[:200] + ") - decyduja heurystyki")
-    return None
+    w, bledy = ocen_vision(lambda m, d: _zapytaj_vision(m, d), data_url, log=log)
+    if w is None:
+        log("AI-ocena niedostepna (" + bledy[:200] + ") - decyduja heurystyki")
+    return w
 
 
 # ---------------- pobierz + filtruj + zapisz (round-robin po personach) ----------------

@@ -2219,9 +2219,10 @@ def cmd_z_promptu(args):
              "wlosy": {"kolor": args.wlosy, "fryzura": args.fryzura, "grzywka": args.grzywka}}
     if args.nagrywa:
         opcje["nagrywa"] = args.nagrywa
-    for k, v in (("klatka", args.klatka), ("klatka_model", args.klatka_model), ("tlo", args.tlo)):
-        if v:
-            opcje[k] = v
+    # 3.5.1: pierwsza klatka z CLI (--klatka/--klatka-model/--tlo) - asystent ich nie dobiera, wiec musza przezyc --asystent
+    # (test 2026-10-08: `--asystent --klatka-model nano_banana_pro` dalej robil GPT Image 2.5 i liczyl 2,75 kr)
+    klatka_cli = {k: v for k, v in (("klatka", args.klatka), ("klatka_model", args.klatka_model), ("tlo", args.tlo)) if v}
+    opcje.update(klatka_cli)
     if args.gotowy and not args.tekst:
         import scenariusz
         opcje["tekst"] = scenariusz.POMYSLY_PO_ID[args.gotowy]["pl"] if args.gotowy in scenariusz.POMYSLY_PO_ID else ""
@@ -2231,7 +2232,7 @@ def cmd_z_promptu(args):
                   and v not in ("", "auto", "losowa")}
         reczne.update(model=args.model, dlugosc=args.dlugosc)
         a = asystent.dobierz(slug, opcje["tekst"], pomysl_id=args.gotowy, zablokowane=reczne)
-        opcje = dict(a["opcje"], asystent=a)
+        opcje = dict(a["opcje"], asystent=a, **klatka_cli)
         print(f"asystent ({a['zrodlo']}): {a['podsumowanie']}\n  dlaczego: {a['dlaczego']}" + (f"\n  {a['uwaga']}" if a["uwaga"] else ""))
     w = wycena_z_promptu(slug, opcje, z_cena=True)
     print(w["prompt"])

@@ -630,6 +630,9 @@ USTAWIENIA_GLOBALNE_DOMYSLNE = {
         "model": "gpt_image_2_5",   # gpt_image_2_5 (najlepiej pisze tekst) | nano_banana_pro | gpt_image_2 | seedream_v5_pro
         "kontrola": True,           # darmowy model wizyjny OpenRouter ocenia klatke przed wideo (bez klucza - bez kontroli)
         "max_dodatkowych": 2,       # ile NOWYCH klatek, gdy kontrola odrzuci (kazda ~3 kr, liczona w budzecie); 0-2
+        # 3.5.1: filtr tresci (NSFW, 0 kr) odrzucil klatke -> od razu kolejny model klatki z tej listy (bez powtorek wybranego,
+        # max 2 zapasowe; zapas drozszy niz zatwierdzona klatka jest pomijany). [] = bez zapasu (rolka konczy sie bledem nsfw)
+        "zapas_nsfw": ["seedream_v5_pro", "nano_banana_pro"],
     },
 }
 

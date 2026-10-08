@@ -1629,13 +1629,11 @@ SZABLON_PELNY_KLATKA = (
     "blend her with anyone, only one of her.{LINIA_STROJU}\n"
     "[{IMIE}] {TOZ}. Hair: {WLOSY}. {WZROST}{SYLWETKA}Outfit: {STROJ} - exactly as in the start frame.\n"
     "[Text] Keep every sign, label and price exactly as it is in the start frame: do not change, add, move, translate or animate "
-    "any text and do not invent new signs or prices; letters stay the same when the camera moves.\n"
+    "any text and do not invent new signs or prices; letters stay the same for the whole clip.\n"
     "[Action] {AKCJA}\n"
     "She acts like a normal person busy with her own task: relaxed posture, small weight shifts, natural hand movements; she "
     "never looks into the lens and never poses. Bystanders react only briefly and naturally: {REAKCJE}.{SUBTELNIE}\n"
-    "[Camera] {KAMERA} The camera stays as far away as in the start frame for the whole clip: she stays a small figure and never "
-    "becomes a close-up; the phone shakes like it is held by someone quietly filming, and now and then a passer-by or the edge "
-    "of something in the foreground briefly covers part of the frame. One continuous take, no cuts.\n"
+    "[Camera] {KAMERA}\n"
     "[Phone look] The same look as the start frame: {SWIATLO}; auto exposure readjusts a little as the phone moves, fine "
     "digital noise, natural slightly flat colours, compression like an Instagram upload. Realistic skin, no beauty filter, no "
     "colour grading.\n"
@@ -1643,6 +1641,30 @@ SZABLON_PELNY_KLATKA = (
     "[Result] A real clip someone filmed in Poland and posted on Instagram: natural scale and perspective, real-world physics. "
     "No subtitles, captions, added text, stickers or watermarks."
 )
+# 3.5.1 (platny test #9 Noemi, Wan 3.0 Prime + klatka): model zrobil kilka ujec z cieciami i "podszedl" do niej (srodek rolki =
+# zblizenie). Wideo z klatka = JEDNO ciagle ujecie z tego samego miejsca: bez ciec i zmiany kadru, bez zoomu, bez podchodzenia
+# i bez gonienia jej kamera; tylko lekkie drganie dloni. Ona moze sie przemieszczac (np. wyjsc ze sklepu). Zamiast {RUCH} kamer
+# (zoom, podchodzenie, mijanie) - bez slow z fabryka.SLOWA_RYZYKOWNE (test).
+KAMERA_KLATKA = (
+    "One single continuous shot from the first to the last second: no cuts, no scene changes, no second angle and no change of "
+    "framing. The phone stays where it is in the start frame, hand-held by someone {OPERATOR}: the same distance and the same "
+    "framing as in the start frame for the whole clip; it never moves closer, never zooms in, never pans and never follows her - "
+    "only a small natural hand-held shake. {IMIE} may move around the place or walk out of the frame (for example walk away or "
+    "out through a door); the camera stays put and does not chase her, so she stays a small figure and never becomes a "
+    "close-up. Now and then a passer-by or the edge of something in the foreground briefly covers part of the frame. Deep phone "
+    "focus. No tripod, gimbal, drone, slow motion or cinematic moves."
+)
+KAMERA_KLATKA_KROTKA = (
+    "one continuous shot with no cuts and no change of framing: the phone, hand-held by someone {OPERATOR}, stays at the same "
+    "spot and distance as in the start image for the whole clip - it never moves closer, never zooms, never pans and never "
+    "follows her; only a small hand-held shake. She may walk around or out of the frame; the camera does not chase her and she "
+    "never becomes a close-up."
+)
+OPERATOR_KLATKI = "standing still far away"     # kamery "w ruchu" (idzie za / mija / z biodra) - w wideo z klatka stoi w miejscu
+KAMERY_W_RUCHU = ("idzie_za", "mija", "z_biodra")
+AKCJA_JEDNO_UJECIE = ("All of this happens in one continuous shot seen from the same spot (the times are moments of the same "
+                      "take, not separate shots): ")
+
 # Wan 3.0 Prime / Gemini: start_image NIE laczy sie ze zdjeciami persony (regula `model get`) - twarz tylko z klatki
 SZABLON_KROTKI_KLATKA = (
     "Candid vertical 9:16 smartphone video, real footage, not a film. It continues EXACTLY from the start image: the same place, "
@@ -1650,7 +1672,7 @@ SZABLON_KROTKI_KLATKA = (
     "away in the start image is {IMIE}: keep her face, hair, body and outfit exactly as in the start image; only one of her. "
     "{WZROST}\n"
     "Action: {AKCJA} She never looks into the lens and never poses. Bystanders: {REAKCJE}.{SUBTELNIE}\n"
-    "Camera: {KAMERA} The camera stays as far away as in the start image; she never becomes a close-up.\n"
+    "Camera: {KAMERA}\n"
     "Look: the same light and phone look as the start image; realistic skin, no beauty filter.\n"
     "Sound: {DZWIEK}\n"
     "No subtitles, captions, text overlays or watermarks."
@@ -2260,7 +2282,11 @@ def zbuduj(slug, opcje=None, los=None):
     if klatka_wl and kl_model not in pierwsza_klatka.MODELE:
         raise ValueError(f"Nieznany model pierwszej klatki '{kl_model}' (mozna: {', '.join(pierwsza_klatka.MODELE)}).")
     if klatka_wl:
-        kamera_blok = kamera_blok.replace(" " + DYSTANS_UKRYTEJ, "")    # szablon z klatka ma wlasne zdanie o odleglosci
+        # 3.5.1: jedno ciagle ujecie z miejsca klatki (bez ciec, zoomu, podchodzenia i gonienia jej) zamiast ruchu kamery
+        op_kl = OPERATOR_KLATKI if kamera in KAMERY_W_RUCHU else operator
+        kamera_blok = (KAMERA_KLATKA if mi["szablon"] == "pelny" else KAMERA_KLATKA_KROTKA).format(OPERATOR=op_kl, IMIE=imie)
+        if pomysl:
+            akcja = AKCJA_JEDNO_UJECIE + akcja      # beaty z czasami (0-3 s: ...) to NIE osobne ujecia
 
     def skladaj(syl):
         blok_syl = f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""

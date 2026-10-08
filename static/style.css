@@ -1058,6 +1058,21 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
 .autopilot-z-promptu.praca { color: var(--akcent-jasny); }
 .autopilot-z-promptu.ok { color: var(--ok); }
 .autopilot-z-promptu a { color: var(--szary); font-size: 14px; }
+/* 3.5.1: model rolek z promptu przy przełączniku autopilota + potwierdzenie włączenia (bez confirm/alert) */
+.autopilot-wybor, .autopilot-potwierdz { display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; }
+.autopilot-wybor:empty { display: none; }
+.autopilot-wybor-gora { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.autopilot-wybor .chip, .autopilot-potwierdz .chip { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.autopilot-wybor-opis { margin: 0; color: var(--szary); font-size: 13.5px; line-height: 1.4; }
+.autopilot-wybor-ile { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--szary); font-size: 14px; }
+.autopilot-wybor-ile input { width: 5.5em; min-height: 36px; padding: 4px 8px; }
+.autopilot-wybor-ile small { font-size: 13px; }
+.autopilot-potwierdz { padding: 12px 14px; background: var(--karta-2); border: 1px solid var(--linia-2);
+  border-left: 3px solid var(--akcent-btn); border-radius: var(--promien-m); }
+.autopilot-potwierdz-tytul { font-weight: 600; font-size: 15.5px; color: var(--tekst); }
+.autopilot-potwierdz-lista { margin: 0; padding-left: 18px; color: var(--szary); line-height: 1.5; }
+.autopilot-potwierdz-lista b { color: var(--tekst); font-weight: 600; }
+.autopilot-potwierdz .rzad { display: flex; gap: 8px; flex-wrap: wrap; }
 .etykieta-pola { font-size: 14px; color: var(--szary); font-weight: 500; }
 .g-zp-persony { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .g-zp-persony .check { padding: 4px 0; }

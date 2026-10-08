@@ -1189,6 +1189,7 @@ function renderAutopilot() {
     }
     elz.className = 'autopilot-z-promptu' + (zp.stan === 'w_toku' ? ' praca' : (zp.stan === 'gotowe' ? ' ok' : ''));
   }
+  renderAutopilotWybor();      // 3.5.1: model (Seedance / Wan Premium) i ile dziennie przy przełączniku
   // 3.4: rolki z Instagrama (źródło klipów do swapa) – „Rolki z Instagrama: dziś X z N (…)”
   const ig = state.rolkiIg || {};
   const eli = $('#autopilot-rolki-ig');
@@ -1220,7 +1221,10 @@ function renderAutopilot() {
 
 // Przełącznik na Starcie: włącza pętlę w tle ORAZ zaznacza personę (ustawienie `autopilot`), bo pętla obsługuje
 // tylko persony z autopilot=true. Wyłączenie odznacza personę; pętlę gasimy, gdy żadna inna jej nie używa.
-async function przelaczAutopilot(wlacz) {
+async function przelaczAutopilot(wlacz, potwierdzone = false) {
+  // 3.5.1: włączanie najpierw pokazuje krótkie potwierdzenie (model, ile dziennie, koszt); wyłączanie bez pytania
+  if (wlacz && !potwierdzone) { pokazPotwierdzenieAutopilota(); return; }
+  if (!wlacz && !$('#autopilot-potwierdz').hidden) { schowajPotwierdzenieAutopilota(); return; }
   try {
     if (wlacz) {
       await api('/api/ustawienia', 'POST', { autopilot: true });
@@ -1243,6 +1247,112 @@ async function przelaczAutopilot(wlacz) {
   }
   renderAutopilot();
   odswiez();
+}
+
+// 3.5.1: model rolek z promptu (Seedance / Wan Premium) i ile dziennie – widoczne przy przełączniku autopilota na Starcie.
+// Ten sam stan co Ustawienia → Autopilot (ustawienia_globalne.autopilot_z_promptu); zmiana zapisuje się od razu.
+function chipyModeluZp(zp, wybrany, akcja) {
+  return `<div class="chipy" role="radiogroup" aria-label="Model rolek z promptu">${(zp.modele || []).map(m =>
+    `<button type="button" class="chip${m.id === wybrany ? ' aktywny' : ''}" role="radio" aria-checked="${m.id === wybrany}" `
+    + `data-akcja="${akcja}" data-model="${esc(m.id)}" title="${esc(m.opis)}">${esc(m.nazwa)} · ok. ${esc(String(m.kr))} kr</button>`).join('')}</div>`;
+}
+
+function modelZp(zp, id) {
+  return (zp.modele || []).find(m => m.id === id) || {};
+}
+
+function renderAutopilotWybor() {
+  const zp = state.autopilotZPromptu || {};
+  const el = $('#autopilot-wybor');
+  if (!el) return;
+  const potw = !$('#autopilot-potwierdz').hidden;
+  el.hidden = potw || !(zp.modele || []).length;
+  if (el.hidden) return;
+  const klucz = JSON.stringify([zp.model, zp.dziennie, zp.modele]);
+  if (el.dataset.klucz === klucz || document.activeElement === $('#autopilot-zp-dziennie')) return;
+  el.dataset.klucz = klucz;
+  el.innerHTML = `<div class="autopilot-wybor-gora"><span class="etykieta-pola">Rolki z promptu:</span>${chipyModeluZp(zp, zp.model, 'autopilot-model')}</div>`
+    + `<p class="autopilot-wybor-opis">${esc(modelZp(zp, zp.model).opis || '')}</p>`
+    + `<label class="autopilot-wybor-ile">Ile dziennie <input type="number" id="autopilot-zp-dziennie" min="0" max="20" value="${esc(String(zp.dziennie ?? 1))}">`
+    + `<small>razem dla wszystkich person, 0 = bez rolek z promptu</small></label>`;
+}
+
+async function zapiszAutopilotZp(zmiany) {
+  const d = await api('/api/ustawienia/globalne', 'POST', { autopilot_z_promptu: zmiany });
+  if (d.z_promptu) state.autopilotZPromptu = d.z_promptu;
+  renderAutopilot();
+  return d;
+}
+
+// Włączanie autopilota: najpierw krótki panel w stronie (bez confirm/alert) – model, ile dziennie, od której, koszt dzienny, IG.
+function pokazPotwierdzenieAutopilota() {
+  const zp = state.autopilotZPromptu || {};
+  state.apPotw = { model: zp.model || 'seedance_2_5', dziennie: Number(zp.dziennie ?? 1) };
+  $('#autopilot-przelacznik').checked = false;          // włączy się dopiero po „Włącz”
+  $('#autopilot-potwierdz').hidden = false;
+  renderPotwierdzenieAutopilota();
+  renderAutopilotWybor();
+  const btn = $('#autopilot-potwierdz [data-akcja="autopilot-potwierdz-wlacz"]');
+  if (btn) btn.focus();
+}
+
+function kosztPotwierdzenia() {
+  const zp = state.autopilotZPromptu || {};
+  const p = state.apPotw || {};
+  const n = Math.max(0, Math.round(Number(p.dziennie) || 0));
+  const kr = modelZp(zp, p.model).kr || 0;
+  return n > 0 ? `${n} × ok. ${kr} kr = ok. ${n * kr} kr dziennie na rolki z promptu`
+    : 'rolek z promptu nie robi (0 dziennie)';
+}
+
+function renderPotwierdzenieAutopilota() {
+  const el = $('#autopilot-potwierdz');
+  if (!el || el.hidden) return;
+  const zp = state.autopilotZPromptu || {};
+  const p = state.apPotw || {};
+  const ig = state.rolkiIg || {};
+  const igTxt = ig.wlaczone && Number(ig.dziennie) > 0
+    ? (ig.ma_klucz === false ? 'włączone, ale brak klucza Apify – nic nie pobierze' : `włączone (do ${ig.dziennie} dziennie)`)
+    : 'wyłączone';
+  const limit = zp.limit_dzienny ? ` Dzienny limit ${zp.limit_dzienny} kr pilnuje całości.` : '';
+  el.innerHTML = `<div class="autopilot-potwierdz-tytul">Włączyć autopilota?</div>`
+    + `<div class="autopilot-wybor-gora"><span class="etykieta-pola">Rolki z promptu:</span>${chipyModeluZp(zp, p.model, 'ap-potw-model')}</div>`
+    + `<p class="autopilot-wybor-opis">${esc(modelZp(zp, p.model).opis || '')}</p>`
+    + `<label class="autopilot-wybor-ile">Ile dziennie <input type="number" id="ap-potw-dziennie" min="0" max="20" value="${esc(String(p.dziennie))}"></label>`
+    + `<ul class="autopilot-potwierdz-lista">`
+    + `<li>Od godziny: <b>${esc(zp.od_godziny || '10:00')}</b></li>`
+    + `<li>Szacowany koszt: <b id="ap-potw-koszt">${esc(kosztPotwierdzenia())}</b><small> (+ rolki z filmików z folderu wg ceny Higgsfield).${esc(limit)}</small></li>`
+    + `<li>Pobieranie rolek z Instagrama: <b>${esc(igTxt)}</b></li></ul>`
+    + `<div class="rzad"><button class="btn btn-glowny" type="button" data-akcja="autopilot-potwierdz-wlacz">Włącz</button>`
+    + `<button class="btn" type="button" data-akcja="autopilot-potwierdz-anuluj">Anuluj</button></div>`;
+}
+
+function schowajPotwierdzenieAutopilota() {
+  $('#autopilot-potwierdz').hidden = true;
+  $('#autopilot-potwierdz').innerHTML = '';
+  state.apPotw = null;
+  renderAutopilot();
+}
+
+async function potwierdzWlaczenieAutopilota(btn) {
+  const zp = state.autopilotZPromptu || {};
+  const p = state.apPotw || {};
+  const n = Math.round(Number(p.dziennie));
+  if (!Number.isFinite(n) || n < 0 || n > 20) { toast('Ile dziennie: od 0 do 20.', 'uwaga'); return; }
+  btn.disabled = true;
+  try {
+    const zmiany = {};
+    if (p.model && p.model !== zp.model) zmiany.model = p.model;
+    if (n !== Number(zp.dziennie)) zmiany.dziennie = n;
+    if (Object.keys(zmiany).length) await zapiszAutopilotZp(zmiany);
+    $('#autopilot-potwierdz').hidden = true;
+    state.apPotw = null;
+    await przelaczAutopilot(true, true);
+  } catch (e) {
+    bladToast(e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderWpisy(ul, wpisy, pusty = 'Jeszcze nic się nie wydarzyło.') {
@@ -4031,6 +4141,19 @@ document.addEventListener('click', async e => {
       case 'koszt': await policzKosztWszystkich(); break;
       case 'autopilot-raz': await akcja({ typ: 'autopilot_raz' }, 'przebieg autopilota'); break;
       case 'autopilot-wznow': await wznowAutopilot(el); break;
+      // 3.5.1: model rolek z promptu na Starcie (zapis od razu) i potwierdzenie włączenia autopilota
+      case 'autopilot-model': {
+        const m = el.dataset.model;
+        if (m && m !== (state.autopilotZPromptu || {}).model) {
+          await zapiszAutopilotZp({ model: m });
+          const nazwa = modelZp(state.autopilotZPromptu || {}, m).nazwa || m;
+          toast(`Rolki z promptu: ${nazwa}.`, 'ok');
+        }
+        break;
+      }
+      case 'ap-potw-model': if (state.apPotw) { state.apPotw.model = el.dataset.model; renderPotwierdzenieAutopilota(); } break;
+      case 'autopilot-potwierdz-wlacz': await potwierdzWlaczenieAutopilota(el); break;
+      case 'autopilot-potwierdz-anuluj': schowajPotwierdzenieAutopilota(); break;
       case 'telegram-wyslij': await wyslijNaTelefon(id); break;
       case 'fokus-wrzuc': wybierzPliki('zrodlo'); break;
       case 'otworz-folder': el.disabled = true; try { await otworzFolder(el.dataset.co, el.dataset.slug); } finally { el.disabled = false; } break;
@@ -4125,6 +4248,11 @@ document.addEventListener('change', e => {
   if (!(el instanceof Element)) return;
   if (el.id === 'wybor-modelki') zmienPersone(el.value).catch(err => { bladToast(err); renderPersonaSelect(); });
   else if (el.id === 'autopilot-przelacznik') przelaczAutopilot(el.checked);
+  else if (el.id === 'autopilot-zp-dziennie') {
+    const n = Math.round(Number(el.value));
+    if (!Number.isFinite(n) || n < 0 || n > 20) { toast('Ile dziennie: od 0 do 20.', 'uwaga'); el.value = (state.autopilotZPromptu || {}).dziennie ?? 1; }
+    else zapiszAutopilotZp({ dziennie: n }).then(() => toast(n ? `Rolki z promptu: ${n} dziennie.` : 'Rolki z promptu wyłączone (0 dziennie).', 'ok')).catch(bladToast);
+  }
   else if (el.id === 'tryb-przelacznik') ustawTryb(el.checked);
   else if (el.name === 'dostawca' && el.closest('#form-generowanie')) przelaczDostawce();
   else if (el.id === 'u-lipsync-dostawca') przelaczLipsyncDostawce();
@@ -4166,6 +4294,11 @@ document.addEventListener('change', e => {
 document.addEventListener('input', e => {
   const el = e.target;
   if (el instanceof Element && (el.id === 'u-prompt-a' || el.id === 'u-prompt-b')) renderPromptyInfo();
+  if (el instanceof Element && el.id === 'ap-potw-dziennie' && state.apPotw) {
+    state.apPotw.dziennie = el.value;                 // koszt dzienny na żywo, bez przerysowania pola
+    const k = $('#ap-potw-koszt');
+    if (k) k.textContent = kosztPotwierdzenia();
+  }
   if (el instanceof Element && el.id === 'zp-prompt') state.zp.edytowany = true;
   else if (el instanceof Element && ['zp-pomysl', 'zp-stroj-tekst', 'zp-komentarz-tekst'].includes(el.id)) {
     const id = state.zp.pomyslId;

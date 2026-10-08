@@ -239,12 +239,18 @@ def test_bez_dodatkowych_klatek_w_ustawieniach(slug, ceny, cli, ai):
 
 
 def test_klatka_odrzucona_przez_filtr_bez_wideo(slug, ceny, cli):
-    cli.wyniki = [{"status": "nsfw"}]
+    # 3.5.1: filtr odrzuca wybrany model i OBA zapasy -> blad nsfw, wideo nie idzie, 0 kr
+    cli.wyniki = [{"status": "nsfw"}] * 3
     w, pid = _zrob(slug)
     wynik = fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
-    assert wynik["odrzucone"] == [pid] and _wideo(cli) == [] and len(_obrazy(cli)) == 1
+    assert wynik["odrzucone"] == [pid] and _wideo(cli) == []
+    assert [g[0] for g in _obrazy(cli)] == ["gpt_image_2_5", "seedream_v5_pro", "nano_banana_pro"]
     p = baza.pomysl(slug, pid)
     assert p["status"] == "blad" and p["powod"] == "nsfw" and baza.wydano_dzis("higgsfield") == 0
+    assert "3 modelach" in p["notatki"] or "3 modelach" in "".join(x["tekst"] for x in baza.dziennik_ostatnie(50))
+    # "Sprobuj jeszcze raz": nowa runda od wybranego modelu
+    pierwsza_klatka.wyczysc_odrzucona(slug, pid)
+    assert pierwsza_klatka.stan(baza.pomysl(slug, pid))["proby"] == []
 
 
 def test_cena_klatki_wyzsza_niz_zatwierdzona_nic_nie_idzie(slug, ceny, cli, monkeypatch):
@@ -409,7 +415,8 @@ def test_api_ustawienia_klatki_katalog_wycena_i_karta(klient, slug, ceny, cli):
     assert d["folder_tel"].endswith("tla")
     r = klient.post("/api/ustawienia/globalne", json={"pierwsza_klatka": {"model": "seedream_v5_pro", "max_dodatkowych": 1}})
     assert r.get_json()["ustawienia"]["pierwsza_klatka"] == {"wlaczona": True, "model": "seedream_v5_pro", "kontrola": True,
-                                                             "max_dodatkowych": 1}
+                                                             "max_dodatkowych": 1,
+                                                             "zapas_nsfw": ["seedream_v5_pro", "nano_banana_pro"]}
     assert klient.post("/api/ustawienia/globalne", json={"pierwsza_klatka": {"model": "x"}}).status_code == 400
     assert klient.post("/api/ustawienia/globalne", json={"pierwsza_klatka": {"max_dodatkowych": 5}}).status_code == 400
     k = klient.get(f"/api/z-promptu?slug={slug}").get_json()
@@ -422,3 +429,108 @@ def test_api_ustawienia_klatki_katalog_wycena_i_karta(klient, slug, ceny, cli):
     assert p["ma_klatke"] and p["klatka_url"] and p["klatka_info"]["kr"] == 3 and not p["mozna_uzyc_klatki"]
     # "Zrob wideo z tej klatki": tylko gdy jest klatka i rolka nie jest w toku
     assert klient.post(f"/api/pomysly/{pid}/klatka", json={}).status_code == 400
+
+
+# ---------------- 3.5.1: zapas po NSFW klatki, --klatka-model z CLI ----------------
+
+def test_nsfw_klatki_od_razu_zapas_seedream_liczy_sie_tylko_udana(slug, ceny, cli):
+    import asystent
+    cli.wyniki = [{"status": "nsfw"}]
+    w, pid = _zrob(slug)
+    wynik = fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: k <= w["kr"])
+    assert wynik["wygenerowane"] == 1 and wynik["odrzucone"] == []
+    (m1, par1, _), (m2, par2, _) = _obrazy(cli)
+    assert m1 == "gpt_image_2_5" and m2 == "seedream_v5_pro" and "quality" not in par2 and par2["prompt"] == par1["prompt"]
+    p = baza.pomysl(slug, pid)
+    assert [x.get("filtr") for x in p["klatka"]["proby"]] == ["nsfw", None] and p["klatka"]["model"] == "seedream_v5_pro"
+    assert "klatka-2" in _wideo(cli)[0][2]["start_image"] and p["status"] == "gotowe"
+    assert baza.wydano_dzis("higgsfield") == 3 + 70 and p["koszt"] == 73          # odrzucona klatka = 0 kr
+    teksty = " | ".join(x["tekst"] for x in baza.dziennik_ostatnie(50))
+    assert "klatka odrzucona przez filtr GPT Image 2.5" in teksty and "probuje Seedream 5.0 Pro" in teksty
+    assert any(h.get("wynik") == "nsfw" and h.get("pid") == pid for h in asystent.historia(slug))   # asystent zapamietal
+    karta = panel._pomysl_dla_panelu(p)
+    assert karta["klatka_info"]["model"] == "Seedream 5.0 Pro" and karta["klatka_info"]["odrzucone_filtrem"] == 1
+
+
+def test_nsfw_zapas_bez_powtorek_i_bez_drozszych(slug, ceny, cli):
+    # wybrany Seedream -> zapas tylko Nano Banana Pro (Seedream sie nie powtarza)
+    assert pierwsza_klatka.lancuch_modeli({"model": "seedream_v5_pro"}) == ["seedream_v5_pro", "nano_banana_pro"]
+    assert pierwsza_klatka.lancuch_modeli({"model": "gpt_image_2"}) == ["gpt_image_2", "seedream_v5_pro", "nano_banana_pro"]
+    cli.wyniki = [{"status": "nsfw"}, {"status": "nsfw"}]
+    w, pid = _zrob(slug, dict(OPCJE, klatka_model="seedream_v5_pro"))
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
+    assert [g[0] for g in _obrazy(cli)] == ["seedream_v5_pro", "nano_banana_pro"] and _wideo(cli) == []
+    assert baza.pomysl(slug, pid)["powod"] == "nsfw" and baza.wydano_dzis("higgsfield") == 0
+    # wybrany Nano Banana Pro (2 kr): Seedream (2,5 -> 3 kr) drozszy niz zatwierdzona klatka -> pominiety, nic wiecej nie idzie
+    cli.generacje.clear()
+    cli.wyniki = [{"status": "nsfw"}]
+    w, pid = _zrob(slug, dict(OPCJE, klatka_model="nano_banana_pro"))
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
+    assert [g[0] for g in _obrazy(cli)] == ["nano_banana_pro"] and baza.pomysl(slug, pid)["powod"] == "nsfw"
+    assert any("zapas klatki Seedream 5.0 Pro pominiety" in x["tekst"] for x in baza.dziennik_ostatnie(50))
+
+
+def test_nsfw_przy_wysylaniu_tez_zapas_a_kontrola_dalej_na_zapasie(slug, ceny, cli, ai):
+    cli.wyniki = [higgsfield_cli.HiggsfieldBlad("request flagged by content policy")]   # create odrzucony, job nie powstal
+    ai["oceny"] = [{"ok": False, "powod": "za blisko"}, {"ok": True, "powod": "daleko"}]
+    w, pid = _zrob(slug)
+    wynik = fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
+    assert wynik["wygenerowane"] == 1
+    assert [g[0] for g in _obrazy(cli)] == ["gpt_image_2_5", "seedream_v5_pro", "seedream_v5_pro"]
+    p = baza.pomysl(slug, pid)
+    assert [x.get("filtr") for x in p["klatka"]["proby"]] == ["nsfw", None, None] and p["klatka"]["proby"][0]["job_id"] is None
+    assert baza.wydano_dzis("higgsfield") == 3 + 3 + 70
+
+
+def test_zapas_nsfw_wylaczony(slug, ceny, cli):
+    baza.zapisz_ustawienia_globalne(pierwsza_klatka={"zapas_nsfw": []})
+    cli.wyniki = [{"status": "nsfw"}]
+    w, pid = _zrob(slug)
+    fabryka.generuj(slug, ids=[pid], potwierdz=lambda q, k, *a: True)
+    assert len(_obrazy(cli)) == 1 and baza.pomysl(slug, pid)["powod"] == "nsfw"
+    assert pierwsza_klatka.sprawdz_ustawienia({"zapas_nsfw": "nano_banana_pro, seedream_v5_pro"}) == {
+        "zapas_nsfw": ["nano_banana_pro", "seedream_v5_pro"]}
+    with pytest.raises(ValueError):
+        pierwsza_klatka.sprawdz_ustawienia({"zapas_nsfw": ["x"]})
+
+
+def test_cli_klatka_model_i_tlo_przezywaja_asystenta(slug, ceny, cli, capsys):
+    assert fabryka.main(["--modelka", slug, "z-promptu", "--miejsce", "sklep_osiedlowy", "--asystent",
+                         "--klatka-model", "nano_banana_pro", "--tlo", "bez", "--sucho"]) == 0
+    out = capsys.readouterr().out
+    assert "pierwsza klatka (Nano Banana Pro" in out and "klatka 2 kr" in out
+    assert any(m == "nano_banana_pro" for m, _p, _me in ceny) and not any(m == "gpt_image_2_5" for m, _p, _me in ceny)
+    assert fabryka.main(["--modelka", slug, "z-promptu", "--miejsce", "sklep_osiedlowy", "--asystent", "--klatka", "wyl",
+                         "--sucho"]) == 0
+    assert "pierwsza klatka (" not in capsys.readouterr().out
+    # z generacja (-y): klatka naprawde z Nano Banana Pro, cena 70 + 2
+    assert fabryka.main(["--modelka", slug, "z-promptu", "--miejsce", "sklep_osiedlowy", "--asystent",
+                         "--klatka-model", "nano_banana_pro", "-y"]) == 0
+    (m_kl, _par, _med), = _obrazy(cli)
+    p = baza.lista_pomyslow(slug)[-1]
+    assert m_kl == "nano_banana_pro" and p["z_promptu"]["klatka"]["model"] == "nano_banana_pro" and p["koszt"] == 72
+
+
+@pytest.mark.parametrize("model", ["seedance_2_5", "wan3_0_prime"])
+@pytest.mark.parametrize("kamera", ["kolejka", "idzie_za", "z_daleka_zoom", "mija"])
+def test_wideo_z_klatka_jedno_ujecie_kamera_nie_podchodzi(slug, model, kamera):
+    sc = scenariusz.zbuduj(slug, dict(OPCJE, model=model, kamera=kamera, pomysl_id="sklep_osiedlowy"))
+    pr = sc["prompt"]
+    assert sc["klatka"] and ("One single continuous shot" in pr or "one continuous shot with no cuts" in pr)
+    for musi in ("no cuts", "never moves closer", "never zooms", "never follows her", "does not chase her",
+                 "never becomes a close-up", "hand-held shake"):
+        assert musi in pr, musi
+    for nie in ("zoom towards", "walks slowly closer", "leans sideways", "2-3 m away", "walking past her"):
+        assert nie not in pr, nie
+    assert scenariusz.AKCJA_JEDNO_UJECIE.strip() in pr          # beaty z czasami = jedno ujecie, nie osobne ujecia
+    if kamera in scenariusz.KAMERY_W_RUCHU:
+        assert scenariusz.OPERATOR_KLATKI in pr
+    kamera_txt = pr.split("amera")[-1].split("\n")[0] if model == "wan3_0_prime" else pr.split("[Camera]")[1].split("\n")[0]
+    for tekst in (kamera_txt, scenariusz.KAMERA_KLATKA, scenariusz.KAMERA_KLATKA_KROTKA, scenariusz.AKCJA_JEDNO_UJECIE):
+        slowa = set(re.findall(r"[a-z]+(?:[- ][a-z]+)?", tekst.lower())) | set(re.findall(r"[a-z]+", tekst.lower()))
+        assert not [s for s in fabryka.SLOWA_RYZYKOWNE if s in slowa], tekst
+
+
+def test_wideo_bez_klatki_dalej_z_ruchem_kamery(slug):
+    sc = scenariusz.zbuduj(slug, dict(OPCJE, klatka="wyl", kamera="z_daleka_zoom", pomysl_id="sklep_osiedlowy"))
+    assert sc["klatka"] is None and "zoom towards her" in sc["prompt"] and "One single continuous shot" not in sc["prompt"]

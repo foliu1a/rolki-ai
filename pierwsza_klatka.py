@@ -48,6 +48,7 @@ MODELE = {
 }
 MODEL_DOMYSLNY = "gpt_image_2_5"
 MAX_DODATKOWYCH = 2                 # tyle NOWYCH klatek po odrzuceniu przez kontrole (kazda platna ~3 kr)
+MAX_ZAPASOWYCH_NSFW = 2             # 3.5.1: tyle innych modeli klatki po odrzuceniu przez filtr tresci (NSFW = 0 kr)
 FOLDER_TEL = "tla"                  # Pulpit\ROLKI AI\tla\<id miejsca>\ - prawdziwe zdjecia miejsc od usera
 CZAS_NA_KLATKE = "15m"
 DLUGI_BOK_OCENY = 1280              # klatka do modelu wizyjnego: JPEG, dluzszy bok max (2K PNG to kilka MB base64)
@@ -100,9 +101,11 @@ def ustawienia():
         dod = max(0, min(MAX_DODATKOWYCH, int(u.get("max_dodatkowych", dom["max_dodatkowych"]))))
     except (TypeError, ValueError):
         dod = dom["max_dodatkowych"]
+    zapas = u.get("zapas_nsfw", dom["zapas_nsfw"])
+    zapas = [m for m in dict.fromkeys(zapas) if m in MODELE] if isinstance(zapas, list) else list(dom["zapas_nsfw"])
     return {"wlaczona": bool(u.get("wlaczona", dom["wlaczona"])),
             "model": u.get("model") if u.get("model") in MODELE else dom["model"],
-            "kontrola": bool(u.get("kontrola", dom["kontrola"])), "max_dodatkowych": dod}
+            "kontrola": bool(u.get("kontrola", dom["kontrola"])), "max_dodatkowych": dod, "zapas_nsfw": zapas}
 
 
 def sprawdz_ustawienia(v):
@@ -125,6 +128,11 @@ def sprawdz_ustawienia(v):
             if not 0 <= n <= MAX_DODATKOWYCH:
                 raise ValueError(f"Ile dodatkowych klatek: od 0 do {MAX_DODATKOWYCH}.")
             wynik[k] = n
+        elif k == "zapas_nsfw":
+            lista = [s.strip() for s in x.split(",") if s.strip()] if isinstance(x, str) else x
+            if not isinstance(lista, list) or any(m not in MODELE for m in lista):
+                raise ValueError(f"Zapas po NSFW klatki: lista modeli z {', '.join(MODELE)}.")
+            wynik[k] = list(dict.fromkeys(lista))
         else:
             raise ValueError(f"Nieznane ustawienie pierwsza_klatka.{k}.")
     return wynik
@@ -284,10 +292,12 @@ def akceptuj(slug, pid):
 
 
 def wyczysc_odrzucona(slug, pid):
-    """'Sprobuj jeszcze raz' rolki, ktorej klatka nie przeszla kontroli: nastepnym razem nowe klatki (stare pliki zostaja)."""
+    """'Sprobuj jeszcze raz' rolki, ktorej klatka nie przeszla kontroli albo (3.5.1) filtr tresci odrzucil ja we wszystkich
+    modelach: nastepnym razem nowe klatki od wybranego modelu (stare pliki zostaja)."""
     p = baza.pomysl(slug, pid)
     st = stan(p)
-    if st and st.get("ok") is False and not st.get("zaakceptowana"):
+    filtr = not st.get("plik") and bool(_odrzucone_filtrem(st)) if st else False
+    if st and ((st.get("ok") is False and not st.get("zaakceptowana")) or filtr):
         st.update(plik=None, ok=None, powod="", proby_poprzednie=(st.get("proby_poprzednie") or []) + (st.get("proby") or []),
                   proby=[], kr=0)
         baza.aktualizuj_pomysl(slug, pid, klatka=st)
@@ -313,7 +323,7 @@ def _zapytaj_vision(model, data_url):
         "messages": [{"role": "system", "content": SYSTEM_OCENY},
                      {"role": "user", "content": [{"type": "text", "text": PYTANIE_OCENY},
                                                   {"type": "image_url", "image_url": {"url": data_url}}]}],
-        "temperature": 0.1, "max_tokens": 200})
+        "temperature": 0.1, "max_tokens": ig.MAX_TOKENOW_VISION})
     if isinstance(odp, dict) and odp.get("error"):
         raise RuntimeError(f"OpenRouter: {str((odp['error'] or {}).get('message', odp['error']))[:200]}")
     try:
@@ -336,17 +346,11 @@ def ocen(plik, log=None):
     except Exception as e:          # PIL rzuca rozne wyjatki
         return None, f"nie umiem otworzyc klatki ({e})"
     import instagram_rolki as ig
-    bledy = []
-    for model in ig.modele_vision()[:ig.MAX_PROB_LLM]:
-        try:
-            w = _zapytaj_vision(model, data_url)
-        except (RuntimeError, ValueError) as e:
-            bledy.append(f"{model.split('/')[-1]}: {e}")
-            if "zly klucz" in str(e) or "doladowania" in str(e):
-                break
-            continue
-        return dict(w, zrodlo=f"openrouter:{model}"), ""
-    return None, "AI niedostepne (" + "; ".join(bledy)[:200] + ")"
+    # 3.5.1: ta sama dynamiczna lista darmowych modeli wizyjnych co filtr rolek z IG (404 "unavailable for free" = nastepny)
+    w, bledy = ig.ocen_vision(lambda m, d: _zapytaj_vision(m, d), data_url, log=log)
+    if w is None:
+        return None, "AI niedostepne (" + bledy[:200] + ")"
+    return w, ""
 
 
 # ---------------- generacja klatki (znacznik w_toku faza "klatka", job_id od razu, wznawianie) ----------------
@@ -516,11 +520,95 @@ def _rozlicz(slug, pid, d, w, kl_lim, model, log):
     return kr
 
 
+# ---------------- 3.5.1: zapas po odrzuceniu klatki przez filtr tresci (NSFW, 0 kr) ----------------
+
+def lancuch_modeli(kl):
+    """Kolejnosc modeli klatki, gdy filtr tresci (NSFW) ja odrzuci: wybrany -> ustawienie zapas_nsfw (domyslnie Seedream 5.0 Pro,
+    Nano Banana Pro) bez powtarzania wybranego, max MAX_ZAPASOWYCH_NSFW zapasowe."""
+    zapas = [m for m in dict.fromkeys(ustawienia()["zapas_nsfw"]) if m != kl["model"] and m in MODELE]
+    return [kl["model"]] + zapas[:MAX_ZAPASOWYCH_NSFW]
+
+
+def _wariant(kl, model):
+    """Konfiguracja klatki dla innego modelu (zapas po NSFW): ten sam prompt i zdjecia, parametry tego modelu."""
+    if model == kl["model"] or model not in MODELE:
+        return kl
+    return dict(kl, model=model, nazwa_modelu=MODELE[model]["nazwa"], parametry=dict(MODELE[model]["parametry"]),
+                zapas_po_nsfw=True)
+
+
+def _nazwa(model):
+    return MODELE.get(model, {}).get("nazwa", model)
+
+
+def _odrzucone_filtrem(st):
+    """Modele, ktorych klatke odrzucil filtr tresci w tej rundzie (proby z 'filtr': 'nsfw')."""
+    return [x.get("model") for x in st.get("proby") or [] if x.get("filtr") == "nsfw"]
+
+
+def _proby_kontroli(st):
+    """Klatki, ktore licza sie do limitu kontroli AI (1 + max_dodatkowych) - bez odrzuconych przez filtr tresci (0 kr)."""
+    return [x for x in st.get("proby") or [] if x.get("job_id") and not x.get("filtr")]
+
+
+def _zapas(kl, model):
+    """Czy model z zapasu moze zrobic te klatke: zdjecia sie mieszcza, cena (`generate cost`, 0 kr) nie wyzsza niz zatwierdzona
+    klatka (w gore do pelnych kr). Zwraca (wariant z wycena, "") albo (None, czemu nie)."""
+    maks = max_obrazow(model)
+    n = len([o for o in kl.get("obrazy") or [] if o])
+    if maks and n > maks:
+        return None, f"przyjmuje max {maks} zdjec, a klatka ma {n}"
+    w = _wariant(kl, model)
+    try:
+        k = cena(w, swieza=True)
+    except dostawcy.BladDostawcy as e:
+        return None, f"Higgsfield nie podal ceny ({e})"
+    if k is None:
+        return None, "Higgsfield nie podal ceny"
+    if kl.get("wycena") is not None and do_limitu(k) > do_limitu(kl["wycena"]):
+        return None, f"kosztuje {k} kr, a zatwierdzona klatka {kl['wycena']} kr"
+    w["wycena"] = k
+    return w, ""
+
+
+def _model_do_proby(slug, pid, kl, st, log):
+    """Konfiguracja na nastepna klatke: wybrany model, a gdy filtr go odrzucil - pierwszy uzyteczny z zapasu (bez powtorek).
+    None = nic nie zostalo."""
+    odrz = set(_odrzucone_filtrem(st))
+    if kl["model"] not in odrz:
+        return kl
+    for m in lancuch_modeli(kl)[1:]:
+        if m in odrz:
+            continue
+        w, czemu = _zapas(kl, m)
+        if w:
+            return w
+        _zdarzenie(log, slug, "uwaga", f"#{pid}: zapas klatki {_nazwa(m)} pominiety - {czemu}", pomysl=pid)
+    return None
+
+
+def _po_filtrze(slug, pid, kl, kl_akt, st, blad, log):
+    """Filtr tresci odrzucil klatke modelu kl_akt (0 kr). Asystent zapamietuje odrzucenie (stroj -> nsfw), a gdy jest zapas -
+    wpis "klatka odrzucona przez filtr X - probuje Y" i konfiguracja nastepnej klatki. None = bez zapasu (rolka -> blad nsfw)."""
+    try:
+        import asystent
+        asystent.zapisz_odrzucenie(slug, baza.pomysl(slug, pid), "nsfw", zrodlo=f"klatka:{kl_akt['model']}")
+    except Exception as e:          # nauka asystenta nie moze zatrzymac rolki
+        (log or _log)(f"#{pid}: asystent nie zapisal odrzucenia klatki ({e})")
+    nastepny = _model_do_proby(slug, pid, kl, st, log)
+    if nastepny is None:
+        return None
+    _zdarzenie(log, slug, "uwaga", f"#{pid}: klatka odrzucona przez filtr {_nazwa(kl_akt['model'])} (NSFW, 0 kr) - probuje "
+               f"{_nazwa(nastepny['model'])} (~{nastepny.get('wycena')} kr)", pomysl=pid, powod="nsfw")
+    return nastepny
+
+
 def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0):
     """Klatka dla rolki #pid: gotowa -> od razu; znacznik faza 'klatka' -> dokoncz TEN job; inaczej nowa (cena i bezpieczniki
     przed kazda). Kontrola AI (gdy wlaczona i jest klucz OpenRouter): zla = nowa klatka, max `max_dodatkowych` dodatkowych.
-    Zwraca sciezke klatki. Rzuca NieWyszla (rolka -> blad, wideo NIE idzie), WrocDoKolejki, fabryka.JobTrwa (zostaje w toku),
-    fabryka.Przerwano (STOP)."""
+    3.5.1: filtr tresci (NSFW, 0 kr) odrzucil klatke -> od razu kolejny model z `lancuch_modeli` (max 2 zapasowe, bez powtorek);
+    w budzecie liczy sie tylko to, co przeszlo. Zwraca sciezke klatki. Rzuca NieWyszla (rolka -> blad, wideo NIE idzie),
+    WrocDoKolejki, fabryka.JobTrwa (zostaje w toku), fabryka.Przerwano (STOP)."""
     import fabryka
     log = log or _log
     p = baza.pomysl(slug, pid)
@@ -533,30 +621,58 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
     d = dostawcy.dostawca("higgsfield")
     marker = p.get("w_toku") if p.get("status") == "w_toku" and (p.get("w_toku") or {}).get("faza") == "klatka" else None
     max_dod = int(kl.get("max_dodatkowych") or 0) if kl.get("kontrola") else 0
+    nastepny = None
     while True:
         fabryka._sprawdz_stop(stop)
         st = stan(baza.pomysl(slug, pid))
         if marker:
+            kl_akt = _wariant(kl, marker.get("model") or kl["model"])      # wznowienie: TEN job (takze klatki z zapasu)
             gotowy_job, jid = _wznow(slug, pid, d, marker, log)
-            kl_lim = int(marker.get("koszt_klatki") or 0) or do_limitu(kl.get("wycena") or 0)
+            kl_lim = int(marker.get("koszt_klatki") or 0) or do_limitu(kl_akt.get("wycena") or 0)
             nr = int(marker.get("nr") or len(st.get("proby") or []) + 1)
             marker = None
         else:
-            nr = len([x for x in st.get("proby") or [] if x.get("job_id")]) + 1
-            if nr > 1 + max_dod:
-                raise NieWyszla(f"pierwsza klatka: wykorzystane {nr - 1} proby", "klatka")
-            job, kl_lim = _wyslij(slug, pid, d, kl, nr, k_wideo, log)
+            kl_akt = nastepny or _model_do_proby(slug, pid, kl, st, log)
+            nastepny = None
+            if kl_akt is None:
+                raise NieWyszla(f"pierwsza klatka odrzucona przez filtr tresci (NSFW) we wszystkich modelach ("
+                                f"{', '.join(_nazwa(m) for m in dict.fromkeys(_odrzucone_filtrem(st)))}) - wideo NIE poszlo, "
+                                f"0 kr", "nsfw")
+            nr = len(st.get("proby") or []) + 1
+            if len(_proby_kontroli(st)) + 1 > 1 + max_dod:
+                raise NieWyszla(f"pierwsza klatka: wykorzystane {len(_proby_kontroli(st))} proby", "klatka")
+            try:
+                job, kl_lim = _wyslij(slug, pid, d, kl_akt, nr, k_wideo, log)
+            except NieWyszla as e:
+                if e.powod != "nsfw":
+                    raise
+                # filtr odrzucil juz przy wysylaniu (job nie powstal, 0 kr) -> zapas, gdy jest
+                _dopisz_probe(slug, pid, {"nr": nr, "job_id": None, "status": "nsfw", "kr": 0, "plik": None, "ok": False,
+                                          "powod": e.tekst[:200], "model": kl_akt["model"], "filtr": "nsfw"})
+                nastepny = _po_filtrze(slug, pid, kl, kl_akt, stan(baza.pomysl(slug, pid)), e.tekst, log)
+                if nastepny is None:
+                    raise
+                continue
             jid, gotowy_job = job["job_id"], job.get("gotowy")
         w = fabryka._czekaj(slug, pid, d, jid, timeout, log, stop, gotowy=gotowy_job)      # JobTrwa / Przerwano -> w toku
-        kr = _rozlicz(slug, pid, d, w, kl_lim, kl["model"], log)
+        kr = _rozlicz(slug, pid, d, w, kl_lim, kl_akt["model"], log)
         status = w.get("status") or ""
         if not d.udany(status) or not w.get("urls"):
             powod = fabryka.powod_odrzucenia(status, w.get("blad")) or "inny"
-            _dopisz_probe(slug, pid, {"nr": nr, "job_id": jid, "status": status, "kr": kr, "plik": None, "ok": False,
-                                      "powod": (w.get("blad") or status)[:200]})
+            wpis = {"nr": nr, "job_id": jid, "status": status, "kr": kr, "plik": None, "ok": False,
+                    "powod": (w.get("blad") or status)[:200], "model": kl_akt["model"]}
+            if powod == "nsfw":
+                wpis["filtr"] = "nsfw"
+            _dopisz_probe(slug, pid, wpis)
+            if powod == "nsfw":
+                nastepny = _po_filtrze(slug, pid, kl, kl_akt, stan(baza.pomysl(slug, pid)), w.get("blad"), log)
+                if nastepny is not None:
+                    continue
             co = {"nsfw": "odrzucona przez filtr tresci (NSFW)", "ip": "odrzucona - model wykryl znana marke/postac (IP)"}.get(
                 powod, f"nie wyszla (status {status or '?'}{', bez URL' if d.udany(status) else ''})")
-            raise NieWyszla(f"pierwsza klatka {co} - wideo NIE poszlo, nic nie wysylam drugi raz. {w.get('blad') or ''}".strip(),
+            modele = list(dict.fromkeys(_odrzucone_filtrem(stan(baza.pomysl(slug, pid))))) if powod == "nsfw" else []
+            gdzie = f" w {len(modele)} modelach ({', '.join(_nazwa(m) for m in modele)})" if len(modele) > 1 else ""
+            raise NieWyszla(f"pierwsza klatka {co}{gdzie} - wideo NIE poszlo, nic nie wysylam drugi raz. {w.get('blad') or ''}".strip(),
                             powod, job_id=jid, status=status)
         cel = _plik_klatki(slug, baza.pomysl(slug, pid), nr, w["urls"][0])
         try:
@@ -573,22 +689,26 @@ def przygotuj(slug, pid, log=None, stop=None, timeout=CZAS_NA_KLATKE, k_wideo=0)
         else:
             ocena, czemu = None, "kontrola wylaczona w ustawieniach"
         wpis = {"nr": nr, "job_id": jid, "status": status, "kr": kr, "plik": cel, "ok": (ocena or {}).get("ok"),
-                "powod": (ocena or {}).get("powod") or "", "zrodlo": (ocena or {}).get("zrodlo") or ""}
+                "powod": (ocena or {}).get("powod") or "", "zrodlo": (ocena or {}).get("zrodlo") or "", "model": kl_akt["model"]}
         _dopisz_probe(slug, pid, wpis)
+        z_zapasu = "" if kl_akt["model"] == kl["model"] else f", zapas {_nazwa(kl_akt['model'])}"
         if ocena is None:
-            _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka gotowa ({os.path.basename(cel)}, {kr} kr) - bez kontroli AI: "
-                       f"{czemu}", pomysl=pid)
-            _zapisz_stan(slug, pid, plik=cel, ok=None, powod="", zrodlo="bez kontroli: " + czemu)
+            _zdarzenie(log, slug, "info", f"#{pid}: pierwsza klatka gotowa ({os.path.basename(cel)}, {kr} kr{z_zapasu}) - bez "
+                       f"kontroli AI: {czemu}", pomysl=pid)
+            _zapisz_stan(slug, pid, plik=cel, ok=None, powod="", zrodlo="bez kontroli: " + czemu, model=kl_akt["model"])
             return cel
         if ocena["ok"]:
-            _zdarzenie(log, slug, "ok", f"#{pid}: pierwsza klatka OK ({os.path.basename(cel)}, {kr} kr; kontrola: "
+            _zdarzenie(log, slug, "ok", f"#{pid}: pierwsza klatka OK ({os.path.basename(cel)}, {kr} kr{z_zapasu}; kontrola: "
                        f"{ocena['powod'] or 'w porzadku'})", pomysl=pid)
-            _zapisz_stan(slug, pid, plik=cel, ok=True, powod=ocena["powod"], zrodlo=ocena["zrodlo"])
+            _zapisz_stan(slug, pid, plik=cel, ok=True, powod=ocena["powod"], zrodlo=ocena["zrodlo"], model=kl_akt["model"])
             return cel
-        _zapisz_stan(slug, pid, plik=cel, ok=False, powod=ocena["powod"], zrodlo=ocena["zrodlo"])
-        if nr >= 1 + max_dod:
-            raise NieWyszla(f"kontrola odrzucila pierwsza klatke {nr}x (ostatnio: {ocena['powod'] or 'bez powodu'}) - wideo NIE "
-                            f"poszlo (0 kr na wideo). Zobacz klatke; 'Zrob wideo z tej klatki' albo 'Sprobuj jeszcze raz'.",
+        _zapisz_stan(slug, pid, plik=cel, ok=False, powod=ocena["powod"], zrodlo=ocena["zrodlo"], model=kl_akt["model"])
+        zrobione = len(_proby_kontroli(stan(baza.pomysl(slug, pid))))
+        if zrobione >= 1 + max_dod:
+            raise NieWyszla(f"kontrola odrzucila pierwsza klatke {zrobione}x (ostatnio: {ocena['powod'] or 'bez powodu'}) - wideo "
+                            f"NIE poszlo (0 kr na wideo). Zobacz klatke; 'Zrob wideo z tej klatki' albo 'Sprobuj jeszcze raz'.",
                             "klatka", job_id=jid, status=status)
         _zdarzenie(log, slug, "uwaga", f"#{pid}: kontrola odrzucila klatke nr {nr} ({ocena['powod'] or 'bez powodu'}) - robie nowa "
-                   f"(proba {nr + 1} z {1 + max_dod})", pomysl=pid)
+                   f"(proba {zrobione + 1} z {1 + max_dod})", pomysl=pid)
+        if kl_akt is not kl:
+            nastepny = kl_akt           # nastepna klatka tym samym modelem z zapasu (wybrany odpadl na filtrze)

@@ -35,7 +35,7 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (film
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
 PORT = 5077
-WERSJA = "3.5"
+WERSJA = "3.5.1"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -584,7 +584,11 @@ def _pomysl_dla_panelu(p):
             p["klatka_url"] = _url_pliku(plik) if plik else None
             p["klatka_info"] = {"ok": st.get("ok"), "powod": st.get("powod") or "", "zaakceptowana": bool(st.get("zaakceptowana")),
                                 "proby": len([x for x in st.get("proby") or [] if x.get("job_id")]), "kr": st.get("kr") or 0,
-                                "model": kl_cfg.get("nazwa_modelu") or kl_cfg.get("model"),
+                                # 3.5.1: model, ktory naprawde zrobil klatke (zapas po NSFW) - inaczej wybrany
+                                "model": (pierwsza_klatka.MODELE.get(st.get("model"), {}).get("nazwa") if st.get("model")
+                                          and st.get("model") != kl_cfg.get("model") else None)
+                                         or kl_cfg.get("nazwa_modelu") or kl_cfg.get("model"),
+                                "odrzucone_filtrem": len([x for x in st.get("proby") or [] if x.get("filtr") == "nsfw"]),
                                 "tlo": os.path.basename(kl_cfg.get("tlo_oryginal") or kl_cfg.get("tlo") or "") or None,
                                 "kontrola": st.get("zrodlo") or ""}
             p["mozna_uzyc_klatki"] = bool(plik and st.get("ok") is False and not st.get("zaakceptowana")
