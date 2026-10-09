@@ -50,7 +50,7 @@ import scenariusz
 MODELE = {
     "seedream_v5_pro": {
         "nazwa": "Seedream 5.0 Pro",
-        "opis": "najwierniejsza twarz (polecany)",
+        "opis": "wierna twarz, tanio (ok. 2,5 kr)",
         "schemat": {"params": [
             {"name": "aspect_ratio", "enum": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"]},
             {"name": "resolution", "enum": ["1k", "1.5k", "2k"]}],
@@ -58,7 +58,7 @@ MODELE = {
     },
     "nano_banana_pro": {
         "nazwa": "Nano Banana Pro",
-        "opis": "najwyższa jakość, do 4K",
+        "opis": "do 4K, ale potrafi zmienić twarz (piegi, włosy) - sprawdzone 2026-10-10",
         "schemat": {"params": [
             {"name": "aspect_ratio", "enum": ["1:1", "3:2", "2:3", "4:3", "3:4", "4:5", "5:4", "9:16", "16:9", "21:9"]},
             {"name": "resolution", "enum": ["1k", "2k", "4k"]}],
@@ -66,7 +66,7 @@ MODELE = {
     },
     "gpt_image_2_5": {
         "nazwa": "GPT Image 2.5",
-        "opis": "ostre detale, jakość do wyboru",
+        "opis": "najwierniejsza twarz i napisy (polecany)",
         "schemat": {"params": [
             {"name": "aspect_ratio", "enum": ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9", "27:16", "16:27",
                                               "9:8", "8:9", "4:5", "5:4"]},
@@ -77,7 +77,7 @@ MODELE = {
     # na prosbe usera 2026-10-08 (tego uzywa w apce Higgsfield); drozszy od 2.5 (high 2k 6.5 kr), schemat z `model get` 2026-10-08
     "gpt_image_2": {
         "nazwa": "GPT Image 2",
-        "opis": "ten z apki Higgsfield",
+        "opis": "ten z apki Higgsfield, drożej (ok. 6,5 kr)",
         "schemat": {"params": [
             {"name": "aspect_ratio", "enum": ["auto", "1:1", "4:3", "3:4", "16:9", "21:9", "9:16", "3:2", "2:3", "4:5", "5:4"]},
             {"name": "quality", "enum": ["low", "medium", "high"]},
@@ -87,7 +87,7 @@ MODELE = {
 }
 # Domyslny: Seedream 5.0 Pro - dokumentacja Higgsfield (skill higgsfield-generate, model-catalog) kieruje tu "one-shot face from
 # reference photos / face edit on a real photo" ("Faces, character sheets, and complex scene edits with faces", do 10 referencji).
-MODEL_DOMYSLNY = "seedream_v5_pro"
+MODEL_DOMYSLNY = "gpt_image_2_5"   # od 2026-10-10: najlepiej trzyma twarz persony (test Lilianna: GPT 2.5 i Seedream ok, Nano Banana Pro zmienia twarz)
 
 PROPORCJE = ("9:16", "2:3", "3:4", "4:5", "1:1", "5:4", "4:3", "3:2", "16:9", "21:9")   # kolejnosc w panelu (pion najpierw)
 JAK_ZDJECIE = "jak_zdjecie"           # proporcje najblizsze wstawionemu zdjeciu (domyslnie)

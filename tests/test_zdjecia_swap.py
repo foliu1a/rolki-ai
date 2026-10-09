@@ -126,8 +126,8 @@ def test_chipy_wg_schematu_modelu():
 
 def test_katalog_i_walidacja_opcji(persona, zrodlo):
     k = zs.katalog(persona)
-    assert k["model_domyslny"] == "seedream_v5_pro" and [m["id"] for m in k["modele"]] == list(zs.MODELE)
-    assert k["domyslne"] == {"model": "seedream_v5_pro", "proporcje": "jak_zdjecie", "ile": 1, "stroj": "ze_zdjecia"}
+    assert k["model_domyslny"] == zs.MODEL_DOMYSLNY == "gpt_image_2_5" and [m["id"] for m in k["modele"]] == list(zs.MODELE)
+    assert k["domyslne"] == {"model": "gpt_image_2_5", "proporcje": "jak_zdjecie", "ile": 1, "stroj": "ze_zdjecia"}
     gpt = [m for m in k["modele"] if m["id"] == "gpt_image_2_5"][0]
     assert ["high", "Wysoka"] in gpt["jakosc"] and ["4k", "4K"] in gpt["rozdzielczosc"]
     sd = [m for m in k["modele"] if m["id"] == "seedream_v5_pro"][0]
@@ -164,7 +164,7 @@ def test_odswiez_schematy_z_cli(monkeypatch):
 # ---------------- prompt ----------------
 
 def test_prompt_pelna_podmiana_postaci(persona, zrodlo):
-    sw = zs.zbuduj(persona, zrodlo, {})
+    sw = zs.zbuduj(persona, zrodlo, {"model": "seedream_v5_pro"})   # parametry Seedreama (domyslny od 2026-10-10 to GPT Image 2.5)
     refy = baza.sciezki_referencji(persona)
     assert sw["obrazy"] == [os.path.abspath(zrodlo)] + refy            # 1 = wstawione zdjecie, potem wszystkie referencje
     assert sw["model"] == "seedream_v5_pro" and sw["parametry"] == {"aspect_ratio": "3:4", "resolution": "2k"}
@@ -212,7 +212,7 @@ def test_limit_zdjec_modelu_obcina_referencje(persona, zrodlo, biblioteka):
     for i in range(4, 12):                        # 11 referencji + zdjecie + stroj > 10 (Seedream)
         with open(os.path.join(baza.folder_referencji(persona), f"{i:02d}_x.png"), "wb") as f:
             f.write(b"img")
-    sw = zs.zbuduj(persona, zrodlo, {"stroj": "ulub_a"})
+    sw = zs.zbuduj(persona, zrodlo, {"stroj": "ulub_a", "model": "seedream_v5_pro"})
     assert len(sw["obrazy"]) == 10 and sw["obrazy"][1:9] == baza.sciezki_referencji(persona)[:8]
     assert "images 2-9" in sw["prompt"] and "image 10 (the last image)" in sw["prompt"]
     assert any("max 10" in u for u in sw["ostrzezenia"])
@@ -266,7 +266,7 @@ def test_pelna_sciezka_job_id_przed_czekaniem_i_plik(persona, zrodlo, cli, monke
         widziane.append((z["status"], (z.get("w_toku") or {}).get("job_id"), (z.get("w_toku") or {}).get("wysylam")))
         return prawdziwy_job(jid)
     monkeypatch.setattr(higgsfield_cli, "job", job)
-    w = zs.generuj(persona, src, {"ile": 1}, kr=2.5)
+    w = zs.generuj(persona, src, {"ile": 1, "model": "seedream_v5_pro"}, kr=2.5)
     assert w["zrobione"] == 1 and len(cli.generacje) == 1 and w["ids"] == [1]
     assert widziane[0] == ("w_toku", "job1", True)             # job_id zapisany PRZED pierwszym odpytaniem
     model, params, media = cli.generacje[0]
@@ -523,7 +523,7 @@ def test_api_wstaw_zdjecie_i_katalog(klient, persona, cli, biblioteka):
     assert r.status_code == 400
     assert klient.post("/api/swap/zdjecie", data={}, content_type="multipart/form-data").status_code == 400
     k = klient.get("/api/swap").get_json()
-    assert k["ok"] and k["model_domyslny"] == "seedream_v5_pro" and [m["id"] for m in k["modele"]] == list(zs.MODELE)
+    assert k["ok"] and k["model_domyslny"] == "gpt_image_2_5" and [m["id"] for m in k["modele"]] == list(zs.MODELE)
     assert [s["id"] for s in k["stroje"]] == ["ulub_a", "ulub_b", "zwykly_c", "zwykly_d"]     # tylko ze zdjeciem, ulubione najpierw
     assert all(s["url"] for s in k["stroje"]) and k["folder"] == baza.folder_zdjec(persona)
 
@@ -591,4 +591,4 @@ def test_gpt_image_2_do_wyboru_z_jakoscia_obok_reszty():
     assert ch["jakosc"] == ["low", "medium", "high"] and ch["rozdzielczosc"] == ["1k", "2k", "4k"]
     assert ch["domyslne"] == {"jakosc": "high", "rozdzielczosc": "2k"}
     assert set(zs.MODELE) >= {"seedream_v5_pro", "nano_banana_pro", "gpt_image_2_5", "gpt_image_2"}
-    assert zs.MODEL_DOMYSLNY == "seedream_v5_pro"
+    assert zs.MODEL_DOMYSLNY == "gpt_image_2_5"
