@@ -164,6 +164,14 @@ odpowiedzi – te same losowe szczegóły = ten sam prompt).
   promptu dopisuje ją do `modelki/<slug>/asystent_archiwum.json` (gotowa bez oceny = słaba).
 - Akcja `{"typ": "dograj_glos", "id": 7}` – komentarz ElevenLabs do gotowej rolki z głosem `tts` (tylko znaki ElevenLabs).
   Karta rolki: `z_promptu_dlaczego`, `mozna_dograc_glos`, `ocena`, `glos_dograny`, `glos_blad`.
+- **3.6 uwagi do ocen**: `POST /api/pomysly/<id>/ocena {"ocena": "dobra" | "slaba" | null, "komentarz": "za wysoka, głos jak
+  lektor"}` → `{pomysl, pamiec}`; karta: `ocena_komentarz`, `ocena_poprawki` (klucze), `ocena_poprawki_nazwy` (PL). Uwaga →
+  `asystent_uwagi.json` (obok stan.json). `GET /api/asystent/pamiec?slug=` → `{poprawki: [{klucz, nazwa, zakres: persona|wszystkie,
+  efekt, dotyczy, persony, z_uwag}], uwagi: [{id, persona, persona_nazwa, pid, ocena, tekst, data, poprawki, miejsce, model}]}`.
+  `POST /api/asystent/pamiec/usun {"poprawka": "wzrost"}` (znika ze wszystkich uwag) albo `{"uwaga": "<id>"}` (cała uwaga) →
+  pamięć; nieznane = 400. Opcje z-promptu: `komentarze_ton: "ostre" | "lagodne"`, `poprawki: [klucze]` (zwykle z `ustalone.poprawki`);
+  wycena/zbuduj oddaje `komentarze_ton`, `poprawki`. Katalog: `komentarze_ostre`, `komentarze_plec_ostre`, `komentarze_tony`,
+  `persona.komentarze_ton`. Ustawienia persony: `komentarze_ton` (ostre domyślnie | lagodne – inne = 400), `glosy_rotuj` (bool).
 - **3.5 pierwsza klatka** (rolka z promptu: najpierw zdjęcie, potem wideo od niego). Nowe opcje wszystkich endpointów z-promptu:
   `klatka: "wl" | "wyl"` (brak = `pierwsza_klatka.wlaczona` z ustawień wspólnych), `klatka_model` (`gpt_image_2_5` | `nano_banana_pro`
   | `gpt_image_2` | `seedream_v5_pro`), `tlo: "auto" | "bez" | "<plik z Pulpit/ROLKI AI/tla/<miejsce>>"` (`ustalone.tlo` zamraża

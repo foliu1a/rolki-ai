@@ -36,7 +36,7 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji pr
 
 # ROLKI_PORT w env = inny port (np. druga kopia programu do testow obok dzialajacego panelu); skroty/.bat zakladaja 5077
 PORT = int(os.environ.get("ROLKI_PORT") or 5077)
-WERSJA = "3.5.3"
+WERSJA = "3.6"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -583,6 +583,9 @@ def _pomysl_dla_panelu(p):
                                                        f"{zp.get('dlugosc')} s" if zp.get("dlugosc") else "", zp.get("rozdzielczosc"),
                                                        "inne włosy" if zp.get("wlosy_zmienione") else "", glos) if x)
         p["z_promptu_dlaczego"] = (zp.get("asystent") or {}).get("dlaczego") or ""
+        # 3.6: uwaga usera do oceny ("Co wyszlo zle?" / "Co bylo dobre?") i poprawki, ktore z niej wynikly
+        p["ocena_poprawki_nazwy"] = [asystent.REGULY_PO_KLUCZU[k][1] for k in (p.get("ocena_poprawki") or [])
+                                     if k in asystent.REGULY_PO_KLUCZU]
         p["mozna_dograc_glos"] = (zp.get("glos") == "tts" and bool(zp.get("komentarz")) and not p.get("glos_dograny")
                                   and p.get("status") in ("gotowe", "wygenerowany"))
         # 3.5: pierwsza klatka - miniatura (od czego ruszylo wideo), ocena kontroli, "Zrob wideo z tej klatki"
@@ -804,7 +807,7 @@ def api_usun_pomysl(pid):
 
 OPCJE_Z_PROMPTU = ("pomysl_id", "tekst", "miejsce", "model", "dlugosc", "rozdzielczosc", "wlosy", "stroj", "stroj_tekst", "reakcja",
                    "komentarz", "komentarz_tekst", "sezon", "pora", "kamera", "ustalone", "obiekt", "nazwy", "glos", "wymowa",
-                   "asystent", "nagrywa", "klatka", "klatka_model", "tlo")
+                   "asystent", "nagrywa", "klatka", "klatka_model", "tlo", "komentarze_ton", "poprawki")
 
 
 def _slug_z_promptu(dane):
@@ -888,13 +891,34 @@ def api_z_promptu_asystent():
 
 @app.route("/api/pomysly/<int:pid>/ocena", methods=["POST"])
 def api_ocena_pomyslu(pid):
-    """Ocena rolki z promptu: {"ocena": "dobra" | "slaba" | null} - asystent uczy sie z niej przy kolejnym dobieraniu."""
+    """Ocena rolki z promptu: {"ocena": "dobra" | "slaba" | null, "komentarz": "co wyszlo zle / co bylo dobre"} - asystent uczy
+    sie z niej przy kolejnym dobieraniu (3.6: komentarz -> uwaga: reguly = stale poprawki promptu, ostatnie uwagi -> LLM)."""
+    dane = request.json or {}
     try:
         aktywna = _wymaga_modelki()
-        pomysl = asystent.ocen(aktywna, pid, (request.json or {}).get("ocena"))
+        pomysl = asystent.ocen(aktywna, pid, dane.get("ocena"), dane.get("komentarz"))
     except ValueError as e:
         return _blad(e)
-    return _ok(pomysl=_pomysl_dla_panelu(pomysl))
+    return _ok(pomysl=_pomysl_dla_panelu(pomysl), pamiec=asystent.pamiec(aktywna))
+
+
+@app.route("/api/asystent/pamiec")
+def api_asystent_pamiec():
+    """3.6: "Asystent pamieta" - aktywne poprawki z uwag usera + ostatnie uwagi (to czyta tez darmowy LLM)."""
+    slug = (request.args.get("slug") or "").strip() or baza.aktywna_modelka()
+    return _ok(**asystent.pamiec(slug))
+
+
+@app.route("/api/asystent/pamiec/usun", methods=["POST"])
+def api_asystent_pamiec_usun():
+    """{"poprawka": klucz} - poprawka znika ze wszystkich uwag | {"uwaga": id} - cala uwaga znika (z regul i z LLM)."""
+    dane = request.json or {}
+    try:
+        asystent.usun_z_pamieci(poprawka=(dane.get("poprawka") or "").strip() or None,
+                                uwaga=(dane.get("uwaga") or "").strip() or None)
+    except ValueError as e:
+        return _blad(e)
+    return _ok(**asystent.pamiec(baza.aktywna_modelka()))
 
 
 @app.route("/api/z-promptu/losuj", methods=["POST"])
@@ -1145,7 +1169,8 @@ def api_ustawienia():
 def _rzutuj(klucz, wartosc):
     """Wartosc z formularza -> typ jak w USTAWIENIA_DOMYSLNE (bool/int/dict/str)."""
     dom = baza.USTAWIENIA_DOMYSLNE[klucz]
-    wybory = {"stroj_swap": ("biblioteka", "z_filmu"), "nagrywa": ("chlopak", "dziewczyna")}
+    wybory = {"stroj_swap": ("biblioteka", "z_filmu"), "nagrywa": ("chlopak", "dziewczyna"),
+              "komentarze_ton": tuple(scenariusz.KOMENTARZE_TONY)}
     if klucz in wybory:
         v = str(wartosc or "").strip()
         if v not in wybory[klucz]:

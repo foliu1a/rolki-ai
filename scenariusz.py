@@ -29,6 +29,9 @@ Zasady (sprawdzone na przewodniku Seedance 2.5 i na rolkach usera z 6.10, PROJEK
   klatka = zdjecie SAMEGO miejsca (prompt_tla, TLO_SCENA: bez bohaterki, ludzie tylko w tle), wideo = SZABLON_KROTKI_TLO
   (bohaterka z obrazow 1..N, miejsce/kadr/swiatlo/napisy z ostatniego obrazu, kamera stoi tam, skad zrobiono zdjecie tla).
   WARIANTY_MODELI: "seedance_2_5_480p" = Seedance 2.5 480p 10 s (ok. 30 kr) - twarz pewna, taniej, mniej ostre.
+- (3.6, feedback 2026-10-10) komentarze ostre (KOMENTARZE_OSTRE, domyslne; tylko ElevenLabs, nigdy w prompcie), mocna skala wzrostu
+  (zdanie_wzrostu + PROPORCJE, SKALA_TLA), ciche kroki w dzwieku (DZWIEK_*, dzwieki_z_daleka), stale poprawki z uwag usera
+  (POPRAWKI_PROMPTU, poprawki_rolki -> ustalone.poprawki; zrodlo: asystent.REGULY_UWAG).
 """
 import os
 import random
@@ -327,15 +330,53 @@ NAGRYWA = {"chlopak": "Chłopak", "dziewczyna": "Dziewczyna"}
 NAGRYWA_DOMYSLNIE = "chlopak"
 KOMENTARZE_PLEC = {"chlopak": [a for a, _ in WARIANTY_PLCI], "dziewczyna": [b for _, b in WARIANTY_PLCI]}
 KOMENTARZE_COSPLAY = ["Halloween już był.", "Gdzie jest ten konwent?"]
+# 3.6 (prosba usera 2026-10-10: "Co za pokemon, ja pierdole"): OSTRE komentarze = potoczny, wulgarny polski jak z prawdziwych
+# nagran z ukrycia - DOMYSLNE (ustawienie persony `komentarze_ton`: ostre | lagodne). Ida TYLKO do ElevenLabs (komentarz_glos),
+# nigdy do promptu modelu wideo/klatki (filtr NSFW/IP: "pokemon" jest w MARKI) - pilnuje tego test. Neutralne wzgledem mowiacego;
+# linie z 1. osoba w parach (WARIANTY_PLCI_OSTRE, dopasuj_do_mowiacego).
+KOMENTARZE_OSTRE = ["Co za pokemon, ja pierdolę.", "Ja pierdolę, patrz na to.", "Kurwa, co ona ma na sobie?",
+                    "Ty, zobacz to, hahaha.", "Cyrk przyjechał, ja nie mogę.", "Halloween był wczoraj czy co?",
+                    "No chyba sobie jaja robisz.", "Ej, nagrywaj, nagrywaj!", "To jest jakiś cosplay, kurwa?",
+                    "Matko jedyna, gdzie ona tak idzie?",
+                    "Ja pierdolę, co to jest?", "O kurwa, patrz, patrz!", "Kurwa, ale ma wyjebane.", "Ja nie mogę, co za wariatka.",
+                    "Chyba jej się Halloween pomylił, hahaha.", "Ej, kurwa, zobacz, zobacz.", "Co to za przebieraniec, kurwa?",
+                    "Serio ona tak wyszła z domu? Ja pierdolę.", "Ty, nie gap się tak, hahaha.", "Kurwa, jak z kosmosu.",
+                    "No to mamy cyrk, ja pierdolę."]
+WARIANTY_PLCI_OSTRE = [   # (chlopak, dziewczyna)
+    ("Pierwszy raz widziałem takiego pokemona.", "Pierwszy raz widziałam takiego pokemona."),
+    ("Ja bym się tak nie odważył, kurwa.", "Ja bym się tak nie odważyła, kurwa."),
+    ("Myślałem, że już wszystko widziałem.", "Myślałam, że już wszystko widziałam."),
+]
+KOMENTARZE_PLEC_OSTRE = {"chlopak": [a for a, _ in WARIANTY_PLCI_OSTRE], "dziewczyna": [b for _, b in WARIANTY_PLCI_OSTRE]}
+KOMENTARZE_TONY = {"ostre": "Ostre – potocznie, z przekleństwami (jak w prawdziwych nagraniach)",
+                   "lagodne": "Łagodne – bez przekleństw"}
+KOMENTARZE_TON_DOMYSLNY = "ostre"
+# rdzenie przeklenstw (bez ogonkow) - lagodny ton odrzuca takie linie (np. z LLM), test pilnuje, ze nie ma ich w promptach wideo
+WULGARNE = re.compile(r"kurw|pierdol|jeb|chuj|spierd|zajeb|jaja\b|dupa", re.I)
 # 1. osoba czasu przeszlego / trybu przypuszczajacego: -łam/-łabym albo "bym ... -ła" = mowi kobieta, -łem/-łbym albo
 # "bym ... -ł" = mowi mezczyzna ("Serio tak wyszła z domu?" to 3. osoba - o niej - wiec neutralne)
 _FORMA_KOBIECA = re.compile(r"\w+(?:łam|łabym)\b|\bbym\b(?:\s+\w+){0,5}?\s+\w+ła\b", re.I)
 _FORMA_MESKA = re.compile(r"\w+(?:łem|łbym)\b|\bbym\b(?:\s+\w+){0,5}?\s+\w+ł\b", re.I)
 
 
-def komentarze_dla(nagrywa):
-    """Linie komentarza pasujace do mowiacego: neutralne + w jego formie (chlopak / dziewczyna)."""
-    return KOMENTARZE + KOMENTARZE_PLEC.get(nagrywa if nagrywa in NAGRYWA else NAGRYWA_DOMYSLNIE, [])
+def ton_komentarzy(slug=None, ton=None):
+    """'ostre' | 'lagodne': podany (z rolki/CLI) > ustawienie persony `komentarze_ton` > KOMENTARZE_TON_DOMYSLNY (ostre)."""
+    if ton in KOMENTARZE_TONY:
+        return ton
+    if slug:
+        t = baza.ustawienia_modelki(slug).get("komentarze_ton")
+        if t in KOMENTARZE_TONY:
+            return t
+    return KOMENTARZE_TON_DOMYSLNY
+
+
+def komentarze_dla(nagrywa, ton="lagodne"):
+    """Linie komentarza pasujace do mowiacego: neutralne + w jego formie (chlopak / dziewczyna). ton: 'lagodne' (KOMENTARZE)
+    albo 'ostre' (KOMENTARZE_OSTRE, 3.6)."""
+    kto = nagrywa if nagrywa in NAGRYWA else NAGRYWA_DOMYSLNIE
+    if ton == "ostre":
+        return KOMENTARZE_OSTRE + KOMENTARZE_PLEC_OSTRE.get(kto, [])
+    return KOMENTARZE + KOMENTARZE_PLEC.get(kto, [])
 
 
 def pasuje_do_mowiacego(tekst, nagrywa):
@@ -348,8 +389,9 @@ def pasuje_do_mowiacego(tekst, nagrywa):
 
 
 def dopasuj_do_mowiacego(tekst, nagrywa):
-    """Znana linia w formie drugiej plci -> ta sama linia w formie mowiacego (z WARIANTY_PLCI); reszta bez zmian."""
-    for meska, kobieca in WARIANTY_PLCI:
+    """Znana linia w formie drugiej plci -> ta sama linia w formie mowiacego (z WARIANTY_PLCI i WARIANTY_PLCI_OSTRE); reszta bez
+    zmian."""
+    for meska, kobieca in WARIANTY_PLCI + WARIANTY_PLCI_OSTRE:
         if nagrywa == "chlopak" and tekst == kobieca:
             return meska
         if nagrywa == "dziewczyna" and tekst == meska:
@@ -484,7 +526,7 @@ MIEJSCA = {
         "dzwieki": "echoing footsteps, the heavy entrance door slamming, the hum of the lift, a TV muffled behind a door",
         "akcje": ["she comes in through the heavy entrance door with a shopping bag and opens her mailbox",
                   "she pulls out a few letters and leaflets and flips through them",
-                  "she starts climbing the stairs, her shoes echoing in the stairwell"],
+                  "she starts climbing the stairs, one hand on the handrail"],
         "streszczenie": "{IMIE} comes home to her block, checks her mailbox and climbs the stairs while a neighbour stares.",
         "reakcje": "a neighbour in a tracksuit coming down with a rubbish bag stops for a second and stares; an elderly lady opens "
                    "her door a crack to look",
@@ -1502,38 +1544,44 @@ def _wzrost(wartosc):
     return (min(a, b), max(a, b))
 
 
-def zdanie_wzrostu(wartosc):
-    """Wzrost persony -> zdanie EN ze skala wzgledem ludzi (sr. Polka ~165 cm, Polak ~179 cm) albo ''."""
+# 3.6 (user 2026-10-10: "kobiety wychodza czasami za wysokie i to zle wyglada"): mocne odniesienia skali wg wzrostu persony -
+# 158-162 = wyraznie nizsza od ludzi obok (glowa na wysokosci ramienia/brody przecietnego mezczyzny), 168-172 = przecietna albo lekko
+# wyzsza kobieta, nadal nizsza od wiekszosci mezczyzn; ZAWSZE normalne codzienne proporcje (nie modelka, nogi nie wydluzone,
+# platformy to kilka cm, ludzie obok w tej samej skali). Bez slow z fabryka.SLOWA_RYZYKOWNE (test).
+PROPORCJE = "Ordinary proportions, not a model: legs never lengthened, platforms add only a few cm, people around at true scale."
+PROPORCJE_KROTKO = "Ordinary proportions, not a model; legs never lengthened."
+WZROST_MOCNIEJ = ("Height check (the user asked for it): she is never taller than the men around her and not taller than most "
+                  "women; if a man stands near her, he is clearly taller; keep her at true scale next to people and doors.")
+
+
+def _skala_wzrostu(s):
+    """(jaka, skala) - opis wzrostu i odniesienie do ludzi obok (sr. Polka ~165 cm, Polak ~179 cm)."""
+    if s < 163:
+        return ("petite", "clearly shorter than people around her, her head only at the shoulder or chin of an average man")
+    if s < 166:
+        return ("a little below average height", "shorter than most women and clearly shorter than men, her head at the mouth "
+                                                 "or nose of an average man")
+    if s < 168:
+        return ("of average height", "as tall as most women and clearly shorter than men, her head at the nose or eyes of an "
+                                     "average man")
+    if s < 175:
+        return ("of average to slightly above-average height", "about as tall as most women, still shorter than most men, her "
+                                                               "head at the eyes or eyebrows of an average man")
+    return ("tall for a woman", "taller than most women, still not taller than most men, her head at the forehead of an "
+                                "average man")
+
+
+def zdanie_wzrostu(wartosc, krotko=False, mocniej=False):
+    """Wzrost persony -> zdanie EN ze skala wzgledem ludzi + normalne proporcje (3.6) albo ''. krotko = do krotkich szablonow
+    (Wan/Gemini, limit znakow); mocniej = poprawka z uwag usera ("za wysoka" - asystent.REGULY_UWAG)."""
     w = _wzrost(wartosc)
     if not w:
         return ""
     a, b = w
-    s = (a + b) / 2
     zakres = f"{a}-{b} cm" if a != b else f"{a} cm"
-    if s < 162:
-        jaka, kobiety = "petite", "noticeably shorter than most women around her"
-    elif s < 165:
-        jaka, kobiety = "on the short side", "a little shorter than most women around her"
-    elif s < 167:
-        jaka, kobiety = "of average height", "about as tall as most women around her"
-    elif s < 170:
-        jaka, kobiety = "fairly tall", "a little taller than most women around her"
-    else:
-        jaka, kobiety = "tall for a woman", "taller than most women around her"
-    if s <= 159.5:
-        mezczyzna = "only about the chin"
-    elif s <= 163:
-        mezczyzna = "about the mouth"
-    elif s <= 166:
-        mezczyzna = "about the nose"
-    elif s <= 169.5:
-        mezczyzna = "about the eyes"
-    elif s <= 174:
-        mezczyzna = "about the forehead"
-    else:
-        mezczyzna = "almost the top of the head"
-    return (f"She is {jaka}, about {zakres} tall: {kobiety}, and the top of her head reaches {mezczyzna} of an average man. "
-            f"Keep this real scale next to people, doors, counters and shelves.")
+    jaka, skala = _skala_wzrostu((a + b) / 2)
+    zdanie = f"She is {jaka}, about {zakres} tall: {skala}. " + (PROPORCJE_KROTKO if krotko else PROPORCJE)
+    return zdanie + (" " + WZROST_MOCNIEJ if mocniej else "")
 
 
 # ---------------- obrazy (ta sama kolejnosc dla promptu i dla --image) ----------------
@@ -1588,9 +1636,8 @@ SZABLON_PELNY = (
     "to white, shadows slightly muddy with fine digital noise; natural, slightly flat colours, mild over-sharpening and "
     "compression like an Instagram upload. Realistic skin texture, no beauty filter, no colour grading.\n"
     "[Sound] {DZWIEK}\n"
-    "[Result] A real clip someone filmed in Poland and posted on Instagram: natural scale and perspective (feet on the ground, "
-    "her height correct next to people and objects), real-world physics. No subtitles, captions, added text, stickers or "
-    "watermarks."
+    "[Result] A real clip someone filmed in Poland and posted on Instagram: natural perspective, feet on the ground, real-world "
+    "physics. No subtitles, captions, added text, stickers or watermarks."
 )
 # [Camera]: klasyczna (nagrywajacy idzie/stoi obok) albo z ukrycia (KAMERY_UKRYTE - nigdy nie podchodzi, ona nie widzi telefonu)
 KAMERA_KLASYCZNA = ("Ordinary iPhone, main 1x lens (about 24 mm), hand-held at chest-to-eye height by someone {OPERATOR}, "
@@ -1606,10 +1653,43 @@ DYSTANS_UKRYTEJ = ("She stays 6-10 m away the whole clip: a small full-body figu
                    "often partly covered by something in the foreground; never a close-up or a photo-shoot framing.")
 # [Sound] (3.1): wideo ZAWSZE tylko z dzwiekiem otoczenia - nikt w kadrze nic nie mowi, komentarz osoby nagrywajacej dogrywa
 # ElevenLabs po generacji (komentarz_glos.py). Mowa z modelu wideo wylaczona: mowila nie ta osoba i przekrecala polskie slowa.
-DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}. Nobody in the clip speaks clearly: {IMIE} says nothing at all, nobody "
-                   "talks to her or to the camera, and the person filming stays completely silent; people nearby only murmur and "
-                   "whisper indistinctly in the background, with no understandable words. No dialogue, no voice-over, no "
-                   "background music.")
+# 3.6 (user: "kroki/buty za glosno jak na odleglosc"): ona jest daleko - jej kroki i buty prawie niesłyszalne, zadnych bliskich
+# odglosow (foley) bohaterki; dominuje dzwiek miejsca (gwar, ulica, sklep...). Po generacji komentarz_glos jeszcze ujarzmia
+# transjenty otoczenia (filtr_otoczenia).
+DZWIEK_BEZ_MOWY = ("Phone-microphone sound only: {DZWIEKI}; she is far away, so her footsteps are almost inaudible (no heel "
+                   "clicks). Nobody in the clip speaks clearly: {IMIE} says nothing at all, nobody talks to her or to the camera, "
+                   "and the person filming stays completely silent; people nearby only murmur and whisper indistinctly in the "
+                   "background. No dialogue, no voice-over, no background music.")
+KROKI_MOCNIEJ = ("Sound check (the user asked for it): her footsteps and shoes are silent - not a single heel click; only the "
+                 "ambience of the place.")
+
+
+def dzwieki_z_daleka(dzwieki):
+    """Odglosy miejsca do promptu: kroki to kroki INNYCH ludzi z daleka (nie jej) - 'footsteps on tiles' -> 'distant footsteps of
+    passers-by on tiles'."""
+    return re.sub(r"\b(?:echoing\s+)?footsteps\b", "distant footsteps", dzwieki or "")
+
+
+# 3.6: stale poprawki promptu z uwag usera do ocenionych rolek (asystent.REGULY_UWAG -> klucze; zbuduj zamraza je w
+# ustalone.poprawki). (pelna, krotka) - krotka do krotkich szablonow (Wan/Gemini) i do zdjec (klatka/tlo). Bez slow ryzykownych.
+POPRAWKI_PROMPTU = {
+    "dystans": ("Distance check (the user asked for it): she stays far from the phone the whole time - about 8-12 m away, a small "
+                "full-body figure no taller than about a quarter of the frame; the camera never gets closer and she never becomes "
+                "a close-up or a medium shot.",
+                "Distance check: she stays far away (8-12 m), a small full-body figure, never a close-up."),
+    "tozsamosc": ("Face check (the user asked for it): her face must match the reference photos exactly - the same face shape, "
+                  "eyes, nose, lips, eyebrows, skin and piercings; do not beautify her, do not change her into a generic pretty "
+                  "model; when unsure, copy the reference face.",
+                  "Face check: exactly the face from the reference photos (shape, eyes, nose, lips, piercings), not a generic "
+                  "pretty face."),
+    "napisy": ("Text check (the user asked for it): fewer and smaller signs - at most one or two short signs readable, everything "
+               "else too small or too far to read; no big text close to the lens.",
+               "Text check: at most one or two small readable signs, the rest too far to read."),
+    "tlo": ("Place check (the user asked for it): it looks like a real, ordinary, slightly worn place in Poland - real Polish "
+            "details, everyday mess and ordinary Polish people; not a clean showroom, film set, render or a foreign-looking place.",
+            "Place check: a real, ordinary, slightly worn place in Poland with everyday mess, not a showroom or render."),
+}
+POPRAWKI_KOLEJNOSC = ("dystans", "wzrost", "tozsamosc", "napisy", "tlo", "kroki", "glos")
 
 SZABLON_KROTKI = (
     "Candid vertical 9:16 smartphone video, real footage, not a film: someone secretly films {IMIE}, the young woman from {REF_K}, "
@@ -1628,8 +1708,9 @@ KAMERA_KROTKA_UKRYTA = ("ordinary iPhone, secretly filmed by someone {OPERATOR} 
                         "her: {RUCH} She stays far away (6-10 m), a small figure about a quarter to a third of the frame height, "
                         "sometimes partly covered by something in the foreground; never a close-up or a photo-shoot framing. "
                         "Hand-held shake, deep focus, no cinematic moves.")
-DZWIEK_KROTKI_BEZ_MOWY = ("ambience only ({DZWIEKI}); nobody speaks clearly: she says nothing, nobody talks to the camera, the "
-                          "person filming stays silent, people nearby only murmur indistinctly. No dialogue, no music.")
+DZWIEK_KROTKI_BEZ_MOWY = ("ambience only ({DZWIEKI}); she is far away, so her footsteps are almost inaudible (no heel clicks); "
+                          "nobody speaks clearly: she says nothing, nobody talks to the camera, the person filming stays silent, "
+                          "people nearby only murmur indistinctly. No dialogue, no music.")
 
 
 # 3.5: wideo z pierwszej klatki - Seedance (omni_reference + start_image + zdjecia persony) rusza DOKLADNIE od klatki: miejsce,
@@ -1926,9 +2007,9 @@ TLO_SCENA = (
     "[Camera] The phone is held at chest height by someone {OPERATOR}, slightly tilted, framing a bit off-centre. {ZASLONA}\n"
     "[Place] {OPIS} Real Polish details: {DETALE}; {POLSKIE}. {POGODA}\n"
     "[People] Only a few ordinary Polish people of all ages in {SEZON} clothes, at the sides and in the background, busy with "
-    "their own things; nobody looks like a model, nobody poses and nobody looks at the camera. The spot where a customer or "
-    "passer-by would stand {GDZIE}, about 6-10 metres from the camera, is clearly visible and free: empty floor, nobody stands "
-    "there yet.\n"
+    "their own things; nobody looks like a model, nobody poses and nobody looks at the camera. {SKALA} The spot where a "
+    "customer or passer-by would stand {GDZIE}, about {DYSTANS} metres from the camera, is clearly visible and free: empty "
+    "floor, nobody stands there yet.\n"
     "[Text] All text belongs to the place and is small and far from the camera - no big sign close to the lens, only a few short "
     "signs readable. Every word is correct Polish with Polish letters, like {NAPISY}. {CENY} {BEZ_MAREK}\n"
     "[Light] {SWIATLO}; just the ordinary light of the place, no studio light.\n"
@@ -1938,6 +2019,37 @@ TLO_SCENA = (
     "[Check] A photo of the place with no main subject: the free spot in the middle distance stays empty and nobody stands "
     "close to the camera in focus; no captions, overlays or watermarks."
 )
+
+
+# 3.6: skala na zdjeciu samego miejsca (tlo Wan/Gemini) - bez bohaterki (model obrazu dorysowalby ja), tylko ludzie i rzeczy
+SKALA_TLA = ("Everyone and everything is at true everyday scale: ordinary heights and proportions (most men clearly taller than "
+             "most women, nobody unusually tall or stretched), doors, counters and shelves at their real size.")
+# tlo: poprawki bez odniesien do niej (na zdjeciu tla jej nie ma)
+POPRAWKI_TLA = {
+    "napisy": POPRAWKI_PROMPTU["napisy"][1],
+    "tlo": POPRAWKI_PROMPTU["tlo"][1],
+}
+
+
+def poprawki_rolki(slug, o=None, u=None):
+    """Klucze poprawek dla rolki: podane w opcjach > zamrozone w ustalonych > aktywne z uwag usera (asystent.poprawki_dla).
+    Blad pliku uwag nigdy nie psuje budowania promptu (= bez poprawek)."""
+    for zrodlo in (o or {}, u or {}):
+        if isinstance(zrodlo.get("poprawki"), (list, tuple)):
+            return [k for k in POPRAWKI_KOLEJNOSC if k in zrodlo["poprawki"]]
+    try:
+        import asystent
+        return [k for k in POPRAWKI_KOLEJNOSC if k in asystent.poprawki_dla(slug)]
+    except Exception:           # zly JSON uwag itp. - rolka bez poprawek, nie blad
+        return []
+
+
+def blok_poprawek(poprawki, krotko=False, dzwiek=True):
+    """Zdania 'Must' z poprawek (bez 'wzrost' - idzie w zdaniu o wzroscie, i bez 'glos' - tylko miks po generacji)."""
+    teksty = [POPRAWKI_PROMPTU[k][1 if krotko else 0] for k in POPRAWKI_KOLEJNOSC if k in (poprawki or ()) and k in POPRAWKI_PROMPTU]
+    if dzwiek and "kroki" in (poprawki or ()):
+        teksty.append(KROKI_MOCNIEJ)
+    return " ".join(teksty)
 
 
 def detale_klatki(miejsce_id):
@@ -1998,6 +2110,9 @@ def prompt_klatki(d):
             BEZ_MAREK=BEZ_MAREK_KLATKI if d.get("nazwy") != "prawdziwe" or not d.get("nazwa_obiektu") else
             BEZ_MAREK_KLATKI.replace("No brand names", "No other brand names"),
             SWIATLO=(d.get("swiatlo") or "ordinary light")[:1].upper() + (d.get("swiatlo") or "ordinary light")[1:], **pola)
+    must = blok_poprawek(d.get("poprawki"), krotko=True, dzwiek=False)       # 3.6: poprawki z uwag usera
+    if must:
+        tekst += "\n[Must] " + must
     tekst = re.sub(r"[ \t]{2,}", " ", tekst)
     return re.sub(r"[ \t]+\n", "\n", tekst).strip(), sorted(set(zamienione))
 
@@ -2029,7 +2144,11 @@ def prompt_tla(d):
         NAPISY=", ".join(f"'{x}'" for x in napisy[:5]), CENY=CENY_KLATKI,
         BEZ_MAREK=BEZ_MAREK_KLATKI if d.get("nazwy") != "prawdziwe" or not d.get("nazwa_obiektu") else
         BEZ_MAREK_KLATKI.replace("No brand names", "No other brand names"),
-        SWIATLO=swiatlo[:1].upper() + swiatlo[1:])
+        SWIATLO=swiatlo[:1].upper() + swiatlo[1:], SKALA=SKALA_TLA,
+        DYSTANS="8-12" if "dystans" in (d.get("poprawki") or ()) else "6-10")
+    must = " ".join(POPRAWKI_TLA[k] for k in POPRAWKI_KOLEJNOSC if k in (d.get("poprawki") or ()) and k in POPRAWKI_TLA)
+    if must:
+        tekst += "\n[Must] " + must                 # 3.6: poprawki z uwag usera (bez odniesien do niej)
     tekst = re.sub(r"[ \t]{2,}", " ", tekst)
     return re.sub(r"[ \t]+\n", "\n", tekst).strip()
 
@@ -2098,7 +2217,8 @@ def zbuduj(slug, opcje=None, los=None):
         "biblioteka:<id ze stroje_biblioteka>" (DOMYSLNY w panelu/asystencie), nagrywa ("chlopak" | "dziewczyna"; brak = z
         ustawien persony) - gramatyka komentarza pod mowiacego. zp-4 (3.5): klatka ("wl" | "wyl"; brak = ustawienia globalne
         pierwsza_klatka), klatka_model (pierwsza_klatka.MODELE), tlo ("auto" = zdjecie usera z tla/<miejsce>, gdy jest | "bez" |
-        nazwa pliku).
+        nazwa pliku). 3.6: komentarze_ton ("ostre" | "lagodne"; brak = ustawienie persony, domyslnie ostre), poprawki (lista
+        kluczy POPRAWKI_KOLEJNOSC; brak = ustalone.poprawki albo aktywne z uwag usera - asystent.poprawki_dla).
     Zwraca {"prompt", "obrazy" (sciezki), "znaki", "limit", "ostrzezenia", "ustalone", "model", "mode", "parametry",
             "generate_audio", "rozdzielczosc", "dlugosc", "tytul", "miejsce", "pomysl_id", "szablon", "glos", "komentarz",
             "komentarz_t" (sekunda komentarza - tam dogrywa go komentarz_glos.py), "obiekt", "nazwy", "stroj_id", "reakcja",
@@ -2329,9 +2449,15 @@ def zbuduj(slug, opcje=None, los=None):
     else:
         stroj_klatki = _WZORZEC_TOKENU.sub("the reference photos", stroj)
 
+    # --- 3.6: stale poprawki z uwag usera do ocenionych rolek ("Asystent pamieta") - zamrozone w ustalone.poprawki, wiec przy
+    #     "Zrob" idzie prompt, ktory user widzial przy wycenie ---
+    poprawki = poprawki_rolki(slug, o, u)
+    u["poprawki"] = poprawki
+
     # --- wlosy, wzrost, tozsamosc ---
     wlosy, wlosy_zmienione = wlosy_opis(slug, o.get("wlosy"))
-    wzrost = zdanie_wzrostu(prof.get("wzrost_cm"))
+    wzrost = zdanie_wzrostu(prof.get("wzrost_cm"), mocniej="wzrost" in poprawki)
+    wzrost_krotko = zdanie_wzrostu(prof.get("wzrost_cm"), krotko=True, mocniej="wzrost" in poprawki)
     if not wzrost:
         ostrzezenia.append(f"{imie} nie ma wzrostu w profilu (Ustawienia -> Persona -> Wzrost) - skala wzgledem ludzi bez liczb.")
     toz = tozsamosc(slug, bez_wlosow=True, limit=600 if mi["szablon"] == "pelny" else 300)
@@ -2347,8 +2473,11 @@ def zbuduj(slug, opcje=None, los=None):
         baza.ustawienia_modelki(slug).get("nagrywa") if baza.ustawienia_modelki(slug).get("nagrywa") in NAGRYWA
         else NAGRYWA_DOMYSLNIE)
 
-    # --- komentarz (mowi osoba nagrywajaca; forma gramatyczna pod chlopaka / dziewczyne) ---
+    # --- komentarz (mowi osoba nagrywajaca; forma gramatyczna pod chlopaka / dziewczyne; 3.6: ton ostre (domyslny) / lagodne).
+    #     Komentarz idzie TYLKO do ElevenLabs po generacji - nigdy do promptu wideo/klatki (test). ---
     kom = (o.get("komentarz") or "losowy").strip()
+    ton = ton_komentarzy(slug, o.get("komentarze_ton") or u.get("komentarze_ton"))
+    u["komentarze_ton"] = ton
     if kom == "bez":
         kom_tekst = ""
     elif kom == "wlasny":
@@ -2356,9 +2485,11 @@ def zbuduj(slug, opcje=None, los=None):
         if not kom_tekst:
             raise ValueError("Wpisz wlasny komentarz albo wybierz inny.")
     elif kom == "losowy":
-        pula = komentarze_dla(nagrywa) + (KOMENTARZE_COSPLAY if stroj_wybor == "cosplay" else [])
+        pula = komentarze_dla(nagrywa, ton) + (KOMENTARZE_COSPLAY if stroj_wybor == "cosplay" else [])
+        # gotowe pomysly maja lagodny komentarz - przy ostrym tonie losujemy z puli ostrych
+        z_pomyslu = (pomysl or {}).get("komentarz") if stroj_wybor != "cosplay" and pomysl and ton == "lagodne" else None
         kom_tekst = u.get("komentarz") if u.get("komentarz_tryb") == "losowy" and u.get("komentarz") else (
-            ((pomysl or {}).get("komentarz") if stroj_wybor != "cosplay" and pomysl else None) or _wybierz(los, pula))
+            z_pomyslu or _wybierz(los, pula))
         u["komentarz_tryb"] = "losowy"
     else:
         kom_tekst = kom
@@ -2413,9 +2544,11 @@ def zbuduj(slug, opcje=None, los=None):
             akcja = AKCJA_JEDNO_UJECIE + akcja      # beaty z czasami (0-3 s: ...) to NIE osobne ujecia
 
     zamienione_wideo = set()
+    dzwieki = dzwieki_z_daleka(m["dzwieki"])
 
-    def skladaj(syl):
+    def skladaj(syl, z_must=True):
         blok_syl =f"Body shape (highest priority after her face): {syl.rstrip('.')}. " if syl else ""
+        must = blok_poprawek(poprawki, krotko=mi["szablon"] != "pelny") if z_must else ""
         if mi["szablon"] == "pelny":
             tekst_p = (SZABLON_PELNY_KLATKA if klatka_wl else SZABLON_PELNY).format(
                 SEK=dlugosc, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"], STRESZCZENIE=streszczenie,
@@ -2424,7 +2557,9 @@ def zbuduj(slug, opcje=None, los=None):
                 SYLWETKA=blok_syl, STROJ=stroj, OPIS=m["opis"], DETALE=m["detale"], SZYLDY=napisy, POGODA=pogoda,
                 UBRANIA=sz["ubrania"], AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie, KAMERA=kamera_blok,
                 SWIATLO=(swiatlo[:1].lower() + swiatlo[1:]) if klatka_wl else swiatlo,
-                DZWIEK=DZWIEK_BEZ_MOWY.format(DZWIEKI=m["dzwieki"], IMIE=imie))
+                DZWIEK=DZWIEK_BEZ_MOWY.format(DZWIEKI=dzwieki, IMIE=imie))
+            if must:
+                tekst_p += "\n[Must] " + must
         else:
             # zdjecie stroju jest ostatnim "reference photo" - twarz, wlosy i cialo tylko z pierwszych N (ref_k);
             # 3.5.2 tryb tla: persona 1..N, stroj N+1, tlo ostatnie (K)
@@ -2433,10 +2568,12 @@ def zbuduj(slug, opcje=None, los=None):
                 K=obrazy_n + (1 if stroj_plik else 0) + 1, GDZIE=GDZIE_W_KLATCE.get(miejsce_id) or "in the middle distance",
                 IMIE=imie, REF_K=ref_k, KROTKO=krotko, PORA=PORY_DNIA[pora][1], SEZON=sz["en"],
                 TOZ=_WZORZEC_TOKENU.sub(ref_k, toz).rstrip("."), WLOSY=wlosy.replace("the reference photos", ref_k),
-                WZROST=(wzrost.split(":")[0] + ". ") if wzrost else "",
+                WZROST=(wzrost_krotko + " ") if wzrost_krotko else "",
                 SYLWETKA=blok_syl.replace("the reference photos", ref_k), STROJ=stroj,
                 OPIS=_pierwsze_zdanie(m["opis"]), SZYLDY=napisy, AKCJA=akcja, REAKCJE=reakcje, SUBTELNIE=subtelnie,
-                KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=DZWIEK_KROTKI_BEZ_MOWY.format(DZWIEKI=m["dzwieki"]))
+                KAMERA=kamera_blok, SWIATLO=swiatlo, DZWIEK=DZWIEK_KROTKI_BEZ_MOWY.format(DZWIEKI=dzwieki))
+            if must:
+                tekst_p += "\nMust: " + must.replace("the reference photos", ref_k)
             if tryb_tla:
                 # 3.5.2: opisy persony (prompt A, sylwetka, stroj) bez slow, ktore filtr NSFW lubi blokowac - jak w klatce
                 import zdjecia_swap
@@ -2444,20 +2581,26 @@ def zbuduj(slug, opcje=None, los=None):
                 zamienione_wideo.update(zam)
         return re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", tekst_p)).strip()
 
-    # sylwetka: pelna; gdy prompt nie miesci sie w limicie modelu - pierwsze zdanie; gdy i to nie - bez niej (z ostrzezeniem)
-    sylwetka_wersja = "brak"
-    prompt = skladaj("")
-    if sylwetka:
-        for wersja, syl in (("pelna", sylwetka), ("krotka", _pierwsze_zdanie(sylwetka))):
-            kandydat = skladaj(syl)
-            if len(kandydat) <= mi["limit_znakow"]:
-                prompt, sylwetka_wersja = kandydat, wersja
-                break
-        else:
-            sylwetka_wersja = "pominieta"
-        if sylwetka_wersja != "pelna":
-            ostrzezenia.append(f"Sylwetka persony nie zmiescila sie w limicie {mi['nazwa']} ({mi['limit_znakow']} znakow) - "
-                               + ("poszlo tylko pierwsze zdanie." if sylwetka_wersja == "krotka" else "prompt jest bez niej."))
+    # sylwetka: pelna; gdy prompt nie miesci sie w limicie modelu - pierwsze zdanie; gdy i to nie - bez niej (z ostrzezeniem).
+    # 3.6: poprawki z uwag usera ("Must") tez musza sie zmiescic - pierwszenstwo maja przed pelna sylwetka; nie mieszcza sie
+    # nawet bez sylwetki = ida bez nich (ostrzezenie). Wszystko za dlugie = sprawdz() zglosi blad jak dawniej.
+    z_must = (True, False) if blok_poprawek(poprawki) else (True,)
+    warianty = [(m, w, syl) for m in z_must for w, syl in (("pelna", sylwetka), ("krotka", _pierwsze_zdanie(sylwetka)))
+                if sylwetka] + [(m, "pominieta" if sylwetka else "brak", "") for m in z_must]
+    prompt, sylwetka_wersja, must_wersja = None, "brak", True
+    for m_, wersja, syl in warianty:
+        kandydat = skladaj(syl, m_)
+        if len(kandydat) <= mi["limit_znakow"]:
+            prompt, sylwetka_wersja, must_wersja = kandydat, wersja, m_
+            break
+    if prompt is None:
+        prompt, sylwetka_wersja, must_wersja = skladaj("", False), ("pominieta" if sylwetka else "brak"), False
+    if sylwetka and sylwetka_wersja != "pelna":
+        ostrzezenia.append(f"Sylwetka persony nie zmiescila sie w limicie {mi['nazwa']} ({mi['limit_znakow']} znakow) - "
+                           + ("poszlo tylko pierwsze zdanie." if sylwetka_wersja == "krotka" else "prompt jest bez niej."))
+    if not must_wersja and blok_poprawek(poprawki):
+        ostrzezenia.append(f"Poprawki z Twoich uwag (Asystent pamieta) nie zmiescily sie w limicie {mi['nazwa']} - ta rolka idzie "
+                           f"bez nich (wzrost i dzwiek zostaja).")
     if zamienione_wideo:
         ostrzezenia.append("W prompcie wideo zamienilem slowa, ktore filtr NSFW lubi blokowac: "
                            + ", ".join(sorted(zamienione_wideo)) + ".")
@@ -2495,7 +2638,7 @@ def zbuduj(slug, opcje=None, los=None):
             # 3.5.2: krok 1 = zdjecie SAMEGO miejsca (bez persony, bez zdjec); zdjecie usera z tla/<miejsce> = gotowe tlo (0 kr)
             kp = prompt_tla({"miejsce_id": miejsce_id, "krotko": krotko, "pora_en": PORY_DNIA[pora][1], "sezon_en": sz["en"],
                              "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
-                             "operator": operator, "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
+                             "operator": operator, "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu, "poprawki": poprawki})
             refy_kl, max_kl = [], None
         if max_kl:
             miejsce_kl = max_kl - (1 if tlo else 0) - (1 if stroj_plik else 0)
@@ -2509,7 +2652,7 @@ def zbuduj(slug, opcje=None, los=None):
                 "opis": m["opis"], "detale": m["detale"], "swiatlo": swiatlo, "pogoda": pogoda, "kamera": kamera,
                 "operator": operator, "czynnosc": czynnosc, "toz": tozsamosc(slug, bez_wlosow=True, limit=700),
                 "wlosy": wlosy, "wzrost": wzrost, "sylwetka": sylwetka, "stroj": stroj_klatki, "stroj_plik": bool(stroj_plik),
-                "n_ref": len(refy_kl), "tlo": bool(tlo), "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu})
+                "n_ref": len(refy_kl), "tlo": bool(tlo), "nazwy": nazwy, "nazwa_obiektu": nazwa_obiektu, "poprawki": poprawki})
             if zamienione:
                 ostrzezenia.append("W opisie persony do klatki zamienilem slowa, ktore filtr NSFW lubi blokowac: "
                                    + ", ".join(zamienione) + ".")
@@ -2549,7 +2692,7 @@ def zbuduj(slug, opcje=None, los=None):
         "sezon": sezon, "pora": pora, "kamera": kamera, "glos": glos if kom_tekst else "bez", "wymowa": wymowa,
         "komentarz_t": t_kom if kom_tekst else None, "obiekt": obiekt, "obiekt_nazwa": obiekt_nazwa, "nazwy": nazwy,
         "stroj_id": stroj_id, "stroj_tryb": stroj_wybor.split(":")[0], "reakcja": rk, "stroj_nazwa": stroj_nazwa,
-        "nagrywa": nagrywa, "sylwetka": sylwetka_wersja, "klatka": klatka,
+        "nagrywa": nagrywa, "sylwetka": sylwetka_wersja, "klatka": klatka, "komentarze_ton": ton, "poprawki": poprawki,
     }
 
 
@@ -2632,6 +2775,9 @@ def katalog(slug=None):
         "linie_reakcji": LINIE_REAKCJI,
         "komentarze": KOMENTARZE,
         "komentarze_plec": KOMENTARZE_PLEC,
+        "komentarze_ostre": KOMENTARZE_OSTRE,           # 3.6: ton "ostre" (domyslny) - tylko do ElevenLabs
+        "komentarze_plec_ostre": KOMENTARZE_PLEC_OSTRE,
+        "komentarze_tony": [[k, v] for k, v in KOMENTARZE_TONY.items()],
         "nagrywa": [[k, v] for k, v in NAGRYWA.items()],
         "kamery": [[k, v[0]] for k, v in KAMERY.items()],
         "kamery_ukryte": list(KAMERY_UKRYTE),
@@ -2649,6 +2795,7 @@ def katalog(slug=None):
                           "wlosy": wlosy_wlasne(slug), "zdjec": len(baza.sciezki_referencji(slug)),
                           "sylwetka": prof.get("sylwetka") or "",
                           "nagrywa": ust.get("nagrywa") if ust.get("nagrywa") in NAGRYWA else NAGRYWA_DOMYSLNIE,
+                          "komentarze_ton": ton_komentarzy(slug),
                           "stroje": [n for n in sorted(os.listdir(baza.folder_strojow(slug)))
                                      if n.lower().endswith(baza.ROZSZERZENIA_OBRAZU)]}
     return kat

@@ -9,6 +9,8 @@ wlosy, dlugosc i model - i tlumaczy wybor jednym zdaniem. Uczy sie z tego, co wy
   * odrzucenia filtrow: NSFW -> unika tego stroju, IP -> unika tego obiektu (a przy powtorce: nazw w ogole, `nazwy: "opisowe"`),
   * gotowa rolka bez oceny = lekki plus.
 Wszystko liczone z pomysly.json (+ modelki/<slug>/asystent_archiwum.json dla usunietych) - zero osobnej bazy do pilnowania.
+3.6: uwagi usera do ocen ("Co wyszlo zle?") w asystent_uwagi.json obok stan.json -> REGULY_UWAG (stale poprawki promptu, panel
+"Asystent pamieta") + ostatnie uwagi w prompcie LLM; ton komentarzy persony (ostre domyslnie / lagodne).
 
 Mozg: DARMOWY model z OpenRouter (klucz w panelu: Ustawienia -> Konta -> OpenRouter; user nie zrobi weryfikacji dowodem do
 Anthropic). Jedno male zapytanie (~1,5 tys. tokenow), JSON na wyjsciu, kazde pole sprawdzane z katalogiem scenariusz.py.
@@ -134,6 +136,180 @@ def historia(slug):
 
 
 PUNKTY = {"dobra": 3, "gotowe": 1, "slaba": -3}
+
+
+# ---------------- 3.6: uwagi usera do ocenionych rolek ("Co wyszlo zle?" / "Co bylo dobre?") ----------------
+# Plik asystent_uwagi.json obok stan.json (wspolny dla person, poza gitem): kazda uwaga = ocena + tekst usera + wybory rolki.
+# Reguly bez LLM rozpoznaja typowe uwagi po slowach (PL, z ogonkami i bez) -> STALE poprawki promptu (scenariusz.POPRAWKI_PROMPTU,
+# zdanie o wzroscie, miks glosu/otoczenia w komentarz_glos). Nieznane uwagi ida tylko do LLM (ostatnie ~10 w jego prompcie).
+# Zakres "persona" (wzrost, twarz) = tylko persona z uwagi; "wszystkie" = kazda rolka z promptu. Panel: "Asystent pamieta"
+# (Z promptu) - lista aktywnych poprawek i uwag z przyciskiem Usun.
+PLIK_UWAG = "asystent_uwagi.json"
+MAX_UWAG_LLM = 10
+REGULY_UWAG = [   # (klucz, nazwa PL do panelu, zakres, wzorzec na tekscie bez ogonkow, co robi)
+    ("dystans", "Kamera dalej od niej", "wszystkie",
+     r"za blisk|\bblisko|zbliz|wypelnia|za duza w kadrze|caly kadr|portret",
+     "prompt wideo i zdjęcia: ona 8–12 m od telefonu, mała postać, nigdy zbliżenie"),
+    ("wzrost", "Mocniej pilnuje wzrostu", "persona",
+     r"za wysok|\bwysok|tyczk|olbrzym|gigant|dlugie nogi|za dlug\w* nog|wyzsza od|za duza od",
+     "prompt wideo i zdjęcia: nigdy wyższa od mężczyzn obok, zwykłe proporcje"),
+    ("tozsamosc", "Mocniej trzyma twarz", "persona",
+     r"nie\s*(?:jest\s+)?podobn|niepodobn|nie ona\b|\btwarz|inna osoba|inna dziewczyn|nie przypomina|nie jej twarz",
+     "prompt wideo i zdjęcia: twarz dokładnie jak na zdjęciach persony"),
+    ("napisy", "Mniej i mniejsze napisy", "wszystkie",
+     r"napis|literk|\blitery|szyld|belkot|krzaki",
+     "prompt wideo i zdjęcia: najwyżej 1–2 małe napisy, reszta za daleko do czytania"),
+    ("glos", "Bardziej surowy głos (jak z telefonu)", "wszystkie",
+     r"\bglos(?:u|em|ie|y|ik)?\b|studyj|lektor|radiow|jak z radia|jak w reklamie",
+     "miks komentarza: niższy bitrate, więcej pokoju, głos ledwo nad otoczeniem"),
+    ("kroki", "Ciszej jej kroki i buty", "wszystkie",
+     r"\bkrok|\bbut(?:y|ow|ami)?\b|obcas|stuka|stukot|tupot|tupie|\bglosn",
+     "prompt dźwięku + miks: jej kroki prawie niesłyszalne, mocniejsze ujarzmienie pików otoczenia"),
+    ("tlo", "Więcej polskich realiów w tle", "wszystkie",
+     r"\btl[oaeu]\b|nierealn|wymyslon|nie\s*polsk|jak w grze|render|sztuczn\w* (?:tl|miejsc|sklep)|jak z ameryki",
+     "prompt wideo i zdjęcia: zwykłe, trochę zużyte polskie miejsce, nie salon ani render"),
+]
+REGULY_PO_KLUCZU = {r[0]: r for r in REGULY_UWAG}
+# po slowie-kluczu stoi pochwala ("twarz ok", "glos super") = to nie skarga
+_POCHWALA_PO = re.compile(r"^\W*(?:\w+\W+)?(?:ok|okej|dobr\w*|super|spoko|idealn\w*|git|fajn\w*|swietn\w*|w porzadku|bomba|"
+                          r"zajebi\w*|sztos|perfekt\w*|piekn\w*)\b")
+# przy ocenie "Dobra" reguly dzialaja tylko, gdy tekst brzmi jak skarga ("dobra, ale za wysoka")
+_SKARGA = re.compile(r"\b(?:ale|za|nie|zle|zly|zla|slab\w*|popraw\w*|gorzej|minus|szkoda|brakuje)\b")
+
+
+def _plik_uwag():
+    return os.path.join(os.path.dirname(baza.PLIK_STANU), PLIK_UWAG)
+
+
+def _norm(tekst):
+    return re.sub(r"\s+", " ", sc._bez_ogonkow(tekst or "").lower()).strip()
+
+
+def rozpoznaj_uwage(tekst, ocena="slaba"):
+    """Klucze poprawek z tekstu uwagi (reguly bez LLM, PL z ogonkami i bez). Przy 'dobra' tylko, gdy tekst brzmi jak skarga."""
+    t = _norm(tekst)
+    if not t or (ocena == "dobra" and not _SKARGA.search(t)):
+        return []
+    wynik = []
+    o_glosie = re.search(REGULY_PO_KLUCZU["glos"][3], t)
+    for klucz, _, _, wzorzec, _ in REGULY_UWAG:
+        for m in re.finditer(wzorzec, t):
+            if _POCHWALA_PO.match(t[m.end():m.end() + 25]):
+                continue
+            if klucz == "kroki" and m.group(0).startswith("glosn") and o_glosie:
+                continue            # "glos za glosny" = o komentarzu, nie o krokach
+            wynik.append(klucz)
+            break
+    return wynik
+
+
+def _wczytaj_uwagi():
+    dane = baza._wczytaj_json(_plik_uwag(), {"uwagi": []}) or {}
+    return [u for u in (dane.get("uwagi") or []) if isinstance(u, dict)]
+
+
+def zapisz_uwage(slug, p, ocena, tekst):
+    """Uwaga usera do ocenionej rolki (zastepuje wczesniejsza uwage tej rolki). Zwraca wpis."""
+    wyb = _wybory_pomyslu(p)
+    zp = p.get("z_promptu") if isinstance(p.get("z_promptu"), dict) else {}
+    try:
+        imie = baza.profil_modelki(slug).get("nazwa") or slug
+    except (OSError, ValueError):
+        imie = slug
+    wpis = {"id": f"u{int(time.time() * 1000)}-{p.get('id')}", "persona": slug, "persona_nazwa": imie, "pid": p.get("id"),
+            "ocena": ocena, "tekst": tekst, "data": baza._teraz(), "poprawki": rozpoznaj_uwage(tekst, ocena),
+            "model": wyb.get("model"), "miejsce": wyb.get("miejsce"), "stroj": wyb.get("stroj"), "kamera": wyb.get("kamera"),
+            "reakcja": wyb.get("reakcja"), "komentarz": zp.get("komentarz") or "",
+            "tekst_usera": ((zp.get("opcje") or {}).get("tekst") or p.get("opis") or "")[:200]}
+    plik = _plik_uwag()
+    with baza._rmw(plik):
+        dane = baza._wczytaj_json(plik, {"uwagi": []}) or {}
+        uwagi = [u for u in (dane.get("uwagi") or []) if isinstance(u, dict)
+                 and not (u.get("persona") == slug and u.get("pid") == p.get("id") and not u.get("usunieta"))]
+        uwagi.append(wpis)
+        dane["uwagi"] = uwagi[-300:]
+        baza._zapisz_json(plik, dane)
+    return wpis
+
+
+def usun_uwagi_rolki(slug, pid):
+    """Cofnieta ocena / ocena bez tekstu = uwaga tej rolki znika (z regul i z LLM)."""
+    plik = _plik_uwag()
+    if not os.path.isfile(plik):
+        return
+    with baza._rmw(plik):
+        dane = baza._wczytaj_json(plik, {"uwagi": []}) or {}
+        dane["uwagi"] = [u for u in (dane.get("uwagi") or []) if isinstance(u, dict)
+                         and not (u.get("persona") == slug and u.get("pid") == pid)]
+        baza._zapisz_json(plik, dane)
+
+
+def uwagi_aktywne():
+    """Uwagi, ktorych user nie usunal (najstarsze pierwsze)."""
+    return [u for u in _wczytaj_uwagi() if not u.get("usunieta")]
+
+
+def poprawki_dla(slug):
+    """Klucze aktywnych poprawek dla rolek persony: zakres 'wszystkie' z uwag o kazdej personie, 'persona' tylko z jej uwag."""
+    wynik = set()
+    for u in uwagi_aktywne():
+        for k in u.get("poprawki") or []:
+            r = REGULY_PO_KLUCZU.get(k)
+            if r and (r[2] == "wszystkie" or u.get("persona") == slug):
+                wynik.add(k)
+    return [r[0] for r in REGULY_UWAG if r[0] in wynik]
+
+
+def pamiec(slug=None):
+    """Panel "Asystent pamieta": aktywne poprawki (z uwag, z ktorych wynikaja) + ostatnie uwagi (to czyta tez LLM)."""
+    uwagi = uwagi_aktywne()
+    poprawki = []
+    for klucz, nazwa, zakres, _, efekt in REGULY_UWAG:
+        zrodla = [u for u in uwagi if klucz in (u.get("poprawki") or [])]
+        if not zrodla:
+            continue
+        persony = sorted({u.get("persona_nazwa") or u.get("persona") or "" for u in zrodla})
+        dotyczy = (slug is None or zakres == "wszystkie" or any(u.get("persona") == slug for u in zrodla))
+        poprawki.append({"klucz": klucz, "nazwa": nazwa, "zakres": zakres, "efekt": efekt, "dotyczy": dotyczy,
+                         "persony": persony if zakres == "persona" else [],
+                         "z_uwag": [{"id": u.get("id"), "tekst": u.get("tekst"), "persona": u.get("persona_nazwa"),
+                                     "pid": u.get("pid")} for u in zrodla[-3:]]})
+    lista = [{k: u.get(k) for k in ("id", "persona", "persona_nazwa", "pid", "ocena", "tekst", "data", "poprawki", "miejsce",
+                                     "model")} for u in reversed(uwagi[-30:])]
+    return {"poprawki": poprawki, "uwagi": lista}
+
+
+def usun_z_pamieci(poprawka=None, uwaga=None):
+    """Panel: Usun poprawke (znika ze WSZYSTKICH uwag - tekst zostaje dla LLM) albo cala uwage (z regul i z LLM).
+    Zwraca pamiec(). ValueError, gdy nie ma czego usunac."""
+    plik = _plik_uwag()
+    zmiana = False
+    with baza._rmw(plik):
+        dane = baza._wczytaj_json(plik, {"uwagi": []}) or {}
+        for u in dane.get("uwagi") or []:
+            if not isinstance(u, dict) or u.get("usunieta"):
+                continue
+            if uwaga and u.get("id") == uwaga:
+                u["usunieta"], zmiana = True, True
+            if poprawka and poprawka in (u.get("poprawki") or []):
+                u["poprawki"] = [k for k in u["poprawki"] if k != poprawka]
+                u.setdefault("poprawki_usuniete", []).append(poprawka)
+                zmiana = True
+        if zmiana:
+            baza._zapisz_json(plik, dane)
+    if not zmiana:
+        raise ValueError("Nie ma takiej poprawki ani uwagi (moze juz usunieta).")
+    return pamiec()
+
+
+def uwagi_dla_llm(limit=MAX_UWAG_LLM):
+    """Ostatnie uwagi usera (najnowsze pierwsze) jako linie do promptu LLM."""
+    linie = []
+    for u in reversed(uwagi_aktywne()[-limit:]):
+        jak = "liked" if u.get("ocena") == "dobra" else "disliked"
+        szczegoly = ", ".join(str(x) for x in (u.get("miejsce"), u.get("model"), u.get("kamera")) if x)
+        linie.append(f"- {jak} {u.get('persona_nazwa') or u.get('persona')} #{u.get('pid')} ({szczegoly}): „{u.get('tekst')}”")
+    return linie
 
 
 def nauka(slug):
@@ -300,8 +476,12 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
     ust = baza.ustawienia_modelki(slug)
     nagrywa = zab["nagrywa"] if zab.get("nagrywa") in sc.NAGRYWA else (
         ust.get("nagrywa") if ust.get("nagrywa") in sc.NAGRYWA else sc.NAGRYWA_DOMYSLNIE)
+    # 3.6: ton komentarzy persony (ostre = domyslnie, potoczny wulgarny polski jak z prawdziwych nagran; lagodne = linie reakcji)
+    ton = sc.ton_komentarzy(slug, zab.get("komentarze_ton"))
     if zab.get("komentarz"):
         komentarz = sc.dopasuj_do_mowiacego(zab["komentarz"], nagrywa)
+    elif ton == "ostre":
+        komentarz = _wybierz(los, sc.komentarze_dla(nagrywa, "ostre"))
     else:
         linie = sc.LINIE_REAKCJI.get(reakcja) or ["Widziałaś to?", "No ja nie mogę…"]
         komentarz = _wybierz(los, linie)
@@ -324,7 +504,7 @@ def dobierz_regulami(slug, tekst="", pomysl_id=None, zablokowane=None, sezon=Non
         dl = 10 if 10 in mi["dlugosci"] else mi["dlugosci"][0]
     opcje = {"tekst": tekst or (pomysl or {}).get("pl", ""), "pomysl_id": (pomysl or {}).get("id") or "", "miejsce": miejsce,
              "nazwy": nazwy, "obiekt": obiekt or "", "stroj": stroj, "kamera": kamera, "reakcja": reakcja, "komentarz": komentarz,
-             "nagrywa": nagrywa, "glos": zab.get("glos") if zab.get("glos") in sc.GLOSY else "auto",
+             "nagrywa": nagrywa, "komentarze_ton": ton, "glos": zab.get("glos") if zab.get("glos") in sc.GLOSY else "auto",
              "wymowa": zab.get("wymowa") if zab.get("wymowa") in sc.WYMOWY else "fonetyczna",
              "wlosy": zab.get("wlosy") if isinstance(zab.get("wlosy"), dict) else {"kolor": "wlasne", "fryzura": "wlasna", "grzywka": "wlasna"},
              "model": model, "dlugosc": dl, "rozdzielczosc": zab.get("rozdzielczosc") or "auto",
@@ -397,7 +577,8 @@ def _stroje_dla_llm(sezon, n):
     return [(k, sc.STROJE_ODWAZNE[k][0]) for k in stroje]
 
 
-def _katalog_dla_llm(sezon, n):
+def _katalog_dla_llm(sezon, n, ton="lagodne", nagrywa=None):
+    przyklady = sc.komentarze_dla(nagrywa, "ostre")[:12] if ton == "ostre" else sc.KOMENTARZE
     linie = [
         "PLACES (id: Polish name):", "; ".join(f"{k}: {v['nazwa']}" for k, v in sc.MIEJSCA.items()
                                              if sezon in (v.get("sezony") or (sezon,))),
@@ -405,9 +586,16 @@ def _katalog_dla_llm(sezon, n):
         "; ".join(f"{k}: {etykieta}" for k, etykieta in _stroje_dla_llm(sezon, n)),
         "CAMERAS (id: label; covert ones are the default):", "; ".join(f"{k}: {sc.KAMERY[k][0]}" for k in sc.KAMERY_UKRYTE),
         "REACTIONS (id: label):", "; ".join(f"{k}: {v[0]}" for k, v in sc.REAKCJE.items() if k != "losowa"),
-        "COMMENT LINES (examples):", " | ".join(sc.KOMENTARZE),
+        "COMMENT LINES (examples):", " | ".join(przyklady),
     ]
     return "\n".join(linie)
+
+
+TON_LLM = {
+    "ostre": ("COMMENT STYLE: crude, colloquial street Polish with swearing (e.g. 'kurwa', 'ja pierdolę'), exactly like real "
+              "hidden-camera clips from Poland - short, spontaneous, a bit mocking."),
+    "lagodne": "COMMENT STYLE: mild, no swearing - surprised or amused, like a polite person whispering to a friend.",
+}
 
 
 SYSTEM_LLM = (
@@ -418,7 +606,8 @@ SYSTEM_LLM = (
     "list); prefer a surprise reaction that fits the place unless the idea says otherwise; the comment is ONE very short natural "
     "Polish line (max 6 words) said quietly by the person filming (see SPEAKER) - she herself never speaks; any first-person "
     "past or conditional verb must match the speaker's gender (a young man: 'widziałem', 'odważyłbym'; a young woman: "
-    "'widziałam', 'odważyłabym'), neutral lines are best; prefer what the learning notes say worked, avoid what failed. "
+    "'widziałam', 'odważyłabym'), neutral lines are best; follow the COMMENT STYLE; prefer what the learning notes say worked, "
+    "avoid what failed, and take the user's notes on recent reels seriously (avoid what they disliked, repeat what they liked). "
     "Answer with ONLY a JSON object: "
     '{"miejsce": "<place id>", "stroj": "<outfit id>", "kamera": "<camera id>", "reakcja": "<reaction id>", '
     '"komentarz": "<Polish line>", "dlugosc": 10, "dlaczego": "<one short sentence in Polish, max 140 characters>"}'
@@ -434,13 +623,22 @@ def _json_z_tekstu(tekst):
     return json.loads(m.group(0))
 
 
-def zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=None):
-    """Jedno zapytanie do darmowego modelu -> surowy slownik z JSON (bez walidacji)."""
+def zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=None, ton="lagodne"):
+    """Jedno zapytanie do darmowego modelu -> surowy slownik z JSON (bez walidacji). 3.6: ton komentarzy + ostatnie uwagi usera
+    do ocenionych rolek (MAX_UWAG_LLM)."""
     kto = "a young woman" if nagrywa == "dziewczyna" else "a young man"
+    try:
+        uwagi = uwagi_dla_llm()
+    except (OSError, ValueError):
+        uwagi = []
     uzytkownik = (f"Idea (Polish): „{tekst or 'brak - wybierz sam cos z duza szansa na reakcje ludzi'}”\n"
                   f"Season now: {sc.SEZONY[sezon]['en']}.\n"
                   f"SPEAKER (the person filming, never visible): {kto}.\n"
-                  f"Learning notes: {opis_nauki(n, dla_llm=True) or 'none yet'}.\n\n{_katalog_dla_llm(sezon, n)}")
+                  f"{TON_LLM.get(ton, TON_LLM['lagodne'])}\n"
+                  f"Learning notes: {opis_nauki(n, dla_llm=True) or 'none yet'}.\n"
+                  f"User's notes on recent reels (newest first, in Polish): "
+                  + ("\n" + "\n".join(uwagi) if uwagi else "none yet") + "\n\n"
+                  + _katalog_dla_llm(sezon, n, ton, nagrywa))
     odp = _http_json("POST", LLM_API + "/chat/completions", {
         "model": model,
         "messages": [{"role": "system", "content": SYSTEM_LLM}, {"role": "user", "content": uzytkownik}],
@@ -487,7 +685,8 @@ def _zastosuj_llm(opcje, wynik, n, sezon, zab, miejsce_z_tekstu):
         przyjete.append("reakcja")
     kom = re.sub(r"[{}„”\"\[\]]", "", str(wynik.get("komentarz") or "")).strip()
     if (kom and _POLSKIE.match(kom) and len(kom.split()) <= 7 and not zab.get("komentarz")
-            and sc.pasuje_do_mowiacego(kom, opcje.get("nagrywa"))):
+            and sc.pasuje_do_mowiacego(kom, opcje.get("nagrywa"))
+            and not (opcje.get("komentarze_ton") == "lagodne" and sc.WULGARNE.search(sc._bez_ogonkow(kom)))):
         opcje["komentarz"] = kom
         przyjete.append("komentarz")
     try:
@@ -545,7 +744,7 @@ def dobierz(slug, tekst="", pomysl_id=None, zablokowane=None, uzyj_llm=True, los
         bledy = []
         for model in modele_llm()[:MAX_PROB_LLM]:
             try:
-                wynik = zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=opcje.get("nagrywa"))
+                wynik = zapytaj_llm(slug, tekst, sezon, n, model, nagrywa=opcje.get("nagrywa"), ton=opcje.get("komentarze_ton"))
             except (RuntimeError, ValueError) as e:
                 bledy.append(f"{model.split('/')[-1]}: {e}")
                 if "zly klucz" in str(e) or "doladowania" in str(e):
@@ -569,11 +768,23 @@ def dobierz(slug, tekst="", pomysl_id=None, zablokowane=None, uzyj_llm=True, los
             "uwaga": uwaga, "nauka": opis_nauki(n)}
 
 
-def ocen(slug, pid, ocena):
-    """Ocena usera rolki z promptu: 'dobra' / 'slaba' / None (cofnij). Asystent liczy ja przy nastepnym dobieraniu."""
+MAX_UWAGI_ZNAKOW = 400
+
+
+def ocen(slug, pid, ocena, komentarz=None):
+    """Ocena usera rolki z promptu: 'dobra' / 'slaba' / None (cofnij). Asystent liczy ja przy nastepnym dobieraniu.
+    3.6: komentarz = "Co wyszlo zle?" / "Co bylo dobre?" -> pomysl.ocena_komentarz + uwaga w asystent_uwagi.json (reguly ->
+    stale poprawki promptu, ostatnie uwagi -> LLM). Cofniecie oceny albo ocena bez tekstu usuwa uwage tej rolki."""
     if ocena not in OCENY + (None,):
         raise ValueError("Ocena: dobra, slaba albo brak.")
     p = baza.pomysl(slug, int(pid))
     if p.get("typ") != "prompt":
         raise ValueError("Oceniac mozna rolki z promptu.")
-    return baza.aktualizuj_pomysl(slug, int(pid), ocena=ocena)
+    tekst = re.sub(r"\s+", " ", str(komentarz or "")).strip()[:MAX_UWAGI_ZNAKOW] if ocena else ""
+    p = baza.aktualizuj_pomysl(slug, int(pid), ocena=ocena, ocena_komentarz=tekst or None,
+                               ocena_poprawki=rozpoznaj_uwage(tekst, ocena) if tekst else None)
+    if tekst:
+        zapisz_uwage(slug, p, ocena, tekst)
+    else:
+        usun_uwagi_rolki(slug, int(pid))
+    return p

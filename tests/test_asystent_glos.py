@@ -166,6 +166,10 @@ def test_katalog_ma_nowe_pola(slug):
 # ---------------- asystent: reguly i nauka ----------------
 
 def test_asystent_regulami_bez_klucza(slug):
+    # 3.6: domyslnie ostre komentarze (z puli KOMENTARZE_OSTRE); lagodne = linie reakcji jak dawniej
+    o = asystent.dobierz(slug, "stoi w kolejce w dyskoncie w Poznaniu", los=random.Random(3))["opcje"]
+    assert o["komentarze_ton"] == "ostre" and o["komentarz"] in sc.komentarze_dla("chlopak", "ostre")
+    baza.zapisz_ustawienia(slug, komentarze_ton="lagodne")
     w = asystent.dobierz(slug, "stoi w kolejce w dyskoncie w Poznaniu", los=random.Random(3))
     o = w["opcje"]
     assert w["zrodlo"] == "reguly" and "OpenRouter" in w["uwaga"] and w["dlaczego"].endswith(".")
@@ -259,7 +263,7 @@ def test_asystent_z_openrouter_waliduje_pola(slug, monkeypatch):
     w = asystent.dobierz(slug, "czeka na tramwaj na przystanku", los=random.Random(2))
     o = w["opcje"]
     assert o["miejsce"] == "przystanek" and o["stroj"].startswith("odwazny:") and o["kamera"] in sc.KAMERY_UKRYTE
-    assert o["reakcja"] == "smiech" and o["komentarz"] in sum(sc.LINIE_REAKCJI.values(), [])
+    assert o["reakcja"] == "smiech" and o["komentarz"] in sc.komentarze_dla("chlopak", "ostre")     # 3.6: ton ostre domyslnie
     assert w["zrodlo"].startswith("openrouter:") and w["dlaczego"]        # reakcja przyjeta, reszta z regul
     # model nie odpowiada (limit darmowych) -> reguly + uwaga, nic sie nie sypie
     u3 = UdawanyOpenRouter([RuntimeError("darmowe modele OpenRouter przeciazone albo dzienny limit")] * 3)
@@ -374,7 +378,7 @@ def test_tts_osoby_zapas_gdy_id_nie_dziala(slug, monkeypatch):
         open(cel, "wb").write(b"ID3")
         return cel
     monkeypatch.setattr(elevenlabs, "tts", tts)
-    baza.zapisz_ustawienia(slug, glos_chlopak="stary_id")
+    baza.zapisz_ustawienia(slug, glos_chlopak="stary_id", glosy_rotuj=False)     # bez rotacji: kolejnosc stala
     cel = os.path.join(baza.folder_audio(slug), "k.mp3")
     assert komentarz_glos.tts_osoby(slug, "[whispers] Widziałeś to?", cel, "chlopak") == "zapas_on"
     assert proby == ["stary_id", "wJmRkw9W1EUa95AGkMrg", "zapas_on"]
@@ -388,15 +392,21 @@ def test_glos_auto_i_filtr_miksu(dane, monkeypatch):
     assert komentarz_glos.rozstrzygnij_glos("auto") == "tts" and komentarz_glos.rozstrzygnij_glos("model") == "tts"
     monkeypatch.setattr(elevenlabs, "stan_klucza", lambda odswiez=False: ("ok", "klucz dziala"))
     assert komentarz_glos.rozstrzygnij_glos("auto") == "tts"
-    f = komentarz_glos.filtr_miksu(5, -21)
-    assert "adelay=5000|5000" in f and "loudnorm=I=-21.0" in f and "sidechaincompress" in f and "[out]" in f
-    # brzmienie telefonu, ktory filmuje: stromo przyciete doly (~250 Hz) i gora (~6,8 kHz), nacisk ~3 kHz, AGC, odbicia, szum toru
-    assert f.count("highpass=f=250") == 2 and f.count("lowpass=f=6800") == 2 and "equalizer=f=3000" in f
-    assert "acompressor=" in f and "aecho=" in f and "anoisesrc=" in f and "amix=inputs=3" in f
+    # 3.6: miks BEZ przyciszania otoczenia pod glosem (sidechain usuniety) - glos wchodzi w sekundzie reakcji, otoczenie z
+    # ujarzmionymi pikami, szum toru, automatyka glosnosci na CALOSCI (glos + otoczenie razem), limiter
+    f = komentarz_glos.filtr_miksu(5, otoczenie_lufs=-24)
+    assert "adelay=5000|5000" in f and "[out]" in f and "sidechaincompress" not in f
+    assert "anoisesrc=color=pink" in f and "amix=inputs=3" in f and "alimiter" in f and "wiatr" not in f
+    assert "detection=peak" in f and "lowpass=f=6500:p=1" in f           # kroki: piki otoczenia przyciete, lekki lowpass "z daleka"
+    # brzmienie telefonu, ktory filmuje: stromo przyciete doly (~250 Hz) i gora (~6,8 kHz), nacisk ~3 kHz, AGC, poglos, nierowno
+    lt = komentarz_glos.lancuch_telefonu(-21)
+    assert lt.count("highpass=f=250") == 2 and lt.count("lowpass=f=6800") == 2 and "equalizer=f=3000" in lt
+    assert "acompressor=" in lt and "aecho=" in lt and "loudnorm=I=-21.0" in lt and "volume='1+" in lt
     assert 200 <= komentarz_glos.TELEFON_DOLY_HZ <= 300 and 6000 <= komentarz_glos.TELEFON_GORA_HZ <= 7000
+    # glos tylko troche glosniej niz otoczenie (nie "na wierzchu"); poprawka "glos" = jeszcze mniej
     assert komentarz_glos.docelowa_glosnosc(None) == -21.0 and komentarz_glos.docelowa_glosnosc(-40) == -27.0
-    assert komentarz_glos.docelowa_glosnosc(-10) == -15.0 and komentarz_glos.docelowa_glosnosc(-22) == -19.0
-    assert komentarz_glos.tekst_dla_tts("Widziałaś to?") == "[whispers] Widziałaś to?"
+    assert komentarz_glos.docelowa_glosnosc(-10) == -15.0 and komentarz_glos.docelowa_glosnosc(-22) == -20.5
+    assert komentarz_glos.docelowa_glosnosc(-22, surowo=True) == -21.5
     assert komentarz_glos.tekst_dla_tts("[laughs] ") == ""
 
 

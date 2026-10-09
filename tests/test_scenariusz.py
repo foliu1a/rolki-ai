@@ -61,10 +61,11 @@ def test_profil_wlosy_wygrywa_z_promptem_i_tozsamosc_txt(persona):
 
 def test_wzrost_skala_wzgledem_ludzi():
     noemi = sc.zdanie_wzrostu("158-160")
-    assert "petite" in noemi and "158-160 cm" in noemi and "chin of an average man" in noemi
+    assert "petite" in noemi and "158-160 cm" in noemi and "shoulder or chin of an average man" in noemi
+    # 3.6 ("kobiety wychodza za wysokie"): 168-172 = przecietna / lekko wyzsza, ale nadal nizsza od wiekszosci mezczyzn
     alicja = sc.zdanie_wzrostu("170-172")
-    assert "tall for a woman" in alicja and "forehead" in alicja
-    assert "eyes" in sc.zdanie_wzrostu("168-170") and "mouth" in sc.zdanie_wzrostu([160, 162])
+    assert "average to slightly above-average" in alicja and "still shorter than most men" in alicja and "tall for" not in alicja
+    assert "eyes" in sc.zdanie_wzrostu("168-170") and "shoulder or chin" in sc.zdanie_wzrostu([160, 162])
     assert sc.zdanie_wzrostu("") == "" and sc.zdanie_wzrostu("duzo") == "" and sc.zdanie_wzrostu("90") == ""
 
 
@@ -79,7 +80,11 @@ def test_numeracja_zdjec_stroj_ostatni_i_jeden_komentarz(persona):
     assert "\n\n" not in w["prompt"]
     # 3.1: model wideo nic nie mowi - komentarz NIE jest w prompcie (dogrywa go ElevenLabs po generacji)
     assert "Dialogue language" not in w["prompt"] and not re.findall(r"\{[^}]+\}", w["prompt"])
-    assert w["komentarz"] == "Jak ona wygląda." and w["glos"] == "tts" and "says nothing at all" in w["prompt"]
+    # 3.6: domyslnie OSTRE komentarze (z puli, nie lagodny komentarz gotowego pomyslu); lagodne = komentarz pomyslu jak dawniej
+    assert w["komentarz"] in sc.komentarze_dla("chlopak", "ostre") and w["komentarze_ton"] == "ostre"
+    assert w["glos"] == "tts" and "says nothing at all" in w["prompt"] and w["komentarz"] not in w["prompt"]
+    lag = sc.zbuduj(persona, {"pomysl_id": "galeria_fastfood", "dlugosc": 10, "stroj": "plik:kurtka.png", "komentarze_ton": "lagodne"})
+    assert lag["komentarz"] == "Jak ona wygląda." and lag["komentarze_ton"] == "lagodne"
     assert "@[Image" not in w["prompt"]
     # zly plik stroju (spoza folderu Stroje) -> blad, nic nie zgadujemy
     with pytest.raises(ValueError):

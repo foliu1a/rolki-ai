@@ -442,6 +442,8 @@ const state = {
   rolkiJakosc: '',       // podpis jakości, z którym rysowano listę rolek (zmiana zestawu przerysowuje szacunki „ok. N kr”)
   bledyOdswiezania: 0,   // kolejne nieudane odpytania /api/stan w tle – toast dopiero po kilku z rzędu (jednorazowy błąd nie alarmuje)
   otwartePrompty: new Set(), odtwarzane: new Set(), podglady: new Set(),   // podglady = rolki z otwartym filmem taniego podglądu
+  ocenaOtwarta: new Set(), ocenaSzkic: {},   // 3.6: rolki z otwartym polem „Co wyszło źle?” / „Co było dobre?” + niezapisany tekst
+  pamiec: null,          // 3.6: „Asystent pamięta” (poprawki z uwag usera) – /api/asystent/pamiec
   // reszta stron
   zdjecia: [], zdjeciaJson: '', lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
   teksty: [], szablony: [], dziennik: [], historiaFiltr: 'wszystko',
@@ -456,6 +458,7 @@ const state = {
 
 function wyczyscCachePersony() {
   state.pomysly = []; state.pomyslyJson = ''; state.otwartePrompty.clear(); state.odtwarzane.clear(); state.podglady.clear();
+  state.ocenaOtwarta.clear(); state.ocenaSzkic = {};
   state.zdjecia = []; state.zdjeciaJson = ''; state.lipsync = []; state.ustawieniaPelne = null; state.teksty = []; state.szablony = [];
   state.stroje = []; state.nsfw = null;
   state.kosztJakosc = {}; state.rolkiJakosc = '';
@@ -508,7 +511,33 @@ function zastosujHash() {
   pokazStrone(STRONY.includes(strona) ? strona : 'start');
 }
 
+// 3.6 (user: „głos sam się odpala bez odpalenia filmiku”): filmy w panelu NIE mają autoplay – grają tylko po kliknięciu
+// „Odtwórz” (odtworzWideo). Zmiana strony pauzuje wszystkie filmy i zamyka odtwarzacze, więc po powrocie nic nie gra samo.
+function zatrzymajWideo() {
+  $$('video').forEach(v => { try { v.pause(); } catch (e) { /* nic */ } });
+  state.odtwarzane.clear(); state.podglady.clear();
+}
+
+// Przerysowanie listy (innerHTML) bez niszczenia otwartych filmów: istniejący <video> z tym samym data-wideo i src wraca na swoje
+// miejsce (gra dalej / zostaje w tej samej sekundzie), nowy element z HTML-a nie startuje sam (bez autoplay).
+function przerysujZWideo(kont, html) {
+  const stare = new Map();
+  kont.querySelectorAll('video[data-wideo]').forEach(v => stare.set(v.dataset.wideo, v));
+  kont.innerHTML = html;
+  kont.querySelectorAll('video[data-wideo]').forEach(v => {
+    const s = stare.get(v.dataset.wideo);
+    if (s && s.getAttribute('src') === v.getAttribute('src')) v.replaceWith(s);
+  });
+}
+
+// Start odtwarzania TYLKO z kliknięcia: po renderze znajdź widoczny film tej rolki i włącz go.
+function odtworzWideo(klucz) {
+  const v = $$(`video[data-wideo="${klucz}"]`).find(x => x.offsetParent !== null) || $(`video[data-wideo="${klucz}"]`);
+  if (v) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+}
+
 function pokazStrone(nazwa) {
+  if (nazwa !== state.strona) zatrzymajWideo();
   state.strona = nazwa;
   // strona tylko z trybu pełnego (Lipsync, Historia) otwarta linkiem w trybie prostym -> włączamy tryb pełny, jak otworzSekcje() dla sekcji ustawień
   const nav = $(`.nav a[data-strona="${nazwa}"]`);
@@ -1123,7 +1152,7 @@ function renderOdbierz() {
     kont.innerHTML = `<div class="pusto cicho"><b>Jeszcze nie ma gotowych rolek</b><span>${nicNieCzeka ? 'Najpierw wrzuć filmik (krok 1), potem kliknij „Zrób rolki”.' : 'Kliknij „Zrób rolki” (krok 2) – gotowe pojawią się tutaj.'}</span><button class="btn btn-maly" type="button" data-akcja="${nicNieCzeka ? 'fokus-wrzuc' : 'zrob-rolki'}">${nicNieCzeka ? 'Wrzuć filmik' : 'Zrób rolki'}</button></div>`;
     return;
   }
-  kont.innerHTML = lista.map(kartaOdbioru).join('');
+  przerysujZWideo(kont, lista.map(kartaOdbioru).join(''));
 }
 
 // Siatka klatek GOTOWEJ rolki (wynik), a gdy jej nie ma – klatki filmiku źródłowego.
@@ -1150,7 +1179,7 @@ function kartaOdbioru(p) {
         ${telefon ? `<button class="btn btn-maly" type="button" data-akcja="telegram-wyslij" data-id="${id}" title="${p.telegram_wyslano ? 'Wyślij tę rolkę na telefon jeszcze raz' : 'Wyślij gotową rolkę na telefon (Telegram)'}">${ikona('telefon')}${p.telegram_wyslano ? 'Wyślij jeszcze raz' : 'Wyślij na telefon'}</button>` : ''}
       </div>
     </div>
-    ${gra ? `<video class="odbior-wideo" controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}
+    ${gra ? `<video class="odbior-wideo" controls preload="metadata" data-wideo="r${id}" src="${esc(p.wideo_url)}"></video>` : ''}
   </div>`;
 }
 
@@ -1764,8 +1793,9 @@ async function ladujRolki(cicho) {
     // bez zmian w rolkach, telefonie i zestawie jakości (szacunki „ok. N kr” zależą od zestawu) – nic nie przerysowujemy
     if (json === state.pomyslyJson && telefon === state.rolkiTelefon && podpisRolek() === state.rolkiJakosc) return;
     const akt = document.activeElement;
-    if (akt && ['TEXTAREA', 'SELECT'].includes(akt.tagName) && $('#rolki-lista').contains(akt)) return; // nie przerywaj edycji promptu / wyboru stroju
-    if ($$('#rolki-lista video').some(v => !v.paused)) return;                        // ani odtwarzania
+    const listy = [$('#rolki-lista'), $('#zp-lista')].filter(Boolean);
+    if (akt && ['TEXTAREA', 'SELECT', 'INPUT'].includes(akt.tagName) && listy.some(l => l.contains(akt))) return; // nie przerywaj edycji promptu / uwagi / wyboru stroju
+    if ($$('#rolki-lista video, #zp-lista video').some(v => !v.paused)) return;        // ani odtwarzania
   }
   state.pomysly = d.pomysly || [];
   state.biblioteka = d.biblioteka || [];          // stroje z biblioteki ze zdjęciem (lista „Strój:” przy klipie)
@@ -1797,7 +1827,7 @@ function renderRolki() {
       : `<div class="pusto"><span class="ikona">${ikona('film')}</span><b>Nie ma jeszcze żadnej rolki</b><span>Wrzuć filmiki powyżej albo do folderu:</span><span class="sciezka">${esc(s.wrzutnia || '')}</span><span>a potem kliknij „Zrób rolki” na Starcie – każdy filmik stanie się rolką.</span><a class="btn btn-glowny" href="#start">Przejdź do Startu</a></div>`;
     return;
   }
-  kont.innerHTML = lista.map(kartaRolki).join('');
+  przerysujZWideo(kont, lista.map(kartaRolki).join(''));
 }
 
 // Szacunek kosztu rolki w kredytach: sekundy × stawka (jakosc.koszt_sekundy); bez długości – jakosc.koszt_rolki. null = nie wiem.
@@ -2004,7 +2034,7 @@ function kartaRolki(p) {
       ${p.opis && p.opis !== nazwa && p.wariant === 'tekst' ? `<div class="rolka-meta">${esc(p.opis)}</div>` : ''}
       ${zPromptu && p.z_promptu_opis ? `<div class="rolka-meta">${esc(p.z_promptu_opis)}</div>` : ''}
       ${zPromptu && p.z_promptu_dlaczego ? `<div class="rolka-meta">Asystent: ${esc(p.z_promptu_dlaczego)}</div>` : ''}
-      ${zPromptu && ['gotowe', 'wygenerowany'].includes(status) ? `<div class="rolka-ocena"><span>Jak wyszła?</span><button class="btn btn-maly${p.ocena === 'dobra' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="dobra" aria-pressed="${p.ocena === 'dobra'}">${ikona('ok')}Dobra – więcej takich</button><button class="btn btn-maly${p.ocena === 'slaba' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="slaba" aria-pressed="${p.ocena === 'slaba'}">Słaba</button></div>` : ''}
+      ${zPromptu && ['gotowe', 'wygenerowany'].includes(status) ? ocenaBlok(p) : ''}
       <div class="rolka-fakty">${fakty.map(f => `<span class="fakt">${f}</span>`).join('')}</div>
       ${strojBlok}
       ${klatkaBlok}
@@ -2013,8 +2043,8 @@ function kartaRolki(p) {
       ${p.bez_prania && status === 'gotowe' ? `<div class="rolka-meta">Media Tool nie zainstalowany – rolka bez prania (zapisana w „tu rolki zrobione”).</div>` : ''}
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
       ${promptOtwarty ? `<div class="rolka-prompt"><label for="prompt-${id}">Prompt – opis dla AI, co zrobić z tym filmikiem</label><textarea id="prompt-${id}" data-prompt="${id}" spellcheck="false" placeholder="Wklej prompt persony albo własny…">${esc(p.prompt_higgsfield || '')}</textarea><div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="zapisz-prompt" data-id="${id}">Zapisz prompt</button>${bezPromptu ? '' : `<button class="btn btn-maly" type="button" data-akcja="prompt-pokaz" data-id="${id}">Zwiń</button>`}</div></div>` : ''}
-      ${gra ? `<video controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}
-      ${podgladGra ? `<video class="rolka-podglad-wideo" controls autoplay preload="metadata" src="${esc(p.podglad_url)}"></video><div class="rolka-podglad-info">To tylko tani podgląd (gorsza jakość). Jeśli persona wygląda dobrze – kliknij „Zrób tę rolkę”.</div>` : ''}
+      ${gra ? `<video controls preload="metadata" data-wideo="r${id}" src="${esc(p.wideo_url)}"></video>` : ''}
+      ${podgladGra ? `<video class="rolka-podglad-wideo" controls preload="metadata" data-wideo="p${id}" src="${esc(p.podglad_url)}"></video><div class="rolka-podglad-info">To tylko tani podgląd (gorsza jakość). Jeśli persona wygląda dobrze – kliknij „Zrób tę rolkę”.</div>` : ''}
       <div class="rolka-akcje">${glowny}${drugi}<details class="menu"><summary class="btn btn-maly">więcej ${ikona('chevron-dol')}</summary><div class="menu-lista">${menu.join('')}</div></details></div>
     </div>
   </article>`;
@@ -2213,7 +2243,46 @@ async function ladujZPromptu() {
   } else {
     renderZpPersony();
   }
+  ladujZpPamiec().catch(() => {});
   await ladujRolki(false);
+}
+
+// ---------- 3.6: „Asystent pamięta” – poprawki z uwag usera do ocenionych rolek ----------
+async function ladujZpPamiec() {
+  const d = await api('/api/asystent/pamiec?slug=' + encodeURIComponent(state.aktywna || ''));
+  state.pamiec = { poprawki: d.poprawki || [], uwagi: d.uwagi || [] };
+  renderZpPamiec();
+}
+
+function renderZpPamiec() {
+  const kont = $('#zp-pamiec');
+  if (!kont) return;
+  const m = state.pamiec || { poprawki: [], uwagi: [] };
+  if (!m.poprawki.length && !m.uwagi.length) {
+    kont.innerHTML = '<div class="pusto cicho"><b>Jeszcze nic</b><span>Oceń gotową rolkę „Słaba” i napisz krótko, co wyszło źle – np. „za blisko”, „za wysoka”, „nie podobna”, „głos jak lektor”, „kroki za głośno”. Asystent poprawi to w kolejnych rolkach.</span></div>';
+    return;
+  }
+  const zrodla = x => x.z_uwag.map(u => `„${esc(u.tekst)}”${u.persona ? ` (${esc(u.persona)} #${u.pid})` : ''}`).join(', ');
+  const poprawki = m.poprawki.map(x => `<li class="pamiec-poz${x.dotyczy ? '' : ' wyszarzone'}">
+      <div class="pamiec-tresc"><b>${esc(x.nazwa)}</b>${x.persony.length ? ` <span class="chip-maly">tylko ${esc(x.persony.join(', '))}</span>` : ''}
+        <small class="muted">${esc(x.efekt)} · z uwag: ${zrodla(x)}</small></div>
+      <button class="btn btn-maly btn-tekst" type="button" data-akcja="pamiec-usun" data-poprawka="${esc(x.klucz)}" title="Asystent przestanie to poprawiać (Twoje uwagi zostają dla AI)">Usuń</button>
+    </li>`).join('');
+  const uwagi = m.uwagi.slice(0, 10).map(u => `<li class="pamiec-poz">
+      <div class="pamiec-tresc"><span class="chip-maly ${u.ocena === 'dobra' ? 'ok' : 'zle'}">${u.ocena === 'dobra' ? 'Dobra' : 'Słaba'}</span> „${esc(u.tekst)}”
+        <small class="muted">${esc(u.persona_nazwa || u.persona || '')} #${u.pid}${(u.poprawki || []).length ? '' : ' · tylko dla AI'}</small></div>
+      <button class="btn btn-maly btn-tekst" type="button" data-akcja="pamiec-usun" data-uwaga="${esc(u.id)}" title="Usuń tę uwagę (z poprawek i z AI)">Usuń</button>
+    </li>`).join('');
+  kont.innerHTML = (poprawki ? `<h3>Poprawki w każdej nowej rolce</h3><ul class="pamiec-lista">${poprawki}</ul>` : '')
+    + (uwagi ? `<h3>Ostatnie uwagi (czyta je AI przy dobieraniu)</h3><ul class="pamiec-lista">${uwagi}</ul>` : '');
+}
+
+async function usunZPamieci(poprawka, uwaga) {
+  const d = await api('/api/asystent/pamiec/usun', 'POST', poprawka ? { poprawka } : { uwaga });
+  state.pamiec = { poprawki: d.poprawki || [], uwagi: d.uwagi || [] };
+  renderZpPamiec();
+  if (state.zp.katalog) zpZmiana();   // nowa wycena = prompt bez usuniętej poprawki
+  toast(poprawka ? 'Usunięte – asystent przestanie to poprawiać.' : 'Uwaga usunięta.', 'ok');
 }
 
 function opcjeHtml(lista, wybrana) {
@@ -2299,13 +2368,15 @@ function renderZpFormularz() {
 function renderZpKomentarze(wybrany) {
   const k = state.zp.katalog || {};
   const kto = ($('#zp-nagrywa') && $('#zp-nagrywa').value) || 'chlopak';
-  const plec = (k.komentarze_plec || {});
+  // 3.6: ton komentarzy persony (Ustawienia → Stroje i głos): ostre (domyślnie) albo łagodne
+  const ostre = ((k.persona || {}).komentarze_ton || 'ostre') === 'ostre';
+  const plec = (ostre ? k.komentarze_plec_ostre : k.komentarze_plec) || {};
   const inna = plec[kto === 'chlopak' ? 'dziewczyna' : 'chlopak'] || [];
   const moje = plec[kto] || [];
   const i = inna.indexOf(wybrany);
   if (i >= 0 && moje[i]) wybrany = moje[i];
   $('#zp-komentarz').innerHTML = opcjeHtml([['losowy', 'Dobierze asystent'], ['bez', 'Bez komentarza']]
-    .concat((k.komentarze || []).concat(moje).map(t => [t, `„${t}”`]), [['wlasny', 'Własny…']]), wybrany || 'losowy');
+    .concat(((ostre ? k.komentarze_ostre : k.komentarze) || []).concat(moje).map(t => [t, `„${t}”`]), [['wlasny', 'Własny…']]), wybrany || 'losowy');
   if (wybrany && !['losowy', 'bez', 'wlasny'].includes(wybrany) && $('#zp-komentarz').value !== wybrany) {
     $('#zp-komentarz').value = 'wlasny'; $('#zp-komentarz-tekst').value = wybrany;
   }
@@ -2605,13 +2676,69 @@ function zpRecznie(el) {
   else state.zp.reczne[pole] = v;
 }
 
+// 3.6: ocena rolki z promptu + uwaga („Co wyszło źle?” przy Słabej – pole otwiera się od razu; „Co było dobre?” przy Dobrej –
+// opcjonalnie). Uwaga trafia do asystenta: typowe („za blisko”, „za wysoka”, „głos jak lektor”…) = stałe poprawki promptu
+// („Asystent pamięta” w Z promptu), reszta – do darmowego AI przy kolejnych rolkach.
+function ocenaBlok(p) {
+  const id = Number(p.id);
+  const otwarta = state.ocenaOtwarta.has(id);
+  const kom = p.ocena_komentarz || '';
+  const szkic = state.ocenaSzkic[id] !== undefined ? state.ocenaSzkic[id] : kom;
+  const slaba = p.ocena === 'slaba';
+  let pole = '';
+  if (p.ocena && otwarta) {
+    pole = `<div class="rolka-uwaga">
+      <label>${slaba ? 'Co wyszło źle?' : 'Co było dobre? <span class="muted">(opcjonalnie)</span>'}
+      <textarea data-ocena-tekst="${id}" rows="2" maxlength="400" placeholder="${slaba ? 'np. za blisko, za wysoka, nie podobna, głos jak lektor, kroki za głośno, tło nierealne' : 'np. świetna twarz, dobre tło, fajny komentarz'}">${esc(szkic)}</textarea></label>
+      <div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="ocena-zapisz" data-id="${id}">Zapisz uwagę</button>
+      <button class="btn btn-maly btn-tekst" type="button" data-akcja="ocena-zamknij" data-id="${id}">Zamknij</button></div>
+      <small class="pole-info">Asystent zapamięta to przy kolejnych rolkach (lista „Asystent pamięta” w zakładce Z promptu).</small>
+    </div>`;
+  } else if (p.ocena && kom) {
+    const popr = (p.ocena_poprawki_nazwy || []).length ? ` <span class="muted">→ ${esc(p.ocena_poprawki_nazwy.join(', '))}</span>` : '';
+    pole = `<div class="rolka-uwaga-zapisana">Twoja uwaga: „${esc(kom)}”${popr} <button class="btn btn-maly btn-tekst" type="button" data-akcja="ocena-zmien" data-id="${id}">zmień</button></div>`;
+  } else if (p.ocena === 'dobra') {
+    pole = `<div class="rolka-uwaga-zapisana"><button class="btn btn-maly btn-tekst" type="button" data-akcja="ocena-zmien" data-id="${id}">Napisz, co było dobre (opcjonalnie)</button></div>`;
+  } else if (slaba) {
+    pole = `<div class="rolka-uwaga-zapisana"><button class="btn btn-maly btn-tekst" type="button" data-akcja="ocena-zmien" data-id="${id}">Napisz, co wyszło źle</button></div>`;
+  }
+  return `<div class="rolka-ocena"><span>Jak wyszła?</span><button class="btn btn-maly${p.ocena === 'dobra' ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="dobra" aria-pressed="${p.ocena === 'dobra'}">${ikona('ok')}Dobra – więcej takich</button><button class="btn btn-maly${slaba ? ' aktywny' : ''}" type="button" data-akcja="ocena" data-id="${id}" data-ocena="slaba" aria-pressed="${slaba}">Słaba</button></div>${pole}`;
+}
+
+function wstawPomysl(d) {
+  const i = state.pomysly.findIndex(x => Number(x.id) === Number((d.pomysl || {}).id));
+  if (i >= 0 && d.pomysl) state.pomysly[i] = d.pomysl;
+  if (d.pamiec) { state.pamiec = d.pamiec; renderZpPamiec(); }
+}
+
+function widocznePoleUwagi(id) {
+  return $$(`textarea[data-ocena-tekst="${id}"]`).find(x => x.offsetParent !== null) || null;
+}
+
 async function ocenRolke(id, ocena) {
   const p = state.pomysly.find(x => Number(x.id) === id);
   const nowa = p && p.ocena === ocena ? null : ocena;
-  const d = await api(`/api/pomysly/${id}/ocena`, 'POST', { ocena: nowa });
-  const i = state.pomysly.findIndex(x => Number(x.id) === id);
-  if (i >= 0 && d.pomysl) state.pomysly[i] = d.pomysl;
-  toast(nowa === 'dobra' ? 'Zapamiętane – asystent częściej dobierze coś podobnego.' : (nowa === 'slaba' ? 'Zapamiętane – asystent będzie tego unikał.' : 'Ocena cofnięta.'), 'ok');
+  // ta sama ocena kliknięta drugi raz = cofnięcie; Słaba otwiera pole „Co wyszło źle?” od razu
+  const d = await api(`/api/pomysly/${id}/ocena`, 'POST', { ocena: nowa, komentarz: '' });
+  wstawPomysl(d);
+  delete state.ocenaSzkic[id];
+  if (nowa === 'slaba') state.ocenaOtwarta.add(id); else state.ocenaOtwarta.delete(id);
+  toast(nowa === 'dobra' ? 'Zapamiętane – asystent częściej dobierze coś podobnego. Możesz dopisać, co było dobre.' : (nowa === 'slaba' ? 'Zapamiętane – napisz krótko, co wyszło źle, a asystent to poprawi.' : 'Ocena cofnięta.'), 'ok');
+  renderRolki();
+  if (nowa === 'slaba') { const ta = widocznePoleUwagi(id); if (ta) ta.focus(); }
+}
+
+async function zapiszUwage(id) {
+  const p = state.pomysly.find(x => Number(x.id) === id);
+  if (!p || !p.ocena) return;
+  const ta = widocznePoleUwagi(id);
+  const tekst = (ta ? ta.value : (state.ocenaSzkic[id] || '')).trim();
+  const d = await api(`/api/pomysly/${id}/ocena`, 'POST', { ocena: p.ocena, komentarz: tekst });
+  wstawPomysl(d);
+  delete state.ocenaSzkic[id];
+  state.ocenaOtwarta.delete(id);
+  const popr = ((d.pomysl || {}).ocena_poprawki_nazwy || []);
+  toast(!tekst ? 'Uwaga usunięta.' : (popr.length ? `Zapamiętane – poprawię: ${popr.join(', ').toLowerCase()}.` : 'Zapamiętane – asystent (AI) weźmie to pod uwagę przy kolejnych rolkach.'), 'ok');
   renderRolki();
 }
 
@@ -2619,8 +2746,8 @@ function renderZpLista() {
   const kont = $('#zp-lista');
   if (!kont) return;
   const lista = state.pomysly.filter(p => p.wariant === 'prompt').sort((a, b) => b.id - a.id).slice(0, 12);
-  kont.innerHTML = lista.length ? lista.map(kartaRolki).join('')
-    : '<div class="pusto cicho"><b>Jeszcze nie ma rolek z promptu</b><span>Napisz krótko pomysł albo kliknij „Losuj”, a potem „Zrób rolkę”.</span></div>';
+  przerysujZWideo(kont, lista.length ? lista.map(kartaRolki).join('')
+    : '<div class="pusto cicho"><b>Jeszcze nie ma rolek z promptu</b><span>Napisz krótko pomysł albo kliknij „Losuj”, a potem „Zrób rolkę”.</span></div>');
 }
 
 // ---------- Zdjęcia (3.2): podmiana postaci jak w Higgsfield ----------
@@ -4185,9 +4312,21 @@ document.addEventListener('click', async e => {
       case 'koszt-pomysl': await akcja({ typ: 'koszt', ids: [id] }, 'liczę koszt'); break;
       case 'generuj-pomysl': await generujPomysl(id); break;
       case 'ponow': await ponowPomysl(id); break;
-      case 'odtworz': if (state.odtwarzane.has(id)) state.odtwarzane.delete(id); else state.odtwarzane.add(id); if (state.strona === 'start') renderOdbierz(); else renderRolki(); break;
+      case 'odtworz': {
+        const wlacz = !state.odtwarzane.has(id);
+        if (wlacz) state.odtwarzane.add(id); else state.odtwarzane.delete(id);
+        if (state.strona === 'start') renderOdbierz(); else renderRolki();
+        if (wlacz) odtworzWideo(`r${id}`);                 // 3.6: gra tylko po kliknięciu (bez autoplay)
+        break;
+      }
       case 'podglad': await taniPodglad(id); break;
-      case 'podglad-pokaz': if (state.podglady.has(id)) state.podglady.delete(id); else state.podglady.add(id); renderRolki(); break;
+      case 'podglad-pokaz': {
+        const wlacz = !state.podglady.has(id);
+        if (wlacz) state.podglady.add(id); else state.podglady.delete(id);
+        renderRolki();
+        if (wlacz) odtworzWideo(`p${id}`);
+        break;
+      }
       case 'prompt-pokaz': if (state.otwartePrompty.has(id)) state.otwartePrompty.delete(id); else state.otwartePrompty.add(id); renderRolki(); { const ta = $(`textarea[data-prompt="${id}"]`); if (ta) ta.focus(); } break;
       case 'pierz': await akcja({ typ: 'pierz', id }, 'pranie w Media Tool'); break;
       case 'lipsync-pomysl': await otworzLipsyncDialog(id); break;
@@ -4204,6 +4343,10 @@ document.addEventListener('click', async e => {
       case 'zp-dobierz': await zpAsystent(true); break;
       case 'zp-przywroc': state.zp.reczne = {}; await zpAsystent(true); break;
       case 'ocena': await ocenRolke(id, el.dataset.ocena); break;
+      case 'ocena-zapisz': el.disabled = true; try { await zapiszUwage(id); } finally { el.disabled = false; } break;
+      case 'ocena-zmien': state.ocenaOtwarta.add(id); renderRolki(); { const ta = widocznePoleUwagi(id); if (ta) ta.focus(); } break;
+      case 'ocena-zamknij': state.ocenaOtwarta.delete(id); delete state.ocenaSzkic[id]; renderRolki(); break;
+      case 'pamiec-usun': el.disabled = true; try { await usunZPamieci(el.dataset.poprawka, el.dataset.uwaga); } finally { el.disabled = false; } break;
       case 'dograj-glos': await akcja({ typ: 'dograj_glos', id }, 'dogrywam komentarz'); break;
       case 'klatka-uzyj': await uzyjKlatki(id); break;
       // zdjęcia, lipsync
@@ -4312,6 +4455,7 @@ document.addEventListener('input', e => {
     const k = $('#ap-potw-koszt');
     if (k) k.textContent = kosztPotwierdzenia();
   }
+  if (el instanceof Element && el.dataset && el.dataset.ocenaTekst !== undefined) state.ocenaSzkic[Number(el.dataset.ocenaTekst)] = el.value;   // 3.6: szkic uwagi przeżyje odświeżenie listy
   if (el instanceof Element && el.id === 'zp-prompt') state.zp.edytowany = true;
   else if (el instanceof Element && ['zp-pomysl', 'zp-stroj-tekst', 'zp-komentarz-tekst'].includes(el.id)) {
     const id = state.zp.pomyslId;

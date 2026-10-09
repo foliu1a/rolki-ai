@@ -520,8 +520,10 @@ fabryka.py          logika + CLI (status, diagnoza, skanuj, prompt, koszt, gener
                     generuj(): wznow_w_toku -> kandydaci -> _rolka (krok 0 + zapas_nsfw) -> _wyslij / _czekaj / _rozlicz / _sukces.
 scenariusz.py       rolka z promptu: katalog polskich miejsc, gotowe pomysly, wlosy/stroje/reakcje/komentarze/kamery, zbuduj() ->
                     prompt + zdjecia, sprawdz(), katalog() dla panelu (zero wysylania). Fabryka: wycena_z_promptu/dodaj_z_promptu.
-asystent.py         "agent w tle" zakladki Z promptu: dobierz() (OpenRouter free albo reguly) + nauka z ocen/NSFW/IP (bez kredytow)
-komentarz_glos.py   komentarz zza kamery z ElevenLabs dograny po generacji (ffmpeg miks z otoczeniem w sekundzie reakcji)
+asystent.py         "agent w tle" zakladki Z promptu: dobierz() (OpenRouter free albo reguly) + nauka z ocen/NSFW/IP (bez kredytow);
+                    3.6: uwagi do ocen (asystent_uwagi.json) -> reguly = stale poprawki promptu, ostatnie uwagi -> LLM, pamiec()
+komentarz_glos.py   komentarz zza kamery z ElevenLabs dograny po generacji (3.6: glos przez telefon + poglos miejsca + kodek, bez
+                    sidechain, otoczenie z przycietymi pikami krokow; obrob_otoczenie dla rolek bez komentarza; rotacja glosow)
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
                     -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
                     glowny; `czat_persony`) -> rolki z promptu (3.3, krok_z_promptu) -> raport dnia po 20:00. BEZ lipsyncu.
@@ -739,3 +741,63 @@ tests/test_wavespeed.py.
   autopilota tylko, gdy True. `baza.przenies_cache_uploadow()` przy starcie przepina cache UUID na nowy folder programu.
 - Brak Media Tool = rolka zapisana bez prania z wpisem (nie blad). `zaloguj_firefox.py`: bez Firefoksa domyslna przegladarka.
 - Kluczy i sesji Higgsfield NIE pakujemy (blokada bezpieczenstwa) - user przenosi folder sam i loguje sie przegladarka.
+
+## 3.6 (2026-10-10): uwagi do ocen, ostre komentarze, skala wzrostu, glos jak z telefonu, ciche kroki
+- **Oceny z komentarzem** (`asystent.ocen(slug, pid, ocena, komentarz)`, `POST /api/pomysly/<id>/ocena {"ocena", "komentarz"}`): panel
+  (karta rolki z promptu w Rolki i Z promptu) - "Slaba" od razu otwiera pole "Co wyszlo zle?", "Dobra" zapisuje i daje opcjonalne
+  "Co bylo dobre?" (szkic w `state.ocenaSzkic`, odswiezanie listy nie przerywa pisania). Zapis: `pomysl.ocena_komentarz`,
+  `ocena_poprawki` + uwaga w `asystent_uwagi.json` OBOK stan.json (wspolny dla person, poza gitem): persona, pid, model, miejsce,
+  stroj, kamera, reakcja, komentarz, tekst usera, data, poprawki. Jedna uwaga na rolke (nowa zastepuje); cofniecie oceny / ocena
+  bez tekstu usuwa uwage.
+- **Reguly bez LLM** (`asystent.REGULY_UWAG`, `rozpoznaj_uwage`: tekst bez ogonkow, pochwala po slowie typu "twarz ok" sie nie
+  liczy, przy "Dobra" tylko gdy brzmi jak skarga - "ale/za/nie..."): dystans (za blisko/zblizenie/wypelnia kadr), wzrost (za
+  wysoka/tyczka; zakres PERSONA), tozsamosc (nie podobna/nie ona/twarz; PERSONA), napisy (napisy/literki/belkot), glos (glos/
+  studyjny/lektor - "glos za glosny" to nie kroki), kroki (kroki/buty/obcasy/glosno), tlo (tlo/nierealne/wymyslone). Nieznane =
+  tylko LLM. `poprawki_dla(slug)` -> `scenariusz.poprawki_rolki` -> ZAMROZONE w `ustalone.poprawki` (wycena i "Zrob" = ten sam
+  prompt). Efekty: `POPRAWKI_PROMPTU` ("[Must]" w pelnym szablonie, "Must:" w krotkim, krotka wersja w klatce; tlo Wan tylko
+  napisy/tlo + wolne miejsce 8-12 m), wzrost = `WZROST_MOCNIEJ` w zdaniu o wzroscie, kroki = `KROKI_MOCNIEJ` w dzwieku + mocniejszy
+  filtr otoczenia, glos = surowszy miks (16 kb/s, wezsze pasmo, glos +0,5 LU nad otoczeniem). Nie mieszcza sie w limicie modelu =
+  pierwszenstwo przed pelna sylwetka, potem rolka bez "Must" (ostrzezenie). LLM dostaje ostatnie 10 uwag (`uwagi_dla_llm`).
+  Panel Z promptu: karta **"Asystent pamieta"** (`GET /api/asystent/pamiec`, `POST /api/asystent/pamiec/usun {poprawka|uwaga}`) -
+  poprawki z efektem i zrodlem (persona-specyficzne wyszarzone u innych) + ostatnie uwagi, przyciski Usun.
+- **Ostre komentarze** (`scenariusz.KOMENTARZE_OSTRE` 21 linii + `WARIANTY_PLCI_OSTRE` w parach, `ton_komentarzy`): ustawienie
+  persony `komentarze_ton` = "ostre" (DOMYSLNE) | "lagodne" (Ustawienia -> Stroje i glos; opcja `komentarze_ton` w z-promptu,
+  zamrozona w ustalonych). Ostry ton: zbuduj losuje z puli (nie bierze lagodnego komentarza gotowego pomyslu), asystent regulami
+  tez, LLM dostaje styl "crude street Polish with swearing" + przyklady; lagodny ton odrzuca wulgarne linie LLM (`WULGARNE`).
+  Komentarz idzie TYLKO do ElevenLabs - test pilnuje, ze zadna linia (ani "pokemon"/"cosplay"/przeklenstwa) nie trafia do promptu
+  wideo, klatki, tla ani zlecenia Higgsfielda (Seedance, Wan, Gemini).
+- **Skala wzrostu** (user: "kobiety wychodza za wysokie"): `zdanie_wzrostu(wzrost, krotko, mocniej)` - 158-162 = "clearly shorter
+  than people around her, her head only at the shoulder or chin of an average man", 168-172 = "about as tall as most women, still
+  shorter than most men", zawsze `PROPORCJE` (not a model, legs never lengthened, platforms add only a few cm, people around at
+  true scale); krotkie szablony (Wan/Gemini) `PROPORCJE_KROTKO`. Klatka i wideo maja zdanie o wzroscie, tlo Wan `SKALA_TLA` (ludzie
+  i rzeczy w prawdziwej skali, bez bohaterki). Kontrola AI: punkt (5) w `PYTANIE_OCENY` (nie wyzsza od mezczyzn, normalne
+  proporcje) i `PYTANIE_TLA` (ludzie w prawdziwej skali). "tall for a woman" tylko >= 175 cm. Zdjecia (swap) tez dostaja nowe zdanie.
+  Prompt Seedance nadal <= ~4960 znakow (zalecane 5000; skrocony [Result] i dzwiek).
+- **Glos jak z telefonu** (`komentarz_glos`): BEZ sidechain (otoczenie sie nie przycisza); krok 1 `przygotuj_glos` = lancuch
+  telefonu + poglos wg miejsca (`przestrzen_miejsca`: maly sklep / hala galeria-dworzec-metro-dyskont / klatka / pojazd / zewnatrz) +
+  lekko nierowna glosnosc (`NIEROWNO`) + kodek niskiego bitrate (libopus VoIP 24 kb/s, bez libopus AAC 32 kb/s; surowo 16 kb/s);
+  krok 2 `filtr_miksu` = glos (dekodowany) + otoczenie po `filtr_otoczenia` + szum toru + na zewnatrz wiatr (brown noise, tremolo,
+  14 dB pod otoczeniem) + lekka automatyka glosnosci na CALOSCI (`agc_calosci`) + limiter. Glos `NAD_OTOCZENIEM_LU` = 1,5 (bylo 3).
+  eleven_v3: `USTAWIENIA_TTS {"stability": 0.0}` (v3 przyjmuje tylko 0/0,5/1; odrzucone ustawienia = druga proba bez nich), tagi
+  `tag_v3` ("hahaha" -> [laughs] tuz przed smiechem, przeklenstwa -> [chuckles]/[sighs]/[whispers], okrzyk bez szeptu, pytanie
+  zwykle [whispers]); rotacja `glosy_rotuj` (DOMYSLNIE tak): chlopak Max/Kris/Wiktor (`GLOSY_PULA`, ID z probek usera 2026-10-07),
+  dziewczyna Jessica; losowanie z ziarnem rolki (ponowne "Dograj glos" = ten sam glos i tag). Rolka zapisuje `glos_id`,
+  `glos_tekst`, `glos_przestrzen`. Demo bez TTS: `probka(glos, cel, t_s, otoczenie=<plik rolki>, przestrzen=...)` ->
+  `..\claudzik\demo_glos_realny.mp3` (Max + otoczenie #9 Noemi, sklepik). NIESPRAWDZONE na zywo (zero nowych TTS): czy eleven_v3
+  przyjmuje stability 0.0 (inaczej zapas bez ustawien) i jak brzmia tagi z Kris/Wiktor.
+- **Ciche kroki**: prompt dzwieku (`DZWIEK_BEZ_MOWY`/`DZWIEK_KROTKI_BEZ_MOWY`: "she is far away, so her footsteps are almost
+  inaudible (no heel clicks)", `dzwieki_z_daleka`: "footsteps" -> "distant footsteps"; akcja klatki schodowej bez "shoes echoing");
+  po generacji `filtr_otoczenia` = szybki kompresor na pikach (detection=peak, attack 0,1 ms, prog = glosnosc otoczenia + 9 dB,
+  ratio 6, makeup ~+2 dB - gwar zostaje) + lowpass 6,5 kHz 1-biegunowy "z daleka" (poprawka kroki: +6 dB/ratio 10/5,2 kHz). Na #9
+  Noemi: szczyty -3,7 -> -11 dBFS, glosnosc bez zmian (-21,5 LUFS). Rolki BEZ komentarza tez: `fabryka._otoczenie_po_generacji` ->
+  `komentarz_glos.obrob_otoczenie` -> `NNN_x.otoczenie.mp4` przed Media Tool (blad = surowy plik, nic nie psuje).
+- **Panel**: filmy bez `autoplay` (user: "glos sam sie odpala") - graja tylko po kliknieciu Odtworz/podglad (`odtworzWideo`),
+  przerysowanie list zachowuje istniejacy `<video data-wideo>` (`przerysujZWideo`: gra dalej / zostaje pauza), zmiana strony
+  pauzuje wszystko i czysci `state.odtwarzane/podglady` (`zatrzymajWideo`); odswiezanie Rolki/Z promptu pomija przerysowanie, gdy
+  pisze sie uwage (textarea/input w liscie) albo film gra. Sprawdzone w przegladarce na kopii panelu (ROLKI_PORT=5099,
+  ROLKI_MODELKI w tmp). Wersja 3.6.
+- Testy: tests/test_uwagi_glos_36.py (reguly z/bez ogonkow i pochwaly, zapis oceny z komentarzem, poprawki w prompcie wideo/klatki/
+  tla i zamrozenie, zakres persona, LLM dostaje uwagi + lagodny ton odrzuca wulgarne, pula ostrych + plec, komentarz nigdy w
+  promptach/zleceniu, skala wg wzrostu + pytania kontroli, filtr glosu bez sidechain/poglos/kodek, tagi v3, stabilnosc z zapasem i
+  rotacja, ffmpeg naprawde (piki krokow -3 dB, gwar +-1,5 LU, miks, demo), dograj z miejscem, rolka bez komentarza, endpointy, panel
+  bez autoplay).

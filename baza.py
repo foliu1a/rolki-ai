@@ -66,6 +66,9 @@ USTAWIENIA_DOMYSLNE = {
     "nagrywa": "chlopak",           # kto nagrywa zza kamery (mowi komentarz w rolkach z promptu): chlopak | dziewczyna
     "glos_chlopak": "",             # ElevenLabs Voice ID glosu chlopaka ("" = komentarz_glos.GLOSY_DOMYSLNE: Max / Jessica; gdy ID
     "glos_dziewczyna": "",          # nie dziala - zapas z konta: premade/professional, polski, ta plec, nigdy klon ani imie persony)
+    "komentarze_ton": "ostre",      # 3.6: komentarze zza kamery: ostre (potoczne, z przeklenstwami - jak w prawdziwych nagraniach;
+                                    # domyslnie) | lagodne. Ida tylko do ElevenLabs, nigdy do promptu wideo
+    "glosy_rotuj": True,            # 3.6: losuj glos osoby nagrywajacej z puli (chlopak: Max, Kris, Wiktor - komentarz_glos.GLOSY_PULA)
     # --- autopilot (panel / autopilot.py) ---
     "autopilot": False,             # autopilot obsluguje te modelke (skanuj -> generuj -> pranie -> lipsync -> zdjecia)
     "autopilot_co_minut": 15,       # co ile minut autopilot sprawdza wrzutnie

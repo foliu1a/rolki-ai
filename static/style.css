@@ -963,6 +963,22 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
 .zp-szczegoly-info { margin: 0; font-size: 14px; }
 .rolka-ocena { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; color: var(--szary); }
 .btn.aktywny { border-color: var(--akcent); background: var(--akcent-tlo); color: var(--tekst); }
+/* 3.6: uwaga do oceny („Co wyszło źle?”) i „Asystent pamięta” */
+.rolka-uwaga { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.rolka-uwaga label { display: flex; flex-direction: column; gap: 4px; color: var(--tekst); }
+.rolka-uwaga textarea { width: 100%; min-height: 54px; resize: vertical; }
+.rolka-uwaga-zapisana { font-size: 14px; color: var(--szary); overflow-wrap: anywhere; }
+.pamiec-lista { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pamiec-poz { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--linia); border-radius: 8px; }
+.pamiec-poz.wyszarzone { opacity: .6; }
+.pamiec-tresc { min-width: 0; overflow-wrap: anywhere; }
+.pamiec-tresc small { display: block; margin-top: 2px; }
+#zp-pamiec h3 { font-size: 15px; margin: 4px 0 8px; }
+.chip-maly { display: inline-block; font-size: 12px; padding: 1px 7px; margin: 0 4px 0 2px; border-radius: 999px;
+  border: 1px solid var(--linia); color: var(--szary); vertical-align: middle; }
+.chip-maly.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-tlo); }
+.chip-maly.zle { color: var(--zle); border-color: var(--zle); background: var(--zle-tlo); }
 @media (max-width: 720px) {
   .zp-przyciski .btn { flex: 1 1 100%; }
   .zp-persona-pole { max-width: none; }

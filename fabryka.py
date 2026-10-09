@@ -1523,8 +1523,10 @@ def _komentarz_po_generacji(slug, p, surowy, log):
     """Rolka z promptu z glosem "tts": komentarz zza kamery z ElevenLabs dogrywany do wideo z samym otoczeniem (komentarz_glos).
     Zwraca sciezke wideo z komentarzem albo None (wtedy rolka idzie dalej bez komentarza - nigdy nie psuje oplaconej rolki)."""
     zp = (p or {}).get("z_promptu") or {}
-    if not (z_promptu(p) and zp.get("glos") == "tts" and zp.get("komentarz")):
+    if not z_promptu(p):
         return None
+    if not (zp.get("glos") == "tts" and zp.get("komentarz")):
+        return _otoczenie_po_generacji(slug, p, surowy, log)
     try:
         import komentarz_glos
         plik = komentarz_glos.dograj(slug, p["id"], surowy, zp["komentarz"], zp.get("komentarz_t") or 4, log=log)
@@ -1535,6 +1537,25 @@ def _komentarz_po_generacji(slug, p, surowy, log):
                  f"otoczenia; model wideo nic nie mowi). Napraw ElevenLabs (Ustawienia -> Konta) i kliknij 'Dograj glos' w panelu")
         _zdarzenie(log, slug, "uwaga", tekst, pomysl=p["id"])
         baza.aktualizuj_pomysl(slug, p["id"], glos_dograny=False, glos_blad=str(e)[:300])
+        return _otoczenie_po_generacji(slug, p, surowy, log)
+
+
+def _otoczenie_po_generacji(slug, p, surowy, log):
+    """3.6: rolka z promptu BEZ komentarza - i tak ujarzmiamy jej kroki/obcasy w dzwieku otoczenia (komentarz_glos.obrob_otoczenie
+    -> NNN_x.otoczenie.mp4). Blad = None (rolka idzie dalej z surowym dzwiekiem; oplaconej rolki nic nie psuje)."""
+    try:
+        import komentarz_glos
+        cel = re.sub(r"\.raw(\.\w+)$", r".otoczenie.mp4", surowy) if ".raw." in os.path.basename(surowy) else (
+            os.path.splitext(surowy)[0] + ".otoczenie.mp4")
+        w = komentarz_glos.obrob_otoczenie(surowy, cel, mocniej="kroki" in komentarz_glos.poprawki_miksu(slug, p))
+        if not w:
+            return None
+        if log:
+            log(f"#{p['id']}: dzwiek otoczenia - ciszej jej kroki (piki przyciete, {w[1]} LUFS) -> {os.path.basename(w[0])}")
+        return w[0]
+    except Exception as e:
+        if log:
+            log(f"#{p['id']}: obrobka dzwieku otoczenia pominieta ({str(e)[:160]})")
         return None
 
 
@@ -2066,7 +2087,7 @@ def _dane_z_promptu(sc):
                                    "pomysl_id", "miejsce", "miejsce_nazwa", "wlosy_zmienione", "stroj_plik", "komentarz",
                                    "sezon", "pora", "kamera", "szablon", "ustalone", "znaki", "opcje", "glos", "wymowa",
                                    "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy", "stroj_id", "stroj_tryb", "reakcja",
-                                   "stroj_nazwa", "nagrywa", "sylwetka", "klatka")}
+                                   "stroj_nazwa", "nagrywa", "sylwetka", "klatka", "komentarze_ton", "poprawki")}
 
 
 def pierwsza_klatka_potrzebna(p):
@@ -2105,7 +2126,7 @@ def wycena_z_promptu(slug, opcje, z_cena=True, log=None):
     wynik = {k: sc.get(k) for k in ("prompt", "znaki", "limit", "ostrzezenia", "ustalone", "model", "rozdzielczosc", "dlugosc",
                                     "tytul", "miejsce", "miejsce_nazwa", "pomysl_id", "wlosy_zmienione", "komentarz", "sezon",
                                     "pora", "kamera", "glos", "wymowa", "komentarz_t", "obiekt", "obiekt_nazwa", "nazwy",
-                                    "stroj_id", "stroj_tryb", "stroj_nazwa", "reakcja", "nagrywa")}
+                                    "stroj_id", "stroj_tryb", "stroj_nazwa", "reakcja", "nagrywa", "komentarze_ton", "poprawki")}
     wynik["ostrzezenia"] = list(wynik.get("ostrzezenia") or [])
     if sc.get("komentarz"):
         try:

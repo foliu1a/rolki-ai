@@ -363,6 +363,14 @@
             </details>
           </form>
 
+          <!-- 3.6: "Asystent pamieta" - stale poprawki z uwag usera do ocenionych rolek (asystent.pamiec, /api/asystent/pamiec) -->
+          <section class="karta" id="zp-pamiec-karta">
+            <div class="karta-naglowek">
+              <div><h2>Asystent pamięta</h2><p class="muted">Z Twoich uwag przy ocenach („Co wyszło źle?”). Poprawki idą do każdej nowej rolki z promptu – usuń, gdy już nie trzeba.</p></div>
+            </div>
+            <div id="zp-pamiec"></div>
+          </section>
+
           <section class="karta" id="zp-lista-karta">
             <div class="karta-naglowek">
               <div><h2>Rolki z promptu</h2><p class="muted">Gotowe lądują w folderze „tu rolki zrobione” (po Media Tool) i w kolejce Rolki – jak każda rolka.</p></div>
@@ -591,8 +599,12 @@
                   <small class="pole-info">Komentarz w rolkach z promptu mówi osoba, która nagrywa – jej nie widać. Persona nic nie mówi.</small></div>
                 <div class="pole"><label for="u-glos-chlopak">Głos chłopaka (ElevenLabs Voice ID)</label><input type="text" id="u-glos-chlopak" name="glos_chlopak" placeholder="puste = Max (domyślny)" spellcheck="false" autocomplete="off"></div>
                 <div class="pole"><label for="u-glos-dziewczyna">Głos dziewczyny (ElevenLabs Voice ID)</label><input type="text" id="u-glos-dziewczyna" name="glos_dziewczyna" placeholder="puste = Jessica (domyślna)" spellcheck="false" autocomplete="off"></div>
+                <div class="pole"><label for="u-komentarze-ton">Komentarze zza kamery</label>
+                  <select id="u-komentarze-ton" name="komentarze_ton"><option value="ostre">Ostre – z przekleństwami</option><option value="lagodne">Łagodne – bez przekleństw</option></select>
+                  <small class="pole-info">Domyślnie ostre, np. „Co za pokemon, ja pierdolę.” – jak w prawdziwych nagraniach. Idą tylko do głosu ElevenLabs, nigdy do opisu dla modelu wideo.</small></div>
+                <div class="pole"><label class="check"><input type="checkbox" id="u-glosy-rotuj" name="glosy_rotuj"><span>Rotuj głosy<small>losuję głos chłopaka z puli (Max, Kris, Wiktor), żeby nie był zawsze ten sam</small></span></label></div>
               </div>
-              <p class="muted">Komentarz brzmi jak nagrany telefonem, który filmuje (szept tuż przy mikrofonie). Puste pola = domyślne głosy (Max / Jessica). Gdy głos przestanie działać, dobiorę zapasowy spośród gotowych polskich głosów ElevenLabs (nigdy sklonowanych i nigdy o imieniu persony). Bez działającego klucza ElevenLabs rolka wyjdzie bez komentarza – dograsz go potem przyciskiem „Dograj głos”. Dotyczy tylko rolek z promptu.</p>
+              <p class="muted">Komentarz brzmi jak nagrany telefonem, który filmuje: pogłos jak w tym miejscu, skompresowany dźwięk z telefonu, tylko trochę głośniej niż otoczenie (nic się pod nim nie przycisza). Puste pola = domyślne głosy (Max / Jessica). Gdy głos przestanie działać, dobiorę zapasowy spośród gotowych polskich głosów ElevenLabs (nigdy sklonowanych i nigdy o imieniu persony). Bez działającego klucza ElevenLabs rolka wyjdzie bez komentarza – dograsz go potem przyciskiem „Dograj głos”. Dotyczy tylko rolek z promptu.</p>
               <div class="karta-stopka"><button class="btn btn-glowny" type="submit">Zapisz</button></div>
               <div class="podsekcja">
                 <h3>Biblioteka strojów</h3>

@@ -63,7 +63,9 @@ PYTANIE_OCENY = (
     "DALEKO od aparatu – mała postać, zajmuje najwyżej ok. 1/3 wysokości kadru; to NIE jest zbliżenie, plan średni ani portret; "
     "(2) jest dokładnie JEDNA wyraźna postać tej kobiety (nie dwie takie same); (3) napisy, które da się przeczytać, są poprawnym "
     "polskim (bez bełkotu, literówek i wymyślonych słów), ceny z przecinkiem jak „4,99 zł” – drobne, nieczytelne z daleka napisy "
-    "są w porządku; (4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama. "
+    "są w porządku; (4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama; (5) kobieta NIE jest "
+    "wyższa od mężczyzn obok i ma normalne, codzienne proporcje (nie jak modelka, nogi nie wydłużone), a jej skala pasuje do "
+    "ludzi, drzwi i lad. "
     'Odpowiedz TYLKO obiektem JSON: {"ok": true/false, "powod": "krótko po polsku, max 100 znaków"}.'
 )
 # 3.5.2: kontrola zdjecia SAMEGO miejsca (tryb tla, Wan/Gemini) - bohaterki ma NIE byc, ludzie w tle sa w porzadku
@@ -75,7 +77,8 @@ PYTANIE_TLA = (
     "bohaterki – nikt nie stoi na pierwszym planie ani w centrum uwagi, nikt nie pozuje i nie jest wyeksponowany; zwykli ludzie "
     "w tle, przy bokach albo za ladą są w porządku; (3) napisy, które da się przeczytać, są poprawnym polskim (bez bełkotu, "
     "literówek i wymyślonych słów), ceny z przecinkiem jak „4,99 zł” – drobne, nieczytelne z daleka napisy są w porządku; "
-    "(4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama. "
+    "(4) wygląda jak zwykłe zdjęcie z telefonu, nie jak sesja zdjęciowa ani reklama; (5) ludzie mają normalne proporcje i "
+    "prawdziwą skalę względem drzwi, lad i półek (nikt nie jest nienaturalnie wysoki ani wyciągnięty). "
     'Odpowiedz TYLKO obiektem JSON: {"ok": true/false, "powod": "krótko po polsku, max 100 znaków"}.'
 )
 
