@@ -1,19 +1,21 @@
 ROLKI AI – PRZENIESIENIE NA INNY KOMPUTER (ok. 15 minut)
 
-NA STARYM KOMPUTERZE
-1. Skopiuj na pendrive dwa foldery:
-   - C:\claude programy\rolki-ai      (program + persony + klucze API w pliku klucze.json)
-   - C:\claude programy\Media Tool    (8 GB – pranie rolek; bez niego rolki zapisują się bez prania)
-   Kopiuj, gdy nic się nie generuje.
-   Uwaga: klucze.json = dostęp do Twoich kont. Przenoś tylko pendrivem / prywatnie.
+1. Wyślij sobie przez internet (np. Google Drive / WeTransfer) 2 pliki z folderu C:\claude programy\do-wyslania:
+   - rolki-ai.zip      (ok. 136 MB – program + 4 persony + stroje)
+   - Media Tool.zip    (ok. 240 MB – pranie rolek: tylko metadane iPhone / EXIF / GPS, BEZ usuwania SynthID)
 
-NA NOWYM KOMPUTERZE
-2. Wklej oba foldery do C:\claude programy\  (tak samo jak na starym).
-3. W folderze rolki-ai kliknij dwa razy NOWY-KOMPUTER.bat.
-   - Jak doinstaluje Pythona / Node.js / ffmpeg, każe zamknąć okno i kliknąć go jeszcze raz.
+2. Na nowym komputerze rozpakuj (prawy klik na zipie -> "Wyodrębnij wszystkie" -> wpisz ścieżkę):
+   - rolki-ai.zip    ->  C:\claude programy\rolki-ai
+   - Media Tool.zip  ->  C:\claude programy\Media Tool
+
+3. Wejdź do C:\claude programy\rolki-ai i kliknij dwa razy NOWY-KOMPUTER.bat.
+   Jak doinstaluje Pythona / Node.js / ffmpeg, każe zamknąć okno i kliknąć go jeszcze raz.
+
 4. Otworzy się przeglądarka z logowaniem Higgsfield – zaloguj się na swoje konto.
-   (Później, gdyby się wylogowało: zaloguj-higgsfield.bat)
-5. Gotowe – panel otwierasz skrótem "Rolki AI" na pulpicie.
+
+5. Klucze API (nie ma ich w zipie): otwórz panel skrótem "Rolki AI" na pulpicie -> Ustawienia -> Konta -> wklej
+   (ElevenLabs, OpenRouter, yapper, sync). Albo skopiuj plik klucze.json z C:\claude programy\rolki-ai na starym
+   komputerze do tego samego folderu na nowym – tylko prywatnie (pendrive), nie przez publiczny link.
 
 WAŻNE
 - AUTOPILOT na nowym komputerze startuje WYŁĄCZONY. Włączaj go tylko na JEDNYM komputerze naraz

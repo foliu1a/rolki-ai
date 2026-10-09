@@ -66,7 +66,7 @@ if exist "%~dp0klucze.json" (
 if exist "C:\claude programy\Media Tool\Media Tool.exe" (
   echo [Media Tool] jest - pranie rolek dziala.
 ) else (
-  echo [Media Tool] brak - skopiuj folder "Media Tool" do C:\claude programy\  ^(bez niego rolki zapisuja sie bez prania^).
+  echo [Media Tool] brak - rozpakuj "Media Tool.zip" do C:\claude programy\Media Tool  ^(bez niego rolki zapisuja sie bez prania^).
 )
 echo.
 echo Teraz logowanie do Higgsfield - otworzy sie przegladarka, zaloguj sie na SWOJE konto.
