@@ -31,9 +31,8 @@ def main():
         print(f"Nie ma CLI Higgsfield w {HF}. Odpal instaluj.bat w rolki-ai.")
         return 1
     firefox = next((p for p in FIREFOX if p.is_file()), None)
-    if not firefox and not sucho:
-        print("Nie znalazlem Firefoksa. Zainstaluj go albo uzyj zwyklego logowania.")
-        return 1
+    if not firefox:
+        print("Nie ma Firefoksa - logowanie otworze w domyslnej przegladarce.", flush=True)
 
     env = dict(os.environ)
     env["PATH"] = str(HF.parent)  # bez System32 -> CLI nie otworzy domyslnej przegladarki
@@ -49,12 +48,16 @@ def main():
             print(linia, end="", flush=True)
             continue
         # linia z linkiem: zamiast "otworz ten plik" otwieramy go sami, w Firefoksie
+        gdzie = "Firefoksie" if firefox else "domyslnej przegladarce"
         if sucho:
-            print(f"[sucho] otworzylbym w Firefoksie: {znalezione.group(1)[:60]}...")
+            print(f"[sucho] otworzylbym w {gdzie}: {znalezione.group(1)[:60]}...")
             proces.terminate()
             return 0
-        subprocess.Popen([str(firefox), tryb, znalezione.group(1)])
-        print(">> Otworzylem logowanie w Firefoksie. Zatwierdz tam i wroc do tego okna.", flush=True)
+        if firefox:
+            subprocess.Popen([str(firefox), tryb, znalezione.group(1)])
+        else:
+            os.startfile(znalezione.group(1))   # komputer bez Firefoksa (np. drugi PC): zwykla przegladarka
+        print(f">> Otworzylem logowanie w {gdzie}. Zatwierdz tam i wroc do tego okna.", flush=True)
         otwarte = True
     return proces.wait()
 

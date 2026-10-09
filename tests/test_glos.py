@@ -107,6 +107,7 @@ def test_lipsync_przechodzi_przez_media_tool(modelka, monkeypatch):
         open(cel, "wb").write(b"wyprane")
         return cel
     monkeypatch.setattr(mediatool, "pierz_wideo", pierz_wideo)
+    monkeypatch.setattr(mediatool, "dostepny", lambda: True)
     baza.zapisz_ustawienia(modelka, mediatool=True)
     cel = lipsync.zrob(modelka, wideo, audio)
     assert cel == os.path.join(baza.folder_gotowych(modelka), "001_a_lipsync.mp4") and open(cel, "rb").read() == b"wyprane"
@@ -116,6 +117,11 @@ def test_lipsync_przechodzi_przez_media_tool(modelka, monkeypatch):
     cel = lipsync.zrob(modelka, wideo, audio)
     assert open(cel, "rb").read() == b"surowe" and baza.lista_lipsync(modelka)[-1]["status"] == "gotowe"
     assert any("Media Tool nie wyszedl" in w["tekst"] for w in baza.dziennik_ostatnie(5, typ="uwaga"))
+    # Media Tool nie zainstalowany -> kopia surowego pliku, jasne ostrzezenie "nie zainstalowany"
+    monkeypatch.setattr(mediatool, "dostepny", lambda: False)
+    cel = lipsync.zrob(modelka, wideo, audio)
+    assert open(cel, "rb").read() == b"surowe" and baza.lista_lipsync(modelka)[-1]["status"] == "gotowe"
+    assert any("Media Tool nie zainstalowany" in w["tekst"] for w in baza.dziennik_ostatnie(5, typ="uwaga"))
     # mediatool wylaczony -> kopia bez prania, bez ostrzezenia
     baza.zapisz_ustawienia(modelka, mediatool=False)
     ile_uwag = len(baza.dziennik_ostatnie(50, typ="uwaga"))

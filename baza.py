@@ -609,6 +609,8 @@ def przygotuj_foldery_pulpitu_wszystkich():
 # PLIK_STANU na katalog tymczasowy.
 
 USTAWIENIA_GLOBALNE_DOMYSLNE = {
+    "autopilot_przy_starcie": True, # panel z --autopilot (skrot, autostart) wlacza autopilota od razu; zapisuje to przelacznik w panelu
+                                    # (wylaczony = zostaje wylaczony po restarcie). Paczka dla innego komputera: False
     "zdjecia_rownolegle": 4,        # ile zdjec (podmiana postaci) moze sie robic naraz (1-8); nadmiar czeka w kolejce panelu
     "autopilot_z_promptu": {        # autopilot sam robi rolki z zakladki "Z promptu" (bez filmikow zrodlowych)
         "dziennie": 1,              # ile rolek dziennie LACZNIE dla wszystkich person (0 = wylaczone)
@@ -881,6 +883,52 @@ def zapisz_upload_id(slug, sciezka, uid):
         cache[os.path.normcase(os.path.abspath(sciezka))] = {"id": uid, "size": st.st_size, "mtime": st.st_mtime,
                                                              "plik": os.path.basename(sciezka), "dodano": _teraz()}
         _zapisz_json(_plik_uploadow(slug), cache)
+
+
+PLIKI_CACHE_UPLOADOW = ("uploady.json", "uploady_yapper.json", "uploady_wavespeed.json")
+
+
+def przenies_cache_uploadow():
+    """Program przeniesiony (inny folder / inny komputer, np. paczka zip): klucze cache uploadow to bezwzgledne sciezki starego
+    miejsca (c:/stary/modelki/noemi/referencje/01.png), a rozpakowanie zmienia tez mtime. Wpis, ktorego sciezka nie istnieje,
+    przepinamy na ten sam plik w obecnym folderze modelek (ta sama czesc sciezki od 'modelki/<slug>/'), o ile plik jest i ma ten
+    sam rozmiar; mtime = obecny. Wpisy z istniejaca sciezka zostaja bez zmian (u siebie nic sie nie dzieje).
+    Zwraca liczbe przepietych wpisow."""
+    razem = 0
+    nazwy_katalogu = {"modelki", os.path.basename(os.path.normpath(KATALOG_MODELEK)).lower()}
+    for slug in lista_modelek():
+        folder = folder_modelki(slug)
+        for nazwa in PLIKI_CACHE_UPLOADOW:
+            plik = os.path.join(folder, nazwa)
+            if not os.path.isfile(plik):
+                continue
+            with _rmw(plik):
+                cache = _wczytaj_json(plik, {})
+                if not isinstance(cache, dict):
+                    continue
+                nowe, zmiany = {}, 0
+                for klucz, wpis in cache.items():
+                    if os.path.isfile(klucz) or not isinstance(wpis, dict):
+                        nowe.setdefault(klucz, wpis)
+                        continue
+                    czesci = [c for c in re.split(r"[\\/]+", klucz) if c]
+                    nowa = None
+                    for i in range(len(czesci) - 2, -1, -1):
+                        if czesci[i].lower() in nazwy_katalogu and czesci[i + 1].lower() == slug.lower():
+                            nowa = os.path.join(folder, *czesci[i + 2:])
+                            break
+                    if not nowa or not os.path.isfile(nowa) or os.stat(nowa).st_size != wpis.get("size"):
+                        nowe.setdefault(klucz, wpis)
+                        continue
+                    nowy_klucz = os.path.normcase(os.path.abspath(nowa))
+                    if nowy_klucz in cache:
+                        continue                    # na nowym miejscu jest juz wlasny wpis - stary wypada
+                    nowe[nowy_klucz] = dict(wpis, mtime=os.stat(nowa).st_mtime)
+                    zmiany += 1
+                if zmiany:
+                    _zapisz_json(plik, nowe)
+                    razem += zmiany
+    return razem
 
 
 def media_do_cli(slug, sciezki):

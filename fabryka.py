@@ -260,7 +260,7 @@ def diagnoza():
     try:
         import mediatool
         ok = mediatool.dostepny()
-        wynik.append({"co": "mediatool", "ok": ok, "info": "jest" if ok else f"nie znaleziono w {mediatool.MT_DIR} (pranie wylaczone -> surowe pliki)"})
+        wynik.append({"co": "mediatool", "ok": ok, "info": "jest" if ok else f"nie zainstalowany (szukam w {mediatool.MT_DIR}) - rolki beda zapisywane bez prania"})
     except Exception as e:
         wynik.append({"co": "mediatool", "ok": False, "info": str(e)})
     try:
@@ -2366,16 +2366,25 @@ def cmd_generuj(args):
     return 1 if w.get("stop") in ("brak referencji", "zajete") or (w.get("stop") or "").startswith("saldo") else 0
 
 
+BEZ_MEDIA_TOOL = "Media Tool nie zainstalowany - rolka bez prania (zapisana w 'tu rolki zrobione')"
+
+
 def _postprodukcja(slug, pid, surowy, nazwa, ust, log=None):
     """Media Tool (pranie) -> folder gotowych. Zwraca sciezke gotowego pliku."""
     log = log or _log
     gotowe_dir = baza.folder_gotowych(slug)
     cel = os.path.join(gotowe_dir, f"{pid:03d}_{nazwa}.mp4")
-    if ust.get("mediatool"):
+    import mediatool
+    if ust.get("mediatool") and not mediatool.dostepny():
+        # Media Tool nie zainstalowany (np. inny komputer): rolka i tak trafia do gotowych - nieuprana, z jasnym wpisem. Nie blad.
+        import shutil
+        shutil.copy2(surowy, cel)
+        baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=cel, bez_prania=True)
+        _zdarzenie(log, slug, "uwaga", f"#{pid}: {BEZ_MEDIA_TOOL} -> {cel}", pomysl=pid)
+    elif ust.get("mediatool"):
         try:
-            import mediatool
             cel = mediatool.pierz_wideo(surowy, gotowe_dir, nazwa_wyniku=os.path.basename(cel))
-            baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=cel)
+            baza.aktualizuj_pomysl(slug, pid, status="gotowe", plik_wynikowy=cel, bez_prania=None)
         except Exception as e:
             _zdarzenie(log, slug, "uwaga", f"#{pid}: Media Tool nie wyszedl ({e}) - zostawiam surowy plik w wyniki/, status wygenerowany", pomysl=pid)
             return None

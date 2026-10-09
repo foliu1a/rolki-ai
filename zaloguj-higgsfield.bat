@@ -1,6 +1,6 @@
 @echo off
-title Logowanie Higgsfield (Firefox)
-echo Otwieram logowanie w Firefoksie - zatwierdz tam i wroc tutaj.
+title Logowanie Higgsfield
+echo Otwieram logowanie w przegladarce (Firefox, a jak go nie ma - domyslna). Zatwierdz tam i wroc tutaj.
 echo.
 python "%~dp0zaloguj_firefox.py"
 echo.

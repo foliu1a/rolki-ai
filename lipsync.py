@@ -158,11 +158,14 @@ def _postprodukcja(slug, surowy, cel, ust, log):
     """Jak przy rolkach: plik z API (surowy, w wyniki/) -> Media Tool (pranie: metadane jak z telefonu) -> folder gotowych.
     Bez Media Tool (ustawienie mediatool=false) albo gdy padnie: kopia surowego pliku do gotowych."""
     if ust.get("mediatool"):
-        try:
-            import mediatool
-            return mediatool.pierz_wideo(surowy, os.path.dirname(cel), nazwa_wyniku=os.path.basename(cel), log=log)
-        except Exception as e:
-            _zdarzenie(log, slug, "uwaga", f"lipsync: Media Tool nie wyszedl ({e}) - plik bez prania")
+        import mediatool
+        if not mediatool.dostepny():
+            _zdarzenie(log, slug, "uwaga", "lipsync: Media Tool nie zainstalowany - plik bez prania")
+        else:
+            try:
+                return mediatool.pierz_wideo(surowy, os.path.dirname(cel), nazwa_wyniku=os.path.basename(cel), log=log)
+            except Exception as e:
+                _zdarzenie(log, slug, "uwaga", f"lipsync: Media Tool nie wyszedl ({e}) - plik bez prania")
     shutil.copy2(surowy, cel)
     return cel
 

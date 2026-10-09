@@ -2010,6 +2010,7 @@ function kartaRolki(p) {
       ${klatkaBlok}
       ${zPromptu && p.glos_blad && !p.glos_dograny ? `<div class="rolka-meta zle">Bez komentarza zza kamery: ${esc(prostyBlad(p.glos_blad))}. Napraw ElevenLabs (Ustawienia → Konta) i kliknij „Dograj głos”.</div>` : ''}
       ${powod}
+      ${p.bez_prania && status === 'gotowe' ? `<div class="rolka-meta">Media Tool nie zainstalowany – rolka bez prania (zapisana w „tu rolki zrobione”).</div>` : ''}
       ${p.podpis ? `<div class="rolka-podpis"><span>${esc(p.podpis)}</span><button class="btn btn-maly btn-tekst" type="button" data-akcja="kopiuj" data-tekst="${esc(p.podpis)}" title="kopiuj podpis">${ikona('kopiuj')}kopiuj</button></div>` : ''}
       ${promptOtwarty ? `<div class="rolka-prompt"><label for="prompt-${id}">Prompt – opis dla AI, co zrobić z tym filmikiem</label><textarea id="prompt-${id}" data-prompt="${id}" spellcheck="false" placeholder="Wklej prompt persony albo własny…">${esc(p.prompt_higgsfield || '')}</textarea><div class="rzad"><button class="btn btn-maly btn-glowny" type="button" data-akcja="zapisz-prompt" data-id="${id}">Zapisz prompt</button>${bezPromptu ? '' : `<button class="btn btn-maly" type="button" data-akcja="prompt-pokaz" data-id="${id}">Zwiń</button>`}</div></div>` : ''}
       ${gra ? `<video controls autoplay preload="metadata" src="${esc(p.wideo_url)}"></video>` : ''}

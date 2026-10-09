@@ -219,6 +219,7 @@ def test_generuj_mediatool(modelka, cli, monkeypatch):
         open(cel, "wb").close()
         return cel
     monkeypatch.setattr(mediatool, "pierz_wideo", udawane_pranie)
+    monkeypatch.setattr(mediatool, "dostepny", lambda: True)
     _wrzuc(modelka, "a.mp4")
     fabryka.main(["skanuj"])
     fabryka.main(["generuj", "--tak"])
@@ -230,13 +231,35 @@ def test_generuj_mediatool_padl_zostaje_wygenerowany(modelka, cli, monkeypatch):
     import mediatool
 
     def padl(*a, **k):
-        raise mediatool.BrakMediaTool("brak exe")
+        raise RuntimeError("Media Tool nie zwrocil wyniku")
     monkeypatch.setattr(mediatool, "pierz_wideo", padl)
+    monkeypatch.setattr(mediatool, "dostepny", lambda: True)
     _wrzuc(modelka, "a.mp4")
     fabryka.main(["skanuj"])
     fabryka.main(["generuj", "--tak"])
     p = baza.pomysl(modelka, 1)
     assert p["status"] == "wygenerowany" and p["plik_wynikowy"].endswith(".raw.mp4")
+
+
+def test_generuj_bez_media_tool_zapisuje_nieuprana(modelka, cli, monkeypatch):
+    """Inny komputer bez Media Tool (mediatool=true w ustawieniach): rolka NIE ginie i NIE jest bledem - laduje w folderze gotowych
+    ('tu rolki zrobione') nieuprana, status gotowe, bez_prania=True, jasny wpis w dzienniku. Pranie nie jest nawet probowane."""
+    import mediatool
+    monkeypatch.setattr(mediatool, "MT_DIR", os.path.join(baza.KATALOG_MODELEK, "..", "nie_ma_media_tool"))
+    monkeypatch.setattr(mediatool, "pierz_wideo", lambda *a, **k: pytest.fail("bez Media Tool nie wolno go wolac"))
+    assert baza.ustawienia_modelki(modelka)["mediatool"] is True and not mediatool.dostepny()
+    _wrzuc(modelka, "a.mp4")
+    fabryka.main(["skanuj"])
+    assert fabryka.main(["generuj", "--tak"]) == 0
+    p = baza.pomysl(modelka, 1)
+    cel = os.path.join(baza.folder_gotowych(modelka), "001_a.mp4")
+    assert p["status"] == "gotowe" and p["bez_prania"] is True and p["plik_wynikowy"] == cel and os.path.isfile(cel)
+    assert os.path.isfile(os.path.join(baza.folder_wynikow(modelka), "001_a.raw.mp4"))     # surowy zostaje jak zawsze
+    uwagi = [w["tekst"] for w in baza.dziennik_ostatnie(20, typ="uwaga")]
+    assert any("Media Tool nie zainstalowany - rolka bez prania" in t and "001_a.mp4" in t for t in uwagi)
+    assert not [w for w in baza.dziennik_ostatnie(20) if w.get("typ") == "blad"]
+    diag = {d["co"]: d for d in fabryka.diagnoza()}
+    assert diag["mediatool"]["ok"] is False and "bez prania" in diag["mediatool"]["info"]
 
 
 # ---------------- bezpiecznik ----------------

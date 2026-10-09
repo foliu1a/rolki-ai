@@ -34,6 +34,9 @@ def dane(tmp_path, monkeypatch):
     # biblioteka strojow: pusta (stare testy = jak przed 3.1); testy biblioteki tworza ja fixtura `biblioteka`
     monkeypatch.setattr(baza, "KATALOG_BIBLIOTEKI", str(tmp_path / "stroje_biblioteka"))
     monkeypatch.setenv("ROLKI_PULPIT", str(tmp_path / "pulpit" / "ROLKI AI"))   # foldery "na pulpicie" tez w tmp
+    # Media Tool: w testach zawsze "nie zainstalowany" (wynik nie moze zalezec od tego, czy komputer go ma); testy prania udaja go same
+    import mediatool
+    monkeypatch.setattr(mediatool, "MT_DIR", str(tmp_path / "brak_media_tool"))
     for env in ("YAPPER_API_KEY", "WAVESPEED_API_KEY", "SYNC_API_KEY", "ELEVENLABS_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(env, raising=False)
     # rolki z promptu robione przez autopilota (3.3, domyslnie 1 dziennie od 10:00) - w testach wylaczone, zeby przebieg

@@ -730,3 +730,12 @@ tests/test_wavespeed.py.
 - Bezpiecznik budzetu (min_kredyty, max_kredyty_na_rolke, limity dzienne, yapper.*, wavespeed.*) zmienia tylko user.
 - Publikacja jest reczna. Fabryka konczy na pliku w folderze gotowych.
 - Klucze API tylko w klucze.json / env - nigdy w kodzie, commitach ani w czacie.
+
+## 3.5.3 – przeniesienie na inny komputer (2026-10-09)
+- `NOWY-KOMPUTER.bat`: Python / Node.js / ffmpeg przez winget (po doinstalowaniu: zamknij i odpal jeszcze raz), pip flask+pillow+pytest,
+  `@higgsfield/cli`, autopilot_przy_starcie=False (drugi komputer startuje bez autopilota), skrot na pulpicie, sprawdza klucze.json
+  i Media Tool, na koncu zaloguj-higgsfield.bat. Instrukcja dla usera: `PRZENIESIENIE.txt` (kopiuje sam rolki-ai + Media Tool 8 GB).
+- `autopilot_przy_starcie` (ustawienie globalne, domyslnie True, zapisuje je przelacznik w panelu): panel z --autopilot wlacza
+  autopilota tylko, gdy True. `baza.przenies_cache_uploadow()` przy starcie przepina cache UUID na nowy folder programu.
+- Brak Media Tool = rolka zapisana bez prania z wpisem (nie blad). `zaloguj_firefox.py`: bez Firefoksa domyslna przegladarka.
+- Kluczy i sesji Higgsfield NIE pakujemy (blokada bezpieczenstwa) - user przenosi folder sam i loguje sie przegladarka.

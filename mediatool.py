@@ -13,11 +13,18 @@ import shutil
 import subprocess
 import sys
 
+_KATALOG = os.path.dirname(os.path.abspath(__file__))
+# Gdzie szukamy Media Tool (pierwszy folder z "Media Tool.exe"): MEDIA_TOOL_DIR z env, potem obok programu (rolki-ai\Media Tool -
+# tu rozpakowuje go INSTALUJ.bat z MediaTool.zip), folder obok rolki-ai, C:\claude programy\Media Tool (komputer autora), Pulpit.
+MIEJSCA = (
+    os.path.join(_KATALOG, "Media Tool"),
+    os.path.join(os.path.dirname(_KATALOG), "Media Tool"),
+    r"C:\claude programy\Media Tool",  # od 2026-10-03; wczesniej lezal na pulpicie
+    os.path.join(os.path.expanduser("~"), "Desktop", "Media Tool"),
+)
 MT_DIR = os.environ.get("MEDIA_TOOL_DIR") or next(
-    (d for d in (r"C:\claude programy\Media Tool",  # od 2026-10-03; wczesniej lezal na pulpicie
-                 os.path.join(os.path.expanduser("~"), "Desktop", "Media Tool"))
-     if os.path.isfile(os.path.join(d, "Media Tool.exe"))),
-    r"C:\claude programy\Media Tool",
+    (d for d in MIEJSCA if os.path.isfile(os.path.join(d, "Media Tool.exe"))),
+    os.path.join(_KATALOG, "Media Tool"),
 )
 
 

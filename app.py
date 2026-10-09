@@ -34,8 +34,9 @@ app = Flask(__name__, template_folder=os.path.join(KATALOG, "templates"), static
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024   # 2 GB uploadu (filmiki zrodlowe)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji przegladarka ma brac nowy app.js, nie z cache
 
-PORT = 5077
-WERSJA = "3.5.2"
+# ROLKI_PORT w env = inny port (np. druga kopia programu do testow obok dzialajacego panelu); skroty/.bat zakladaja 5077
+PORT = int(os.environ.get("ROLKI_PORT") or 5077)
+WERSJA = "3.5.3"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -168,6 +169,15 @@ def autopilot_stop():
     _autopilot["stop"].set()
     konsola.stop.set()
     baza.dziennik_zapisz("info", "autopilot wylaczony (panel)")
+
+
+def autopilot_przy_starcie():
+    """Czy panel uruchomiony z --autopilot ma od razu wlaczyc autopilota: ustawienie globalne `autopilot_przy_starcie` (zapisywane
+    przez przelacznik w panelu; domyslnie True = jak dawniej). Paczka dla innego komputera ma False - autopilot kosztuje."""
+    try:
+        return bool(baza.ustawienia_globalne().get("autopilot_przy_starcie", True))
+    except Exception:
+        return True
 
 
 def _stan_autopilota():
@@ -1740,6 +1750,8 @@ def api_autopilot():
         autopilot_start()
     else:
         autopilot_stop()
+    # przelacznik pamieta wybor: po restarcie panelu (skrot / autostart z --autopilot) autopilot wstaje tylko, gdy byl wlaczony
+    baza.zapisz_ustawienia_globalne(autopilot_przy_starcie=wlacz)
     return _ok(autopilot=_stan_autopilota())
 
 
@@ -1954,13 +1966,23 @@ def main():
     print(f"Panel rolki-ai {WERSJA}: http://localhost:{PORT}   (widget: http://localhost:{PORT}/widget)")
     _foldery_na_pulpicie()
     print(f"  prawdziwe zdjecia miejsc (pierwsza klatka): {os.path.join(pierwsza_klatka.przygotuj_foldery_tel(), '<miejsce>')}")
+    try:
+        przeniesione = baza.przenies_cache_uploadow()     # program przeniesiony do innego folderu/komputera: cache UUID dalej dziala
+        if przeniesione:
+            baza.dziennik_zapisz("info", f"start panelu: cache wgranych plikow przepiety na nowy folder programu ({przeniesione} plikow)")
+    except Exception as e:
+        print(f"(cache uploadow: {e})")
     threading.Thread(target=fabryka.zapisz_diagnoze_w_dzienniku, args=("start panelu",), daemon=True).start()
     # chipy strony Zdjecia wg aktualnego schematu modeli (darmowe `model get`); bez CLI zostaje kopia z kodu
     threading.Thread(target=zdjecia_swap.odswiez_schematy, daemon=True, name="schematy-swap").start()
     wznow_przy_starcie()
     start_kolejki_zdjec()
     if "--autopilot" in sys.argv:
-        autopilot_start()
+        if autopilot_przy_starcie():
+            autopilot_start()
+        else:
+            print("  autopilot WYLACZONY (wlaczasz go w panelu: Start -> Autopilot) - nic nie generuje sie samo")
+            baza.dziennik_zapisz("info", "start panelu: autopilot wylaczony (przelacznik w panelu) - nic nie generuje sie samo")
     if "--bez-przegladarki" not in sys.argv:
         threading.Thread(target=_otworz_przegladarke, daemon=True).start()
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)

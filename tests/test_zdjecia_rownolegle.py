@@ -416,5 +416,5 @@ def test_api_ile_naraz_i_stan_kolejki(klient, modelka, src):
     zs.zlec(modelka, src, {"ile": 3}, kr=45, saldo=10000, obudz=False)
     s = klient.get("/api/stan").get_json()
     k = s["zdjecia_kolejka"]
-    assert s["wersja"] == "3.5.2" and k["w_kolejce"] == 3 and k["limit"] == 2 and k["persona"] == {"w_toku": 0, "w_kolejce": 3}
+    assert s["wersja"] == panel.WERSJA and k["w_kolejce"] == 3 and k["limit"] == 2 and k["persona"] == {"w_toku": 0, "w_kolejce": 3}
     assert baza.budzet().get("max_kredyty_dziennie") == 300         # limity budzetu nietkniete
