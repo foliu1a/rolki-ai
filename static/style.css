@@ -1093,3 +1093,16 @@ dialog h2 { font-size: 23px; margin-bottom: 10px; }
 .g-zp-persony { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .g-zp-persony .check { padding: 4px 0; }
 .g-zp-persony .check.bez-zdjec { opacity: .55; }
+
+/* konta Telegram (3.6.1): link do bota, stan kont, dodatkowe konta */
+.tg-bot { font-size: 14.5px; line-height: 1.5; }
+.tg-bot a { font-weight: 600; }
+.tg-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14.5px; }
+.tg-lista li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tg-lista b { font-weight: 600; }
+.tg-stan { color: var(--szary); font-size: 13.5px; }
+.tg-stan.ok { color: var(--ok); }
+.tg-stan.uwaga { color: var(--uwaga); }
+.tg-dodatkowe { display: flex; flex-direction: column; gap: 6px; }
+.tg-dodatkowe label { font-weight: 600; font-size: 14.5px; }
+.tg-dodatkowe textarea { min-height: 72px; font-family: var(--mono); font-size: 14px; }

@@ -615,6 +615,8 @@ USTAWIENIA_GLOBALNE_DOMYSLNE = {
     "autopilot_przy_starcie": True, # panel z --autopilot (skrot, autostart) wlacza autopilota od razu; zapisuje to przelacznik w panelu
                                     # (wylaczony = zostaje wylaczony po restarcie). Paczka dla innego komputera: False
     "zdjecia_rownolegle": 4,        # ile zdjec (podmiana postaci) moze sie robic naraz (1-8); nadmiar czeka w kolejce panelu
+    "telegram_dodatkowe": [],       # 3.6.1: dodatkowe konta Telegram ("huy7128" albo id liczbowe, bez @) - po /start do bota dostaja
+                                    # to samo co czat glowny: gotowe rolki wszystkich person, zdjecia, alarmy, raport dnia
     "autopilot_z_promptu": {        # autopilot sam robi rolki z zakladki "Z promptu" (bez filmikow zrodlowych)
         "dziennie": 1,              # ile rolek dziennie LACZNIE dla wszystkich person (0 = wylaczone)
         "model": "seedance_2_5",    # seedance_2_5 (720p, 10 s, ok. 70 kr) | seedance_2_5_480p (480p, ok. 30 kr) |

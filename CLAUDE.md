@@ -525,8 +525,9 @@ asystent.py         "agent w tle" zakladki Z promptu: dobierz() (OpenRouter free
 komentarz_glos.py   komentarz zza kamery z ElevenLabs dograny po generacji (3.6: glos przez telefon + poglos miejsca + kodek, bez
                     sidechain, otoczenie z przycietymi pikami krokow; obrob_otoczenie dla rolek bez komentarza; rotacja glosow)
 autopilot.py        petla: telefon (Telegram) -> skanuj -> generuj (max rolek/dzien, HAMULEC autopilot_stop_po_bledach) -> pranie
-                    -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (konto persony `telegram_czat` albo czat
-                    glowny; `czat_persony`) -> rolki z promptu (3.3, krok_z_promptu) -> raport dnia po 20:00. BEZ lipsyncu.
+                    -> zdjecia -> podpisy (+hashtagi z profilu) -> gotowe rolki na Telegram (3.6.1: czat glowny + konta dodatkowe +
+                    konto persony `telegram_czat`, `adresaci_persony`) -> rolki z promptu (3.3, krok_z_promptu) -> raport dnia po
+                    20:00. BEZ lipsyncu. telefon_w_tle() = krok telefonu dla watku panelu (3.6.1, bez autopilota).
                     Stan hamulca: modelki/<slug>/autopilot_stan.json (pauza, bledy_z_rzedu) - baza.autopilot_pauza/wznow.
                     Z Telegramem przebieg co 60 s (ODSTEP_TELEGRAM_S). Komendy z telefonu: /status /raport /stop /wznow /pomoc
                     (/stop i /wznow tylko z czatu glownego). Odpowiedzi ida na czat nadawcy.
@@ -549,9 +550,10 @@ dostawcy/           wspolny interfejs (gotowy/saldo/koszt/podglad/generuj/pobier
                     elevenlabs.py (gotowy/saldo_szczegoly: zostalo znakow TTS z GET /v1/user/subscription - do paska sald;
                     NAZWY_SALDA = NAZWY + elevenlabs; stan_klucza, glosy/wybierz_glos, tts() eleven_v3 -> mp3 dla komentarza
                     rolek z promptu; glos z tekstu do lipsyncu nadal przez sync.so),
-                    sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone)/pobierz_plik/wyslij_wideo(chat_id);
-                    telegram.json obok stan.json: chat_id = czat glowny (pierwszy, ktory napisal), `czaty` = sparowane konta person
-                    (tylko te z ustawien telegram_czat; obce ignorowane); `czat_dla(konto)`; limity 20 MB pobieranie / 50 MB
+                    sync_so.py (REST lipsync/TTS), telegram.py (Bot API: odbierz(dozwolone, dodatkowe)/pobierz_plik/
+                    wyslij_wideo(chat_id); telegram.json obok stan.json: chat_id = czat glowny (pierwszy SPOZA list, ktory napisal),
+                    `czaty` = sparowane konta person i dodatkowe {nazwa, username}; obce ignorowane; `czat_dla(konto)`,
+                    `adresaci(konto_persony)`, `status_kont()`, `blokada()`, BladSieci; limity 20 MB pobieranie / 50 MB
                     wysylka), instagram.py (3.4: Apify - rolki_z_profili/obserwowani/pobierz/pobierz_przez_apify; zrodlo klipow do
                     swapa, NIE generator - poza NAZWY, poza paskiem sald), http.py (urllib: JSON, multipart, PUT, pobierz, powtorki)
 higgsfield_cli.py   wrapper na CLI @higgsfield/cli (subprocess + --json); NIE ma tu klucza API - logowanie OAuth robi user
@@ -801,3 +803,51 @@ tests/test_wavespeed.py.
   promptach/zleceniu, skala wg wzrostu + pytania kontroli, filtr glosu bez sidechain/poglos/kodek, tagi v3, stabilnosc z zapasem i
   rotacja, ffmpeg naprawde (piki krokow -3 dB, gwar +-1,5 LU, miks, demo), dograj z miejscem, rolka bez komentarza, endpointy, panel
   bez autoplay).
+
+## 3.6.1 (2026-10-10): telefon bez autopilota + dodatkowe konta Telegram
+
+- **Po co**: user zalozyl bota @rolkipilot_bot i ma WYLACZONY autopilot (`autopilot_przy_starcie=False` - ma tak zostac). Do 3.6
+  odbior z Telegrama (parowanie po /start, filmiki do wrzutni, /status) i wysylka gotowych rolek dzialaly tylko w przebiegu
+  autopilota. Do tego: "chce tez na innych kontach to dostawac".
+- **Watek telefonu w panelu** (`app.start_telefonu` przy starcie panelu, `_petla_telefonu`, co `autopilot.ODSTEP_TELEFONU_W_TLE_S` =
+  20 s): `autopilot.telefon_w_tle()` = `obsluz_telegram(w_tle=True)` (parowanie, filmiki -> wrzutnia, glos, komendy) + `wyslij_gotowe` /
+  `wyslij_zdjecia` WSZYSTKICH person (`telegram_wysylaj`) + `raport_dnia()`. Nic nie generuje sam (poza /zdjecie zamowionym z
+  telefonu). Bez tokena nic nie robi (sprawdza co krok - token wklejony pozniej dziala bez restartu). Blad sieci (`telegram.BladSieci`:
+  status 0 / 5xx / 429) = cicha pauza 20 s -> ... -> 5 min, bez wpisow w dzienniku; inny blad (np. 401 zly token) = JEDEN wpis
+  "telegram: odbior w tle nie dziala (...)" na rodzaj bledu. `/api/zamknij` konczy watek (`stop_telefonu`). Odpowiedz na filmik przy
+  wylaczonym autopilocie: "Mam: X -> noemi (lezy we wrzutni). Autopilot jest wylaczony - rolke zrobisz w panelu (Zrob rolki)...".
+- **Bez dublowania z autopilotem**: `telegram.blokada(czekaj_s)` = RLock watkow + plik `telegram.lock` obok telegram.json (msvcrt/fcntl,
+  inny proces np. `python autopilot.py`). Watek bierze ja bez czekania (zajeta = pomija krok), autopilot czeka max
+  `CZEKAJ_NA_TELEFON_S` (30 s), potem pomija swoj odbior (watek odbierze). Pod blokada: getUpdates + obsluga, wysylka gotowych,
+  raport (sprawdzenie `ostatni_raport`). Filmik odebrany przez watek przy DZIALAJACEJ petli autopilota (`STAN["petla"]`) trafia do
+  `_ODEBRANE_W_TLE` -> `przebieg_wszystkich` robi go jak dawniej ("zrob to", takze persona bez autopilota).
+- **Dodatkowe konta**: ustawienie globalne `telegram_dodatkowe` (lista "huy7128"/id liczbowe, bez @; `telegram.normalizuj_konta`
+  przyjmuje "@a\n@b", przecinki, linki t.me, zly wpis = ValueError/400, max 20). Konto z listy paruje sie przez /start i NIGDY nie
+  zostaje czatem glownym (nawet gdy pisze pierwsze) - glownym zostaje pierwszy czat SPOZA list (persony + dodatkowe). Konto usuniete z
+  list jest dalej w `czaty`, ale jego wiadomosci sa ignorowane. Dodatkowe dostaja TO SAMO co glowny: gotowe rolki wszystkich person,
+  zdjecia, alarmy (`wyslij_na_telefon`), raport dnia (dziala tez bez czatu glownego - wystarczy dodatkowe). `/stop` `/wznow` tylko
+  glowny; `/zdjecie` (kosztuje) - glowny albo konto persony; `/raport` = odpowiedz tylko pytajacemu (`raport_dnia(wyslij=False)`).
+- **Odbiorcy** (`telegram.adresaci(konto_persony)`): czat glowny + sparowane dodatkowe + konto persony, kazde RAZ (konto glowne i
+  dodatkowe = jedna wiadomosc). ZMIANA vs 3.6: czat glowny dostaje teraz tez rolki person z wlasnym kontem. Konto persony bez /start =
+  ostrzezenie raz na uruchomienie (`_ostrzez_konto_persony`), reszta dostaje od razu, ono - po /start (okno 24 h `_swiezy`).
+  Per rzecz (pomysl / zdjecie): `telegram_do` (lista chat_id), `telegram_do_lipsync`, `telegram_bledy` {chat_id: n};
+  `telegram_wyslano` dalej = poszlo choc raz (panel). Rolki wyslane przed 3.6.1 (telegram_wyslano bez telegram_do) = zalatwione.
+  Kazde konto osobno (`_wyslij_do`): blad konta (403 zablokowal bota itp.) = wpis "telegram: nie wyslalem rolki #N do @x (...)" i dalej
+  do reszty, po `MAX_PROB_WYSYLKI` (3) to konto pomijamy przy tej rzeczy; BladSieci = w gore (cicha pauza, nic nie liczymy).
+  Teksty: blad jednego konta = wpis raz dziennie (`_wpis_telefonu_raz`). Watek nie wysyla rolki "wygenerowany" zmienionej w ciagu
+  15 min (`ODCZEKAJ_SUROWY_S` - moze byc surowa tuz przed Media Tool); autopilot jak dawniej. Reczne "Wyslij na telefon" (akcja
+  `telegram_wyslij`) = ci sami odbiorcy.
+- **Odpowiedzi po /start**: glowny "Polaczono - tu beda gotowe rolki, alarmy i raport dnia. /pomoc = komendy", dodatkowe "Polaczono
+  jako dodatkowe konto - dostaniesz gotowe rolki i alarmy", persona "Polaczono z persona <Nazwa>"; nowe konto = info na czat glowny
+  ("Konto @x sparowane ..."). /pomoc = pelna lista komend. Obce czaty - zero odpowiedzi.
+- **Panel** (Ustawienia -> Konta -> Telefon): link do bota (`telegram.bot_info()` = getMe, cache 10 min) "otworz i kliknij Start",
+  lista stanow (czat glowny, kazde dodatkowe, konta person: polaczone / czeka na /start), stan odbioru, pole "Dodatkowe konta (po
+  jednym @ w linii)" + "Zapisz konta", "Wyslij test" (do wszystkich polaczonych), w trybie pelnym "Odlacz czat glowny"
+  (`telegram.rozparuj_glowny`). API: `GET/POST /api/telegram`, `POST /api/telegram/test`, `POST /api/telegram/rozparuj` (API.md).
+- Token bota nigdy w komunikatach (`telegram._bez_tokena`, `_opis`). Wersja 3.6.1.
+- Testy: tests/test_telegram_361.py (watek przy wylaczonym autopilocie + reczna rolka na telefon, bez tokena nic, blokada w obie
+  strony bez drugiego getUpdates, watek + przebiegi naraz bez duplikatow, filmik z watku -> przebieg petli, blad sieci = cisza i
+  powrot, inny blad = 1 wpis, parowanie dodatkowego (takze pierwszego i po id), odpowiedzi po /start, obcy i usuniety z listy
+  ignorowani, komendy wlasciciela, normalizacja kont, wysylka glowny+dodatkowe+persona bez duplikatow (rolki, zdjecia, alarm, raport),
+  blad jednego konta / max 3 proby / siec, stare wyslane nie ida drugi raz, surowa rolka w watku, API status/zapis/test/rozparuj,
+  /api/stan 3.6.1 z wylaczonym autopilotem). Stare testy Telegrama poprawione pod nowe teksty i odbiorcow.

@@ -36,7 +36,7 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0                 # po aktualizacji pr
 
 # ROLKI_PORT w env = inny port (np. druga kopia programu do testow obok dzialajacego panelu); skroty/.bat zakladaja 5077
 PORT = int(os.environ.get("ROLKI_PORT") or 5077)
-WERSJA = "3.6"
+WERSJA = "3.6.1"
 CACHE_SALDA_S = 60
 CACHE_MODELI_S = 600
 
@@ -182,6 +182,70 @@ def autopilot_przy_starcie():
 
 def _stan_autopilota():
     return dict(autopilot.STAN, wlaczony=_autopilot_wlaczony())
+
+
+# ---------------- telefon (Telegram) w tle - NIEZALEZNIE od autopilota (3.6.1) ----------------
+# Lekki watek: co autopilot.ODSTEP_TELEFONU_W_TLE_S (20 s) autopilot.telefon_w_tle() - parowanie po /start, filmiki z telefonu do
+# wrzutni, komendy (/status...), gotowe rolki/zdjecia na telefon i raport dnia. Bez tokena bota nic nie robi (sprawdza co krok,
+# wiec token wklejony pozniej w Konta zadziala bez restartu). Wspolna blokada z autopilotem (telegram.blokada): gdy autopilot
+# robi swoj krok telefonu, ten krok jest pomijany. Blad sieci = cicha pauza (20 s -> ... -> 5 min) bez wpisow w dzienniku;
+# inny blad (np. zly token) = jeden wpis na rodzaj bledu. Zamkniecie panelu konczy watek.
+
+_telefon = {"watek": None, "stop": threading.Event(), "ostatni": None, "blad": None, "bledy_z_rzedu": 0, "zgloszony": None}
+PAUZA_TELEFONU_MAX_S = 300
+
+
+def _log_telefonu(msg):
+    print(time.strftime("%H:%M:%S"), "[telefon]", msg, flush=True)
+
+
+def _krok_telefonu():
+    """Jeden krok watku. Zwraca pauze (s) do nastepnego."""
+    from dostawcy import telegram
+    odstep = autopilot.ODSTEP_TELEFONU_W_TLE_S
+    try:
+        autopilot.telefon_w_tle(log=_log_telefonu)
+    except Exception as e:
+        n = _telefon["bledy_z_rzedu"] + 1
+        _telefon.update(blad=str(e), bledy_z_rzedu=n)
+        if not isinstance(e, telegram.BladSieci) and str(e) != _telefon.get("zgloszony"):
+            _telefon["zgloszony"] = str(e)
+            baza.dziennik_zapisz("uwaga", f"telegram: odbior w tle nie dziala ({e}) - probuje dalej co chwile")
+        return min(odstep * 2 ** min(n, 4), PAUZA_TELEFONU_MAX_S)
+    _telefon.update(ostatni=time.time(), blad=None, bledy_z_rzedu=0, zgloszony=None)
+    return odstep
+
+
+def _petla_telefonu(stop, pierwsza_pauza=3.0):
+    pauza = pierwsza_pauza
+    while not stop.wait(pauza):
+        try:
+            pauza = _krok_telefonu()
+        except BaseException as e:      # watek nie moze umrzec po cichu
+            _log_telefonu(f"blad watku telefonu: {type(e).__name__}: {e}")
+            pauza = PAUZA_TELEFONU_MAX_S
+
+
+def telefon_dziala():
+    w = _telefon["watek"]
+    return bool(w and w.is_alive())
+
+
+def start_telefonu(pierwsza_pauza=3.0):
+    """Start panelu: watek odbioru Telegrama (niezalezny od autopilota). Drugi start nic nie robi."""
+    if telefon_dziala():
+        return
+    _telefon["stop"] = threading.Event()
+    w = threading.Thread(target=_petla_telefonu, args=(_telefon["stop"], pierwsza_pauza), daemon=True, name="telefon")
+    _telefon["watek"] = w
+    w.start()
+
+
+def stop_telefonu(czekaj_s=0):
+    _telefon["stop"].set()
+    w = _telefon["watek"]
+    if w and czekaj_s:
+        w.join(czekaj_s)
 
 
 # ---------------- cache sald i modeli ----------------
@@ -1079,21 +1143,41 @@ def _funkcja_akcji(typ, slug, dane):
         plik = p.get("lipsync_plik") if p.get("lipsync_plik") and os.path.isfile(p["lipsync_plik"] or "") else p.get("plik_wynikowy")
         if not plik or not os.path.isfile(plik):
             raise ValueError("Ta rolka nie ma jeszcze gotowego pliku.")
-        if not telegram.sparowany():
+        if not telegram.skonfigurowany():
             raise ValueError("Telegram nie jest sparowany - napisz /start do bota na telefonie.")
-        konto = (baza.ustawienia_modelki(slug).get("telegram_czat") or "").strip()
-        cid, opis = telegram.czat_dla(konto)
-        if not cid:
-            raise ValueError(f"Konto {konto} tej persony nie napisalo jeszcze /start do bota ({opis}).")
+        # 3.6.1: to samo co wysylka automatyczna - czat glowny + konta dodatkowe + konto persony, kazde raz i osobno
+        lista, brak = telegram.adresaci(baza.ustawienia_modelki(slug).get("telegram_czat"))
+        if not lista:
+            raise ValueError("Telegram nie jest sparowany - napisz /start do bota na telefonie."
+                             + (f" (konto persony: {brak})" if brak else ""))
 
         z_lipsynciem = plik == p.get("lipsync_plik")
 
         def _wyslij(log, stop):
-            telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "")
-                                  + (f"\n\n{p['podpis']}" if p.get("podpis") else ""), chat_id=cid)
-            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True, **({"telegram_wyslano_lipsync": True} if z_lipsynciem else {}))
-            log(f"wyslalem #{p['id']} na Telegram ({opis})")
-            return {"wyslano": p["id"], "czat": opis}
+            udane, bledy = [], []
+            for a in lista:
+                try:
+                    telegram.wyslij_wideo(plik, f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "")
+                                          + (f"\n\n{p['podpis']}" if p.get("podpis") else ""), chat_id=a["chat_id"])
+                    udane.append(a)
+                except Exception as e:
+                    bledy.append(f"{a['nazwa']}: {e}")
+                    log(f"nie wyslalem #{p['id']} do {a['nazwa']}: {e}")
+                    baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem rolki #{p['id']} do {a['nazwa']} ({e})", modelka=slug)
+            if not udane:
+                raise ValueError("Nie wyslalem na zadne konto: " + "; ".join(bledy))
+            akt = baza.pomysl(slug, p["id"])
+            pola = {"telegram_wyslano": True, "telegram_do": list(akt.get("telegram_do") or [])}
+            if z_lipsynciem:
+                pola.update(telegram_wyslano_lipsync=True, telegram_do_lipsync=list(akt.get("telegram_do_lipsync") or []))
+            for a in udane:
+                for pole in ("telegram_do", "telegram_do_lipsync"):
+                    if pole in pola and str(a["chat_id"]) not in pola[pole]:
+                        pola[pole].append(str(a["chat_id"]))
+            baza.aktualizuj_pomysl(slug, p["id"], **pola)
+            opis = ", ".join(a["nazwa"] for a in udane)
+            log(f"wyslalem #{p['id']} na Telegram ({opis})" + (f"; konto persony czeka: {brak}" if brak else ""))
+            return {"wyslano": p["id"], "czat": opis, "konta": len(udane), "bledy": bledy}
         return _wyslij
     raise ValueError(f"Nieznana akcja '{typ}'.")
 
@@ -1285,6 +1369,9 @@ def api_zapisz_ustawienia_globalne():
                 zmiany[k] = autopilot.sprawdz_ustawienia_rolki_ig(v)
             elif k == "pierwsza_klatka":
                 zmiany[k] = pierwsza_klatka.sprawdz_ustawienia(v)
+            elif k == "telegram_dodatkowe":
+                from dostawcy import telegram
+                zmiany[k] = telegram.normalizuj_konta(v)
             else:
                 return _blad(f"Nieznane ustawienie: {k}")
     except (TypeError, ValueError) as e:
@@ -1367,7 +1454,8 @@ JAK_LOGOWAC = {
     "openrouter": "https://openrouter.ai/keys -> Create key (konto przez Google/GitHub, BEZ weryfikacji dowodem, bez doladowania - "
                   "asystent uzywa tylko darmowych modeli). Klucz zaczyna sie od sk-or-",
     "telegram": "W Telegramie napisz do @BotFather: /newbot, nadaj nazwe -> dostaniesz token. Wklej go tu. "
-                "Potem napisz do swojego bota /start - od tej chwili wysylasz mu filmiki, a on odsyla gotowe rolki.",
+                "Potem napisz do swojego bota /start - od tej chwili wysylasz mu filmiki, a on odsyla gotowe rolki. "
+                "Dodatkowe konta (po jednym @ w linii) tez musza raz kliknac Start u bota. Telefon dziala tez przy wylaczonym autopilocie.",
     "apify": "console.apify.com -> zaloz darmowe konto (Google/GitHub, bez karty) -> Settings -> Integrations/API -> "
              "Personal API tokens -> skopiuj token. Apify pobiera za Ciebie najnowsze rolki z publicznych profili IG "
              "(scrape po ich stronie - omija Twoj VPN, nie dotyka Twojego konta). Darmowy limit wystarcza na kilka rolek dziennie.",
@@ -1394,6 +1482,84 @@ def _konta_pelne():
 @app.route("/api/konta")
 def api_konta():
     return _ok(konta=_konta_pelne())
+
+
+# ---------------- telefon: konta Telegram (3.6.1) ----------------
+
+def _telegram_dla_panelu(z_botem=True):
+    """Konta -> Telegram: link do bota (getMe, cache 10 min), czat glowny, konta dodatkowe i konta person (polaczone / czeka na
+    /start), stan watku odbioru."""
+    from dostawcy import telegram
+    wynik = {"skonfigurowany": telegram.skonfigurowany(), "bot": None, "bot_blad": None,
+             "odbior": {"dziala": telefon_dziala(), "ostatni": _telefon.get("ostatni"),
+                        "blad": _telefon.get("blad"), "autopilot": _autopilot_wlaczony()}}
+    wynik.update(telegram.status_kont())
+    if z_botem and wynik["skonfigurowany"]:
+        try:
+            wynik["bot"] = telegram.bot_info()
+        except Exception as e:
+            wynik["bot_blad"] = str(e)
+    return wynik
+
+
+@app.route("/api/telegram")
+def api_telegram():
+    return _ok(telegram=_telegram_dla_panelu())
+
+
+@app.route("/api/telegram", methods=["POST"])
+def api_telegram_zapisz():
+    """{"dodatkowe": ["@a", "b"] | "@a\\n@b"} - dodatkowe konta Telegram (ustawienie globalne telegram_dodatkowe)."""
+    from dostawcy import telegram
+    dane = request.json or {}
+    if "dodatkowe" not in dane:
+        return _blad("Podaj dodatkowe konta (lista albo tekst, po jednym @ w linii).")
+    try:
+        konta = telegram.normalizuj_konta(dane.get("dodatkowe"))
+    except ValueError as e:
+        return _blad(e)
+    baza.zapisz_ustawienia_globalne(telegram_dodatkowe=konta)
+    baza.dziennik_zapisz("info", "telefon: dodatkowe konta Telegram: " + (", ".join("@" + k if not k.lstrip("-").isdigit() else k
+                                                                             for k in konta) or "brak"))
+    return _ok(telegram=_telegram_dla_panelu())
+
+
+@app.route("/api/telegram/test", methods=["POST"])
+def api_telegram_test():
+    """"Wyslij test": krotka wiadomosc na KAZDE polaczone konto (czat glowny, dodatkowe, konta person) - kazde osobno."""
+    from dostawcy import telegram
+    if not telegram.skonfigurowany():
+        return _blad("Najpierw wklej token bota (Konta -> Telefon).")
+    lista = telegram.wszyscy_polaczeni()
+    if not lista:
+        return _blad("Zadne konto nie napisalo jeszcze /start do bota - otworz bota w Telegramie i kliknij Start.")
+    wyniki = []
+    for a in lista:
+        if a["rola"] == "glowny":
+            tekst = "rolki-ai: test - czat glowny dziala (gotowe rolki, alarmy, raport dnia)."
+        elif a["rola"] == "dodatkowe":
+            tekst = "rolki-ai: test - konto dodatkowe dziala (gotowe rolki i alarmy)."
+        else:
+            slug = a.get("persona")
+            tekst = f"rolki-ai: test - konto persony {(baza.profil_modelki(slug).get('nazwa') or slug) if slug else ''} dziala."
+        try:
+            telegram.wyslij_tekst(tekst, chat_id=a["chat_id"])
+            wyniki.append({"nazwa": a["nazwa"], "rola": a["rola"], "ok": True})
+        except Exception as e:
+            wyniki.append({"nazwa": a["nazwa"], "rola": a["rola"], "ok": False, "blad": str(e)})
+    return _ok(wyniki=wyniki, wyslane=sum(1 for w in wyniki if w["ok"]))
+
+
+@app.route("/api/telegram/rozparuj", methods=["POST"])
+def api_telegram_rozparuj():
+    """Odlacza czat glowny (np. glownym zostalo nie to konto) - nastepne konto spoza list, ktore napisze /start, bedzie glownym."""
+    from dostawcy import telegram
+    if not (request.json or {}).get("potwierdzam"):
+        return _blad("Potwierdz odlaczenie czatu glownego.")
+    stary = telegram.stan().get("czat") or ""
+    telegram.rozparuj_glowny()
+    baza.dziennik_zapisz("info", f"telefon: odlaczony czat glowny {stary} - nastepny /start spoza list zostanie glownym")
+    return _ok(telegram=_telegram_dla_panelu(z_botem=False))
 
 
 @app.route("/api/statystyki")
@@ -1902,6 +2068,7 @@ def api_zamknij():
     Rolka, ktora juz sie generuje u dostawcy, zostaje dokonczona po ponownym uruchomieniu (bez drugiej oplaty)."""
     trwa = bool(konsola.stan.get("trwa")) or fabryka.trwa_wysylanie()
     autopilot_stop()
+    stop_telefonu()
     konsola.stop.set()
     zdjecia_swap.KOLEJKA.wstrzymaj()      # nic nowego z kolejki zdjec (zostaje na nastepny start); wysylane koncza wysylanie
     if trwa:
@@ -2002,6 +2169,7 @@ def main():
     threading.Thread(target=zdjecia_swap.odswiez_schematy, daemon=True, name="schematy-swap").start()
     wznow_przy_starcie()
     start_kolejki_zdjec()
+    start_telefonu()        # 3.6.1: Telegram (parowanie, filmiki, komendy, gotowe rolki) dziala tez przy wylaczonym autopilocie
     if "--autopilot" in sys.argv:
         if autopilot_przy_starcie():
             autopilot_start()

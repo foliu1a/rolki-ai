@@ -96,17 +96,19 @@ def test_telegram_konto_persony(tg, modelka, cli, bez_ffmpeg):
     _wiad(tg, 555, "huy7128", text="/start")          # konto persony noemi - paruje sie
     z = autopilot.obsluz_telegram()
     assert [w[1]["chat_id"] for w in tg.wyslane] == [777, 555, 777]   # powitanie glownego, powitanie persony, info dla glownego
-    assert "persony noemi" in tg.wyslane[1][1]["text"] and "huy7128 sparowane" in tg.wyslane[2][1]["text"]
+    assert tg.wyslane[1][1]["text"] == "Polaczono z persona Noemi" and "huy7128 sparowane" in tg.wyslane[2][1]["text"]
     assert len(z) == 2 and telegram.stan()["chat_id"] == 777
-    assert telegram.czaty() == {"777": {"nazwa": "yux", "glowny": True}, "555": {"nazwa": "huy7128", "glowny": False}}
+    assert telegram.czaty() == {"777": {"nazwa": "yux", "username": "yux", "glowny": True},
+                                "555": {"nazwa": "huy7128", "username": "huy7128", "glowny": False}}
     assert telegram.czat_dla("@HUY7128") == (555, "huy7128") and telegram.czat_dla("") == (777, "yux")
     assert telegram.czat_dla("@nikt")[0] is None
     assert "konta person: @huy7128" in telegram.gotowy()[1]
-    # gotowa rolka noemi -> czat persony (555), nie glowny
+    # gotowa rolka noemi -> czat glowny (777) I konto persony (555), kazde raz (3.6.1)
     open(os.path.join(baza.folder_zrodel(modelka), "a.mp4"), "wb").write(b"v")
     w = autopilot.przebieg(modelka)
     assert w["wygenerowane"] == 1 and w["wyslane"] == 1
-    assert tg.pliki[-1][0] == "sendVideo" and tg.pliki[-1][1]["chat_id"] == "555"
+    assert [(m, p["chat_id"]) for m, p, _ in tg.pliki] == [("sendVideo", "777"), ("sendVideo", "555")]
+    assert baza.pomysl(modelka, 1)["telegram_do"] == ["777", "555"]
     # /stop z konta persony - odmowa; /status - dziala i odpowiada na ten czat
     _wiad(tg, 555, "huy7128", text="/stop")
     _wiad(tg, 555, "huy7128", text="/status")
@@ -127,16 +129,17 @@ def test_telegram_konto_persony_bez_start_czeka(tg, modelka, cli, bez_ffmpeg):
     open(os.path.join(baza.folder_zrodel(modelka), "a.mp4"), "wb").write(b"v")
     autopilot._OSTRZEZENIA.clear()
     w = autopilot.przebieg(modelka)
-    assert w["wygenerowane"] == 1 and w["wyslane"] == 0 and tg.pliki == []
+    # 3.6.1: czat glowny dostaje rolke od razu, konto persony czeka na /start (ostrzezenie na czat glowny)
+    assert w["wygenerowane"] == 1 and w["wyslane"] == 1 and [p["chat_id"] for _, p, _ in tg.pliki] == ["777"]
     assert "nie napisal jeszcze /start" in tg.wyslane[-1][1]["text"] and tg.wyslane[-1][1]["chat_id"] == 777
-    assert baza.pomysl(modelka, 1).get("telegram_wyslano") is None
+    assert baza.pomysl(modelka, 1)["telegram_do"] == ["777"]
     ile = len(tg.wyslane)
-    autopilot.przebieg(modelka)
-    assert len(tg.wyslane) == ile                      # ostrzezenie tylko raz
-    # konto pisze /start -> kolejny przebieg wysyla zalegla rolke
+    assert autopilot.przebieg(modelka)["wyslane"] == 0
+    assert len(tg.wyslane) == ile and len(tg.pliki) == 1   # ostrzezenie tylko raz, czat glowny nie dostaje drugi raz
+    # konto pisze /start -> kolejny przebieg wysyla zalegla rolke TYLKO na to konto
     _wiad(tg, 555, "huy7128", text="/start")
     autopilot.obsluz_telegram()
-    assert autopilot.przebieg(modelka)["wyslane"] == 1 and tg.pliki[-1][1]["chat_id"] == "555"
+    assert autopilot.przebieg(modelka)["wyslane"] == 1 and [p["chat_id"] for _, p, _ in tg.pliki] == ["777", "555"]
     d = {w["co"]: w for w in fabryka.diagnoza()}
     assert d[f"telefon {modelka}"]["ok"] is True and d[f"foldery {modelka}"]["ok"] is True
 
@@ -153,13 +156,16 @@ def test_api_telegram_wyslij_na_konto_persony(tg, modelka, cli, bez_ffmpeg):
     open(plik, "wb").write(b"v")
     baza.aktualizuj_pomysl(modelka, pid, status="gotowe", plik_wynikowy=plik)
     with panel.app.test_client() as c:
-        r = c.post("/api/akcja", json={"typ": "telegram_wyslij", "id": pid})
-        assert r.status_code == 400 and "/start" in r.get_json()["blad"]
+        # 3.6.1: konto persony bez /start - rolka idzie na czat glowny (i dodatkowe), konto persony dostanie ja po /start
+        assert c.post("/api/akcja", json={"typ": "telegram_wyslij", "id": pid}).status_code == 200
+        panel.konsola.watek.join(5)
+        assert [p["chat_id"] for _, p, _ in tg.pliki] == ["777"]
         _wiad(tg, 555, "huy7128", text="/start")
         autopilot.obsluz_telegram()
         assert c.post("/api/akcja", json={"typ": "telegram_wyslij", "id": pid}).status_code == 200
         panel.konsola.watek.join(5)
-        assert tg.pliki[-1][1]["chat_id"] == "555"
+        assert [p["chat_id"] for _, p, _ in tg.pliki] == ["777", "777", "555"]
+        assert baza.pomysl(modelka, pid)["telegram_do"] == ["777", "555"]
         assert [x["nazwa"] for x in c.get("/api/stan").get_json()["telegram"]["czaty"]] == ["yux", "huy7128"]
 
 

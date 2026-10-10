@@ -85,7 +85,8 @@ def test_telegram_parowanie_i_komendy(tg, modelka):
     zrobione = autopilot.obsluz_telegram()
     assert [z["tekst"] for z in zrobione] == ["/start", "/status"]
     assert telegram.sparowany() and telegram.stan()["chat_id"] == 777 and telegram.stan()["czat"] == "yux"
-    assert "Sparowane" in tg.wyslane[0][1]["text"] and tg.wyslane[0][1]["chat_id"] == 777
+    assert tg.wyslane[0][1]["text"] == "Polaczono - tu beda gotowe rolki, alarmy i raport dnia. /pomoc = komendy"
+    assert tg.wyslane[0][1]["chat_id"] == 777
     assert "noemi: czeka 0" in tg.wyslane[1][1]["text"]
     assert telegram.gotowy()[1].endswith("sparowany z czatem yux")
     # offset: drugi odbior nie powtarza

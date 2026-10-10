@@ -206,6 +206,8 @@ const SLOWNIK_BLEDOW = [
   [/telegram nie jest sparowany|brak sparowanego czatu|nie jest sparowany/i, 'Najpierw napisz /start do bota na telefonie.'],
   [/ponad 20 ?MB|plik za du[zż]y dla telegrama/i, 'Plik za duży dla Telegrama (max 20 MB).'],
   [/brak tokena bota/i, 'Podłącz telefon: wklej token bota w Ustawienia → Konta.'],
+  [/bot was blocked by the user/i, 'To konto zablokowało bota – odblokuj go w Telegramie i kliknij Start.'],
+  [/chat not found|bot can't initiate conversation/i, 'Bot nie może pisać do tego konta – niech raz otworzy bota i kliknie Start.'],
   [/dzienny limit WaveSpeed nie jest ustawiony|brak limitu dziennego wavespeed/i, 'Ustaw dzienny limit WaveSpeed (Ustawienia → Limity, tryb pełny) – bez niego fabryka nic tam nie wyda.'],
   [/WaveSpeed: za malo pieniedzy|insufficient.credits/i, 'Za mało pieniędzy na koncie WaveSpeed – doładuj je (wavespeed.ai → Billing).'],
   [/WaveSpeed odrzucil tresc|moderacja WaveSpeed/i, 'Odrzucone przez moderację WaveSpeed (NSFW) – filtr nie patrzy na kontekst.'],
@@ -352,8 +354,9 @@ function prostyTekstWpisu(w) {
   if (/^autopilot wznowiony z telefonu/.test(t)) return 'Autopilot wznowiony z telefonu (/wznow).';
   if ((m = t.match(/^z telefonu: glos (.*)$/))) return `Z telefonu przyszło nagranie głosu: ${m[1]}`;
   if ((m = t.match(/^z telefonu: (.*?) -> wrzutnia (\S+)/))) return `Z telefonu przyszedł filmik ${m[1]} (do ${m[2]})`;
-  if ((m = t.match(/^telegram: nie wyslalem rolki #(\d+) \((.*)\)$/))) return `Nie udało się wysłać rolki #${m[1]} na telefon: ${prostyBlad(m[2])}`;
-  if ((m = t.match(/^telegram: nie wyslalem wiadomosci \((.*)\)$/))) return `Nie udało się wysłać wiadomości na telefon: ${prostyBlad(m[1])}`;
+  if ((m = t.match(/^telegram: nie wyslalem (rolki|zdjecia) #(\d+)(?: do (\S+))? \((.*)\)( - wiecej nie probuje)?$/))) return `Nie udało się wysłać ${m[1] === 'rolki' ? 'rolki' : 'zdjęcia'} #${m[2]} na telefon${m[3] ? ' (' + m[3] + ')' : ''}: ${prostyBlad(m[4])}${m[5] ? ' – więcej nie próbuję' : ''}`;
+  if ((m = t.match(/^telegram: nie wyslalem wiadomosci(?: do (\S+))? \((.*)\)$/))) return `Nie udało się wysłać wiadomości na telefon${m[1] ? ' (' + m[1] + ')' : ''}: ${prostyBlad(m[2])}`;
+  if ((m = t.match(/^telegram: odbior w tle nie dziala \((.*)\)/))) return `Telefon (Telegram): odbiór wiadomości nie działa – ${prostyBlad(m[1])}. Próbuję dalej sam.`;
   if ((m = t.match(/^telegram: (.*)$/))) return `Telefon (Telegram): ${prostyBlad(m[1])}`;
   if (/^autopilot wlaczony/.test(t)) return 'Autopilot włączony';
   if (/^autopilot wylaczony/.test(t)) return 'Autopilot wyłączony';
@@ -445,7 +448,7 @@ const state = {
   ocenaOtwarta: new Set(), ocenaSzkic: {},   // 3.6: rolki z otwartym polem „Co wyszło źle?” / „Co było dobre?” + niezapisany tekst
   pamiec: null,          // 3.6: „Asystent pamięta” (poprawki z uwag usera) – /api/asystent/pamiec
   // reszta stron
-  zdjecia: [], zdjeciaJson: '', lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {},
+  zdjecia: [], zdjeciaJson: '', lipsync: [], ustawieniaPelne: null, budzet: null, kontaPelne: null, testyKont: {}, telegramKonta: null,
   teksty: [], szablony: [], dziennik: [], historiaFiltr: 'wszystko',
   listy: {},             // cache list modeli/głosów: zapytanie -> {czas, pozycje, blad}
   konsola: { otwarta: false, logOd: 0, start: null, trwalo: false, timer: null, sprawdzanie: false, linie: [], oczekujacy: [] },
@@ -3760,12 +3763,12 @@ function renderStanKontaTelegram(v) {
   if (!el) return;
   const konto = kontoTelegram(v);
   const t = state.telegram || {};
-  if (!konto) { el.textContent = t.sparowany ? `Rolki tej persony lecą na Twój główny czat${t.czat ? ` (${t.czat})` : ''}.` : ''; el.className = 'pole-info'; return; }
+  if (!konto) { el.textContent = t.sparowany ? `Rolki tej persony lecą na Twój główny czat${t.czat ? ` (${t.czat})` : ''} i dodatkowe konta.` : ''; el.className = 'pole-info'; return; }
   const czaty = Array.isArray(t.czaty) ? t.czaty : [];
   const jest = czaty.some(c => kontoTelegram(c.nazwa).toLowerCase() === konto.toLowerCase());
   if (!t.skonfigurowany) { el.textContent = 'Bot Telegram nie jest jeszcze podłączony – wklej token w Ustawienia → Konta.'; el.className = 'pole-info zle'; }
-  else if (jest) { el.textContent = `${konto} jest sparowane z botem ✓ – gotowe rolki tej persony polecą tam.`; el.className = 'pole-info ok'; }
-  else { el.textContent = `${konto} nie napisało jeszcze /start do bota – gotowe rolki poczekają (dostaniesz o tym wiadomość na główny czat) i polecą tam, gdy to konto napisze /start.`; el.className = 'pole-info zle'; }
+  else if (jest) { el.textContent = `${konto} jest sparowane z botem ✓ – gotowe rolki tej persony polecą tam (i jak zawsze na czat główny oraz dodatkowe konta).`; el.className = 'pole-info ok'; }
+  else { el.textContent = `${konto} nie napisało jeszcze /start do bota – czat główny i dodatkowe konta dostają rolki już teraz, a to konto dostanie je, gdy kliknie Start u bota.`; el.className = 'pole-info zle'; }
 }
 
 async function zapiszProfil(f) {
@@ -3825,6 +3828,97 @@ async function ladujKonta() {
   const d = await api('/api/konta');
   state.kontaPelne = d.konta || {};
   renderKonta();
+  ladujTelegramKonta();     // osobno – sprawdza bota (getMe), nie blokuje reszty kont
+}
+
+// ---------- Konta → Telefon: konta Telegram (3.6.1) ----------
+async function ladujTelegramKonta() {
+  if (!(state.kontaPelne && state.kontaPelne.telegram && state.kontaPelne.telegram.jest)) return;
+  try {
+    const d = await api('/api/telegram');
+    ustawTelegramKonta(d.telegram);
+  } catch (e) { /* stan kont to dodatek – bez niego karta działa jak dawniej */ }
+}
+
+// Pierwsze dane: cała karta (pole z kontami dostaje wartość); później tylko lista stanów – nie kasujemy tego, co user pisze.
+function ustawTelegramKonta(t) {
+  const pierwszy = !state.telegramKonta;
+  state.telegramKonta = t || null;
+  const pole = $('#tg-dodatkowe');
+  if (pierwszy || !pole || pole.disabled) { renderKonta(); return; }
+  const el = $('#tg-konta');
+  if (el) el.innerHTML = htmlTelegramKonta(state.telegramKonta);
+}
+
+function wierszKontaTg(klasa, etykieta, stan) {
+  return `<li><span class="kropka ${klasa}"></span><span>${etykieta}</span><span class="tg-stan ${klasa}">${esc(stan)}</span></li>`;
+}
+
+function htmlTelegramKonta(t) {
+  if (!t) return '<div class="muted">Sprawdzam bota i konta…</div>';
+  const bot = t.bot && t.bot.username
+    ? `<div class="tg-bot">Twój bot: <a href="${esc(t.bot.link)}" target="_blank" rel="noopener">t.me/${esc(t.bot.username)}</a> – otwórz i kliknij <b>Start</b> (na każdym koncie, które ma dostawać rolki).</div>`
+    : (t.bot_blad ? `<div class="konto-powod">Nie mogę sprawdzić bota: ${esc(prostyBlad(t.bot_blad))}</div>` : '');
+  const w = [];
+  w.push(t.glowny
+    ? wierszKontaTg('ok', `Czat główny: <b>${esc(kontoTelegram(t.glowny.nazwa) || t.glowny.nazwa)}</b>`, 'połączone')
+    : wierszKontaTg('uwaga', 'Czat główny', 'czeka na /start – otwórz bota na swoim głównym koncie i kliknij Start'));
+  for (const d of t.dodatkowe || []) {
+    w.push(wierszKontaTg(d.polaczone ? 'ok' : 'uwaga', `Dodatkowe: <b>${esc(kontoTelegram(d.konto))}</b>`,
+      d.polaczone ? (d.glowny ? 'połączone (to też czat główny – wiadomość przyjdzie raz)' : 'połączone') : 'czeka na /start'));
+  }
+  for (const p of t.persony || []) {
+    w.push(wierszKontaTg(p.polaczone ? 'ok' : 'uwaga', `Persona ${esc(p.persona)}: <b>${esc(kontoTelegram(p.konto))}</b>`,
+      p.polaczone ? 'połączone' : 'czeka na /start'));
+  }
+  const o = t.odbior || {};
+  const odbior = !o.dziala ? 'Odbiór wiadomości z telefonu nie działa – uruchom panel ponownie.'
+    : (o.blad ? 'Odbiór z telefonu: chwilowo brak połączenia z Telegramem – ponawiam sam.'
+      : `Odbiór z telefonu działa${o.autopilot ? '' : ' (także przy wyłączonym autopilocie)'}.`);
+  return `${bot}<ul class="tg-lista">${w.join('')}</ul><div class="konto-czaty">${esc(odbior)} Osobne konto dla persony wpisujesz w <a href="#ustawienia/persona">Persona → Konto Telegram</a>.</div>`;
+}
+
+async function zapiszDodatkoweTelegram(f) {
+  const pole = f.querySelector('textarea[name="dodatkowe"]');
+  const btn = f.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/telegram', 'POST', { dodatkowe: pole ? pole.value : '' });
+    state.telegramKonta = null;          // pełne przerysowanie z nowymi kontami
+    ustawTelegramKonta(d.telegram);
+    const ile = ((d.telegram || {}).dodatkowe || []).length;
+    toast(ile ? `Zapisane. ${ile} ${odmiana(ile, 'dodatkowe konto', 'dodatkowe konta', 'dodatkowych kont')} – każde musi raz kliknąć Start u bota.` : 'Zapisane – bez dodatkowych kont.', 'ok');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function testTelegramu(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api('/api/telegram/test', 'POST', {});
+    const zle = (d.wyniki || []).filter(w => !w.ok);
+    const ok = (d.wyniki || []).filter(w => w.ok).map(w => kontoTelegram(w.nazwa) || w.nazwa);
+    toast(`Test wysłany na ${ok.length} ${odmiana(ok.length, 'konto', 'konta', 'kont')}${ok.length ? ': ' + ok.join(', ') : ''}.`
+      + (zle.length ? ` Nie doszło: ${zle.map(w => `${kontoTelegram(w.nazwa) || w.nazwa} (${prostyBlad(w.blad || '')})`).join(', ')}.` : ''), zle.length ? 'uwaga' : 'ok');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function rozparujTelegram() {
+  const w = await potwierdz({
+    tytul: 'Odłączyć czat główny?',
+    tresc: '<p>Następne konto <b>spoza listy</b> (nie dodatkowe i nie konto persony), które kliknie Start u bota, zostanie czatem głównym. Konta dodatkowe i konta person zostają.</p>',
+    ok: 'Odłącz', klasa: 'btn-zly',
+  });
+  if (!w) return;
+  const d = await api('/api/telegram/rozparuj', 'POST', { potwierdzam: true });
+  state.telegramKonta = null;
+  ustawTelegramKonta(d.telegram);
+  toast('Czat główny odłączony – otwórz bota na właściwym koncie i kliknij Start.', 'ok');
+  ladujTelegramKonta();
+  odswiez();
 }
 
 function renderKonta() {
@@ -3840,7 +3934,7 @@ const OPISY_KONT = {
   wavespeed: 'Tańsze rolki w 1080p (Seedance 2.5 Edit Turbo, 10 s ≈ $2,60). Płacisz dolarami z doładowania. Potrzebne, jeśli wybierzesz WaveSpeed w „Jak robić rolki” albo jako zapas po NSFW.',
   sync: 'Dopasowanie ust do głosu (lipsync) i głos z tekstu.',
   elevenlabs: 'Opcjonalnie: głos z tekstu.',
-  telegram: 'Wysyłasz botowi filmik → fabryka robi rolkę → bot odsyła gotową z podpisem. Komendy: /status, /raport, /stop, /wznow.',
+  telegram: 'Wysyłasz botowi filmik → trafia do folderu persony → bot odsyła gotowe rolki z podpisem (na główny czat, dodatkowe konta i konto persony). Działa też przy wyłączonym autopilocie. Komendy: /status, /raport, /stop, /wznow.',
   apify: 'Pobiera za Ciebie najnowsze rolki z publicznych profili IG (źródło klipów do swapa) – scrape po stronie Apify, bez logowania na Twoje konto. Profile ustawiasz w Ustawienia → Autopilot → Rolki z Instagrama.',
 };
 
@@ -3879,16 +3973,23 @@ function kartaKonta(id, k) {
     if (k.sparowany) { stanKlasa = 'ok'; stanTekst = `Sparowany z: ${k.czat || 'telefon'}`; }
     else if (k.jest) { stanKlasa = 'uwaga'; stanTekst = 'Token jest. Teraz na telefonie napisz do swojego bota: /start'; }
     else { stanKlasa = ''; stanTekst = 'nie podłączony'; }
-    // wszystkie konta, które napisały /start do bota (główny czat + konta person z ustawienia telegram_czat)
-    const czaty = Array.isArray((state.telegram || {}).czaty) ? state.telegram.czaty : [];
-    const sparowane = czaty.length
-      ? `<div class="konto-czaty">sparowane konta: ${czaty.map(c => `<b>${esc(kontoTelegram(c.nazwa) || c.nazwa)}</b>${c.glowny ? ' (główny)' : ''}`).join(', ')}.<br>Osobne konto dla persony wpisujesz w <a href="#ustawienia/persona">Persona → Konto Telegram</a> – też musi raz napisać /start.</div>`
+    // 3.6.1: link do bota + stan każdego konta (główny, dodatkowe, konta person) z /api/telegram – ładowane osobno (getMe)
+    const tk = state.telegramKonta;
+    const dodatkowe = tk && Array.isArray(tk.dodatkowe) ? tk.dodatkowe.map(d => kontoTelegram(d.konto)).join('\n') : null;
+    const kontaHtml = k.jest
+      ? `<div class="tg-konta" id="tg-konta">${htmlTelegramKonta(tk)}</div>
+        <form class="tg-dodatkowe" data-telegram-dodatkowe>
+          <label for="tg-dodatkowe">Dodatkowe konta (po jednym @ w linii)</label>
+          <textarea id="tg-dodatkowe" name="dodatkowe" rows="3" placeholder="@drugie_konto&#10;@trzecie_konto" autocomplete="off" spellcheck="false"${dodatkowe === null ? ' disabled' : ''}>${esc(dodatkowe || '')}</textarea>
+          <small class="pole-info">Dostaną to samo co czat główny: gotowe rolki wszystkich person, zdjęcia, alarmy i raport dnia. Każde konto musi raz otworzyć bota i kliknąć <b>Start</b>.</small>
+          <div class="rzad"><button class="btn btn-maly" type="submit"${dodatkowe === null ? ' disabled' : ''}>Zapisz konta</button><button class="btn btn-maly" type="button" data-akcja="telegram-test">Wyślij test</button><button class="btn btn-maly btn-tekst" type="button" data-akcja="telegram-rozparuj" data-zaawansowane title="Gdy głównym czatem zostało nie to konto">Odłącz czat główny</button></div>
+        </form>`
       : '';
-    srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}${sparowane}
+    srodek = `${k.ok === false && k.komunikat ? `<div class="konto-powod">${esc(prostyBlad(k.komunikat))}</div>` : ''}${kontaHtml}
       <ol class="kroki-lista">
         <li>W Telegramie napisz do <b>@BotFather</b>: <span class="mono">/newbot</span>, nadaj nazwę – dostaniesz <b>token</b>.</li>
         <li>Wklej token poniżej i kliknij <b>Zapisz</b>.</li>
-        <li>Na telefonie napisz do swojego bota: <span class="mono">/start</span>. Od tej chwili wysyłasz mu filmiki, a on odsyła gotowe rolki.</li>
+        <li>Otwórz swojego bota i kliknij <b>Start</b> (napisz <span class="mono">/start</span>). Od tej chwili wysyłasz mu filmiki, a on odsyła gotowe rolki – także przy wyłączonym autopilocie.</li>
       </ol>
       <div class="konto-jak" data-zaawansowane>${linkuj(k.jak || '')}${k.komunikat ? `\n${esc(k.komunikat)}` : ''}</div>
       ${k.jest ? `<div class="konto-maska" data-zaawansowane>token: ${esc(k.maska || '••••')}${k.z_env ? ' (ze zmiennej środowiskowej)' : ''}</div>` : ''}
@@ -3929,7 +4030,9 @@ async function zapiszKlucz(dostawca, klucz) {
   state.kontaPelne = d.konta || state.kontaPelne;
   delete state.testyKont[dostawca];
   toast('Klucz zapisany. Kliknij „Sprawdź”, żeby zobaczyć, czy działa.', 'ok');
+  if (dostawca === 'telegram') state.telegramKonta = null;
   renderKonta();
+  if (dostawca === 'telegram') ladujTelegramKonta();
   odswiezDiagnoze();
   odswiez();
 }
@@ -3946,6 +4049,7 @@ async function usunKlucz(dostawca) {
   state.kontaPelne = d.konta || state.kontaPelne;
   delete state.testyKont[dostawca];
   toast(telefon ? 'Token usunięty.' : 'Klucz usunięty.', 'ok');
+  if (telefon) state.telegramKonta = null;
   renderKonta();
   odswiezDiagnoze();
   odswiez();
@@ -4364,6 +4468,8 @@ document.addEventListener('click', async e => {
       case 'odswiez-listy': await odswiezListy(); break;
       case 'konto-test': await testujKonto(el.dataset.dostawca, el); break;
       case 'konto-usun': await usunKlucz(el.dataset.dostawca); break;
+      case 'telegram-test': await testTelegramu(el); break;
+      case 'telegram-rozparuj': await rozparujTelegram(); break;
       case 'losuj-tekst': await losujTekst(); break;
       case 'usun-szablon': await usunSzablon(el.dataset.nazwa); break;
       // historia
@@ -4393,6 +4499,7 @@ document.addEventListener('submit', async e => {
     else if (f.id === 'form-profil') await zapiszProfil(f);
     else if (f.id === 'form-teksty') await dodajTeksty();
     else if (f.id === 'form-szablon') await dodajSzablon();
+    else if (f.hasAttribute('data-telegram-dodatkowe')) await zapiszDodatkoweTelegram(f);
     else if (f.dataset.kontoForm) { const inp = f.querySelector('input[name="klucz"]'); await zapiszKlucz(f.dataset.kontoForm, inp.value.trim()); inp.value = ''; }
   } catch (err) {
     bladToast(err);

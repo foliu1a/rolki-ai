@@ -59,10 +59,21 @@ wrzutni, gotowych i zdjęć. Backend podaje gotowe pola `*_url` – frontend ich
   – czemu filtr treści Higgsfield/Seedance odrzuca rolki aktywnej persony. Pomysł ze statusem `blad` ma `powod`: `"nsfw"` (filtr treści),
   `"ip"` (znana postać/marka), `"inny"` albo `null`. Po dwóch odrzuceniach NSFW z rzędu fabryka nie próbuje dalej.
 - `GET /api/statystyki` → `razem.nsfw` = odrzucone przez filtr w tym okresie.
-- Telegram per persona: ustawienie `telegram_czat` (`"@huy7128"`, `""` = czat główny). Takie konto musi raz napisać `/start` do bota
-  (bot paruje tylko czat główny i konta z `telegram_czat`; obce ignoruje). Gotowe rolki/zdjęcia persony lecą na jej konto;
-  alarmy i raport – na czat główny. `/stop`, `/wznow` tylko z czatu głównego. Akcja `telegram_wyslij` wysyła na konto persony
-  (400, gdy to konto nie napisało jeszcze `/start`). `telegram.czaty` w `/api/stan` = sparowane konta.
+- Telegram per persona: ustawienie `telegram_czat` (`"@huy7128"`, `""` = brak). Takie konto musi raz napisać `/start` do bota
+  (bot paruje tylko czat główny, konta z `telegram_czat` i konta dodatkowe; obce ignoruje bez odpowiedzi). 3.6.1: gotowe rolki/zdjęcia
+  persony lecą na czat główny + konta dodatkowe + jej konto (każde raz); alarmy i raport – czat główny + dodatkowe. `/stop`, `/wznow`
+  tylko z czatu głównego (`/zdjecie` – główny albo konto persony). Akcja `telegram_wyslij` wysyła na wszystkie te konta (400 tylko,
+  gdy żadne nie jest sparowane). `telegram.czaty` w `/api/stan` = sparowane konta.
+- Telefon 3.6.1 (niezależnie od autopilota – wątek panelu co 20 s: odbiór, gotowe rolki/zdjęcia, raport dnia):
+  `GET /api/telegram` → `{"telegram": {"skonfigurowany", "bot": {"username", "link": "https://t.me/<bot>", "imie"} | null, "bot_blad",
+  "glowny": {"nazwa", "polaczone"} | null, "dodatkowe": [{"konto", "polaczone", "glowny"}], "persony": [{"slug", "persona", "konto",
+  "polaczone"}], "odbior": {"dziala", "ostatni", "blad", "autopilot"}}}`; `POST /api/telegram {"dodatkowe": ["@a", "b"] | "@a
+@b"}`
+  (ustawienie globalne `telegram_dodatkowe`, zły wpis → 400; to samo przez `POST /api/ustawienia/globalne {"telegram_dodatkowe": [...]}`);
+  `POST /api/telegram/test` → `{"wyniki": [{"nazwa", "rola": glowny|dodatkowe|persona, "ok", "blad"}], "wyslane": n}` (wiadomość
+  testowa na każde połączone konto osobno; 400 gdy żadne); `POST /api/telegram/rozparuj {"potwierdzam": true}` – odłącza czat główny
+  (następny `/start` spoza list zostaje głównym). Pomysł/zdjęcie: `telegram_do` (lista chat_id, które dostały), `telegram_do_lipsync`,
+  `telegram_bledy` ({chat_id: n} – po 3 nieudanych próbach to konto jest pomijane).
 - Autopilot NIE robi lipsyncu (`fabryka.generuj(lipsync=False)`); `lipsync_auto` (domyślnie false) działa tylko przy ręcznym „Zrób rolkę”.
 - Zdjęcia ze strojów: ustawienia `zdjecia_stroje` (bool, co drugie zdjęcie w kolejnym stroju ze `stroje/`) i `zdjecia_prompt_stroj`
   (dopisek do promptu, strój = ostatni obraz). Akcja `{"typ": "zdjecia", "stroj": "auto"|"bez"|"<plik ze stroje/>"}` (brak = automatycznie).

@@ -6,6 +6,9 @@
     z `telegram_czat` albo czat glowny) + raport dnia na telefon.
     Autopilot NIE robi lipsyncu (dopasowanie ust jest tylko recznie: panel -> Lipsync).
 
+Telefon (3.6.1): odbior z Telegrama i wysylka gotowych dziala tez BEZ autopilota - panel ma osobny lekki watek
+(telefon_w_tle co 20 s); autopilot dzieli z nim jedna blokade (telegram.blokada), wiec nic nie idzie dwa razy.
+
 Uzycie:  python autopilot.py            petla (co `autopilot_co_minut` z ustawien; z Telegramem co minute; Ctrl+C konczy)
          python autopilot.py --raz      jeden przebieg i koniec (np. z Harmonogramu zadan Windows)
          python autopilot.py --modelka noemi --raz
@@ -32,9 +35,18 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(errors="replace")
 
 STAN = {"trwa": False, "ostatni": None, "nastepny": None, "modelka": None, "etap": "", "przebiegi": 0,
-        "telegram_wiadomosci": 0, "opis": ""}   # opis: co dokladnie robi (widget Pierdolkomat), np. "robię rolkę z promptu: Noemi, ..."
+        "telegram_wiadomosci": 0, "opis": "", "petla": False}   # opis: co dokladnie robi (widget Pierdolkomat), np. "robię rolkę z promptu: Noemi, ..."
 _OSTRZEZENIA = set()            # ostrzezenia wyslane raz na uruchomienie (np. konto persony bez /start)
 ODSTEP_TELEGRAM_S = 60          # z telefonem sprawdzamy wiadomosci co minute
+# 3.6.1: telefon dziala tez przy WYLACZONYM autopilocie - watek panelu (app.start_telefonu) co ODSTEP_TELEFONU_W_TLE_S robi
+# telefon_w_tle(): odbior (parowanie, filmiki do wrzutni, komendy), wysylka gotowych rolek/zdjec i raport dnia. Jedna blokada
+# (telegram.blokada) z krokiem "telefon" autopilota: nigdy dwa getUpdates naraz ani ta sama rolka wyslana dwa razy.
+ODSTEP_TELEFONU_W_TLE_S = 20
+CZEKAJ_NA_TELEFON_S = 30        # autopilot czeka max tyle na watek panelu, potem pomija swoj krok telefonu (watek go zrobi)
+MAX_PROB_WYSYLKI = 3            # nieudane wysylki jednej rolki/zdjecia na jedno konto (nie siec) - potem to konto pomijamy
+ODCZEKAJ_SUROWY_S = 15 * 60     # watek w tle: rolka "wygenerowany" (jeszcze przed Media Tool?) idzie dopiero po 15 min bez zmian
+_ODEBRANE_W_TLE = []            # filmiki odebrane przez watek panelu przy dzialajacej petli autopilota -> "zrob to" w przebiegu
+_odebrane_lock = threading.Lock()
 RAPORT_GODZINA = 20             # raport dnia na telefon po tej godzinie (lokalnie)
 POMOC = ("Jestem fabryka rolek.\n"
          "- Wyslij mi filmik (mp4) - zrobie z niego rolke i odesle gotowa. W podpisie mozesz wpisac nazwe persony.\n"
@@ -64,27 +76,70 @@ def _telegram():
     return telegram if telegram.skonfigurowany() else None
 
 
+_WPISY_TELEFONU = {"dzien": None, "wpisy": set()}
+
+
+def _wpis_telefonu_raz(klucz, tekst, modelka=None):
+    """Wpis "uwaga" w dzienniku raz dziennie dla klucza (np. konto, ktore zablokowalo bota - watek telefonu co 20 s nie zasypie
+    Historii tym samym bledem)."""
+    dzien = baza._dzis()
+    klucz = (baza.PLIK_DZIENNIKA, klucz)
+    if _WPISY_TELEFONU["dzien"] != dzien:
+        _WPISY_TELEFONU.update(dzien=dzien, wpisy=set())
+    if klucz in _WPISY_TELEFONU["wpisy"]:
+        return False
+    _WPISY_TELEFONU["wpisy"].add(klucz)
+    baza.dziennik_zapisz("uwaga", tekst, modelka=modelka)
+    return True
+
+
+def _konto_opis(a):
+    n = str(a.get("nazwa") or a.get("chat_id"))
+    return n if n.lstrip("-").isdigit() else "@" + n
+
+
 def wyslij_na_telefon(tekst):
-    """Tekst na sparowany czat (po cichu, gdy Telegram nie jest skonfigurowany/sparowany). Zwraca bool."""
+    """Tekst (alarm, raport, ostrzezenie) na czat glowny + sparowane konta dodatkowe - na kazde osobno, kazde raz. Blad jednego
+    konta nie blokuje reszty (wpis w dzienniku raz dziennie; blad sieci bez wpisu). Po cichu False, gdy Telegram nie jest
+    skonfigurowany/sparowany. Zwraca True, gdy doszlo choc na jedno konto."""
     tg = _telegram()
-    if not tg or not tg.sparowany():
+    if not tg:
         return False
     try:
-        tg.wyslij_tekst(tekst)
-        return True
+        lista, _ = tg.adresaci()
     except Exception as e:
-        baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem wiadomosci ({e})")
+        _log(f"telegram: {e}")
         return False
+    ok = False
+    for a in lista:
+        try:
+            tg.wyslij_tekst(tekst, chat_id=a["chat_id"])
+            ok = True
+        except tg.BladSieci as e:
+            _log(f"telegram: brak polaczenia - wiadomosc do {_konto_opis(a)} nie poszla ({e})")
+        except Exception as e:
+            _wpis_telefonu_raz(f"tekst:{a['chat_id']}:{str(e)[:60]}",
+                               f"telegram: nie wyslalem wiadomosci do {_konto_opis(a)} ({e})")
+    return ok
 
 
 def _dozwolone_czaty():
-    """Konta Telegram person z ustawien telegram_czat -> {"huy7128": "noemi"} (bot paruje tylko te i czat glowny)."""
+    """Konta Telegram person z ustawien telegram_czat -> {"huy7128": "noemi"} (bot paruje tylko te, konta dodatkowe
+    z ustawienia globalnego telegram_dodatkowe i czat glowny)."""
+    tg = _telegram()
+    if tg:
+        return tg.konta_person()
     wynik = {}
     for slug in baza.lista_modelek():
         konto = (baza.ustawienia_modelki(slug).get("telegram_czat") or "").strip().lstrip("@").lower()
         if konto:
-            wynik[konto] = slug
+            wynik.setdefault(konto, slug)
     return wynik
+
+
+def _autopilot_dziala():
+    """Czy petla autopilota (albo jego przebieg) wlasnie dziala - wtedy filmik z telefonu zrobi sie sam."""
+    return bool(STAN.get("petla") or STAN.get("trwa"))
 
 
 def persona_z_tekstu(tekst, domyslna=None):
@@ -150,16 +205,25 @@ def _status_tekst():
     return "\n".join(linie) or "Brak person."
 
 
-def raport_dnia(wymus=False):
-    """Podsumowanie dnia na telefon (raz dziennie po RAPORT_GODZINA, albo na /raport). Zwraca tekst albo None."""
+def raport_dnia(wymus=False, wyslij=True):
+    """Podsumowanie dnia na telefon - czat glowny + konta dodatkowe (raz dziennie po RAPORT_GODZINA, albo wymus=True).
+    wyslij=False (komenda /raport) = tylko tekst, odpowiedz idzie na czat pytajacego. Zwraca tekst albo None."""
     tg = _telegram()
-    if not tg or not tg.sparowany():
+    if not tg or not tg.adresaci()[0]:          # czat glowny albo choc jedno konto dodatkowe
         return None
     dzis = datetime.now().strftime("%Y-%m-%d")
-    s = tg.stan()
     if not wymus:
-        if s.get("ostatni_raport") == dzis or datetime.now().hour < int(s.get("raport_godzina") or RAPORT_GODZINA):
-            return None
+        with tg.blokada(CZEKAJ_NA_TELEFON_S) as moge:      # watek panelu i autopilot nie wysla raportu dwa razy
+            if not moge:
+                return None
+            s = tg.stan()
+            if s.get("ostatni_raport") == dzis or datetime.now().hour < int(s.get("raport_godzina") or RAPORT_GODZINA):
+                return None
+            return _raport_dnia(tg, dzis, wyslij)
+    return _raport_dnia(tg, dzis, wyslij)
+
+
+def _raport_dnia(tg, dzis, wyslij):
     linie = [f"Raport {dzis}:"]
     for slug in baza.lista_modelek():
         rolki = baza.pomysly_z_dnia(slug)
@@ -176,33 +240,55 @@ def raport_dnia(wymus=False):
     if bledy:
         linie.append(f"Problemy dzis: {len(bledy)} (szczegoly w panelu -> Historia)")
     tekst = "\n".join(linie)
-    if wyslij_na_telefon(tekst):
+    if wyslij and wyslij_na_telefon(tekst):
         tg.zapisz_stan(ostatni_raport=dzis)
     return tekst
+
+
+def _do_glownego(tg, tekst):
+    """Informacja tylko dla wlasciciela (czat glowny), np. "konto X sparowane". Bez czatu glownego / przy bledzie - nic."""
+    if not tg.sparowany():
+        return False
+    try:
+        tg.wyslij_tekst(tekst)
+        return True
+    except Exception as e:
+        _log(f"telegram: {e}")
+        return False
 
 
 def _obsluz_wiadomosc(tg, w, log):
     typ, tekst = w["typ"], (w.get("tekst") or "").strip()
     cid = w.get("chat_id")
     glowny = w.get("glowny", True)
+    dodatkowe = bool(w.get("dodatkowe")) and not glowny
     persona_czatu = w.get("persona")
 
     def odp(t):
-        tg.wyslij_tekst(t, chat_id=cid)     # odpowiadamy tam, skad przyszla wiadomosc (czat glowny albo konto persony)
+        tg.wyslij_tekst(t, chat_id=cid)     # odpowiadamy tam, skad przyszla wiadomosc (czat glowny, dodatkowe albo konto persony)
 
     if typ == "tekst":
         kom = tekst.split()[0].lower() if tekst else ""
-        if kom in ("/start", "/pomoc", "/help", "/menu"):
+        if kom == "/start":
+            konto = f"@{w.get('od')}" if w.get("od") else str(cid)
             if glowny:
-                odp("Sparowane - od teraz wysylam tu gotowe rolki.\n\n" + POMOC)
-            else:
-                odp(f"Sparowane - tu beda przychodzic gotowe rolki persony {persona_czatu or '?'}.\n\n" + POMOC)
+                odp("Polaczono - tu beda gotowe rolki, alarmy i raport dnia. /pomoc = komendy")
+            elif dodatkowe:
+                odp("Polaczono jako dodatkowe konto - dostaniesz gotowe rolki i alarmy"
+                    + (f" (i rolki persony {_nazwa(persona_czatu)})" if persona_czatu else ""))
                 if w.get("nowy"):
-                    wyslij_na_telefon(f"Konto @{w.get('od') or cid} sparowane - bedzie dostawac rolki persony {persona_czatu or '?'}.")
+                    _do_glownego(tg, f"Konto {konto} sparowane jako dodatkowe - dostanie gotowe rolki i alarmy.")
+            else:
+                odp(f"Polaczono z persona {_nazwa(persona_czatu) if persona_czatu else '?'}")
+                if w.get("nowy"):
+                    _do_glownego(tg, f"Konto {konto} sparowane z persona {_nazwa(persona_czatu) if persona_czatu else '?'} "
+                                     f"- bedzie dostawac jej gotowe rolki.")
+        elif kom in ("/pomoc", "/help", "/menu"):
+            odp(POMOC)
         elif kom == "/status":
             odp(_status_tekst())
         elif kom == "/raport":
-            odp(raport_dnia(wymus=True) or "Brak danych.")
+            odp(raport_dnia(wymus=True, wyslij=False) or "Brak danych.")
         elif kom == "/stop":
             if not glowny:
                 odp("Zatrzymac moze tylko czat glowny (telefon wlasciciela).")
@@ -220,6 +306,10 @@ def _obsluz_wiadomosc(tg, w, log):
             baza.dziennik_zapisz("info", "autopilot wznowiony z telefonu (/wznow)")
             odp("Wznowione. Robie dalej.")
         elif kom in ("/zdjecie", "/foto"):
+            if dodatkowe and not persona_czatu:
+                # zdjecie kosztuje kredyty - zamawia je tylko wlasciciel (czat glowny) albo konto persony
+                odp("Zdjecie moze zamowic tylko czat glowny albo konto persony.")
+                return {"typ": "komenda", "tekst": kom, "odmowa": True}
             slug = persona_z_tekstu(" ".join(tekst.split()[1:]), domyslna=persona_czatu)
             ust = baza.ustawienia_modelki(slug) if slug else {}
             if not slug or not ust.get("zdjecia_model"):
@@ -250,7 +340,11 @@ def _obsluz_wiadomosc(tg, w, log):
         tg.pobierz_plik(w["file_id"], cel)
         baza.dziennik_zapisz("info", f"z telefonu: {os.path.basename(cel)} -> wrzutnia {slug}", modelka=slug)
         log(f"telegram: {os.path.basename(cel)} -> {slug}")
-        odp(f"Mam: {os.path.basename(cel)} -> {slug}. Zrobie rolke i odesle, jak bedzie gotowa.")
+        if _autopilot_dziala():
+            odp(f"Mam: {os.path.basename(cel)} -> {slug}. Zrobie rolke i odesle, jak bedzie gotowa.")
+        else:
+            odp(f"Mam: {os.path.basename(cel)} -> {slug} (lezy we wrzutni). Autopilot jest wylaczony - rolke zrobisz w panelu "
+                f"(Zrob rolki), gotowa przyjdzie tutaj.")
         return {"typ": "wideo", "plik": cel, "modelka": slug}
 
     if typ == "audio":
@@ -293,47 +387,96 @@ def _obsluz_wiadomosc(tg, w, log):
     return {"typ": typ}
 
 
-def obsluz_telegram(log=None):
-    """Odbiera wiadomosci z telefonu: filmiki -> wrzutnia, glos -> lipsync, komendy. Zwraca liste obsluzonych."""
+def obsluz_telegram(log=None, w_tle=False):
+    """Odbiera wiadomosci z telefonu: parowanie (/start), filmiki -> wrzutnia, glos -> lipsync, komendy. Zwraca liste
+    obsluzonych. Pod `telegram.blokada`: autopilot czeka max CZEKAJ_NA_TELEFON_S na watek panelu (potem pomija krok - watek
+    odbierze sam), watek panelu (w_tle=True) nie czeka wcale i bledy odbioru rzuca w gore (cicha pauza w watku)."""
     log = log or _log
     tg = _telegram()
     if not tg:
         return []
-    try:
-        wiadomosci = tg.odbierz(dozwolone=_dozwolone_czaty())
-    except Exception as e:
-        log(f"telegram: nie moge odebrac ({e})")
-        return []
-    zrobione = []
-    for w in wiadomosci:
-        STAN["telegram_wiadomosci"] += 1
+    with tg.blokada(0 if w_tle else CZEKAJ_NA_TELEFON_S) as moge:
+        if not moge:
+            if not w_tle:
+                log("telegram: telefon obsluguje teraz watek panelu - pomijam odbior w tym przebiegu")
+            return []
         try:
-            zrobione.append(_obsluz_wiadomosc(tg, w, log))
+            wiadomosci = tg.odbierz(dozwolone=_dozwolone_czaty(), dodatkowe=tg.dodatkowe_konta())
         except Exception as e:
-            log(f"telegram: {e}")
-            baza.dziennik_zapisz("blad", f"telegram: {e}")
+            if w_tle:
+                raise
+            log(f"telegram: nie moge odebrac ({e})")
+            return []
+        zrobione = []
+        for w in wiadomosci:
+            STAN["telegram_wiadomosci"] += 1
             try:
-                tg.wyslij_tekst(f"Nie udalo sie: {e}", chat_id=w.get("chat_id"))
-            except Exception:
-                pass
+                zrobione.append(_obsluz_wiadomosc(tg, w, log))
+            except Exception as e:
+                log(f"telegram: {e}")
+                baza.dziennik_zapisz("blad", f"telegram: {e}")
+                try:
+                    tg.wyslij_tekst(f"Nie udalo sie: {e}", chat_id=w.get("chat_id"))
+                except Exception:
+                    pass
+    if w_tle and STAN.get("petla"):
+        # petla autopilota dziala: filmik odebrany przez watek panelu = "zrob to" w najblizszym przebiegu (jak przy odbiorze
+        # przez sam autopilot - takze dla persony bez wlaczonego autopilota)
+        with _odebrane_lock:
+            _ODEBRANE_W_TLE.extend(z for z in zrobione if z and z.get("typ") == "wideo" and z.get("modelka"))
     return zrobione
 
 
-def czat_persony(tg, slug, ust=None, log=None):
-    """Czat, na ktory leca gotowe rolki/zdjecia persony: konto z `telegram_czat` albo czat glowny.
-    Zwraca chat_id albo None (konto persony nie napisalo jeszcze /start - ostrzezenie raz na uruchomienie)."""
-    ust = ust or baza.ustawienia_modelki(slug)
-    cid, opis = tg.czat_dla(ust.get("telegram_czat"))
-    if cid:
-        return cid
+def _wez_odebrane_w_tle():
+    with _odebrane_lock:
+        wynik = list(_ODEBRANE_W_TLE)
+        _ODEBRANE_W_TLE.clear()
+    return wynik
+
+
+def telefon_w_tle(log=None):
+    """3.6.1: krok telefonu NIEZALEZNY od autopilota - wola go watek panelu co ODSTEP_TELEFONU_W_TLE_S: odbior (parowanie,
+    filmiki do wrzutni, komendy), gotowe rolki i zdjecia wszystkich person na telefon (czat glowny + konta dodatkowe + konto
+    persony) i raport dnia. Gdy autopilot robi wlasnie swoj krok telefonu (blokada zajeta) - nic nie robi i zwraca None.
+    Nic nie generuje samo (poza /zdjecie zamowionym z telefonu). Bledy sieci (telegram.BladSieci) i inne bledy odbioru ida w
+    gore - watek robi cicha pauze. Zwraca liste obsluzonych wiadomosci."""
+    log = log or _log
+    tg = _telegram()
+    if not tg:
+        return None
+    with tg.blokada(0) as moge:
+        if not moge:
+            return None
+        zrobione = obsluz_telegram(log, w_tle=True)
+        for slug in baza.lista_modelek():
+            wyslij_gotowe(slug, log=log, w_tle=True)
+            wyslij_zdjecia(slug, log=log, w_tle=True)
+        raport_dnia()
+        return zrobione
+
+
+def _ostrzez_konto_persony(slug, ust, opis, log=None):
+    """Konto persony (telegram_czat) nie napisalo jeszcze /start: ostrzezenie raz na uruchomienie (czat glowny + dodatkowe dostaja
+    rolki juz teraz, konto persony - gdy napisze /start)."""
     klucz = f"czat:{slug}:{(ust.get('telegram_czat') or '').strip().lower()}"
-    if klucz not in _OSTRZEZENIA:
-        _OSTRZEZENIA.add(klucz)
-        tekst = f"{slug}: rolki czekaja - {opis}. Z tego konta napisz /start do bota, wtedy wysle."
-        baza.dziennik_zapisz("uwaga", "telegram: " + tekst, modelka=slug)
-        (log or _log)("telegram: " + tekst)
-        wyslij_na_telefon(tekst)
-    return None
+    if klucz in _OSTRZEZENIA:
+        return
+    _OSTRZEZENIA.add(klucz)
+    tekst = (f"{slug}: rolki dla konta persony czekaja - {opis}. Z tego konta napisz /start do bota, wtedy wysle "
+             f"(czat glowny i konta dodatkowe dostaja je juz teraz).")
+    baza.dziennik_zapisz("uwaga", "telegram: " + tekst, modelka=slug)
+    (log or _log)("telegram: " + tekst)
+    wyslij_na_telefon(tekst)
+
+
+def adresaci_persony(tg, slug, ust=None, log=None):
+    """Kto dostaje gotowe rolki/zdjecia persony: czat glowny + sparowane konta dodatkowe + konto persony (`telegram_czat`),
+    kazde raz. Konto persony bez /start - ostrzezenie raz na uruchomienie, reszta dostaje dalej. Lista z telegram.adresaci."""
+    ust = ust or baza.ustawienia_modelki(slug)
+    lista, brak = tg.adresaci(ust.get("telegram_czat"))
+    if brak:
+        _ostrzez_konto_persony(slug, ust, brak, log)
+    return lista
 
 
 def _swiezy(p, godzin=24, pole="wygenerowano"):
@@ -347,45 +490,119 @@ def _swiezy(p, godzin=24, pole="wygenerowano"):
     return (datetime.now(timezone.utc) - t).total_seconds() < godzin * 3600
 
 
-def wyslij_gotowe(slug, log=None):
-    """Nowe gotowe rolki (jeszcze nie wyslane) -> telefon, z podpisem. Zwraca liczbe wyslanych."""
+def _dopisz(lista, cid):
+    lista = [str(x) for x in (lista or [])]
+    if str(cid) not in lista:
+        lista.append(str(cid))
+    return lista
+
+
+def _do_kogo(rzecz, adresaci, pole):
+    """Adresaci, ktorzy nie maja jeszcze tej rzeczy (lista chat_id w `pole`) i nie przekroczyli MAX_PROB_WYSYLKI nieudanych prob."""
+    juz = {str(c) for c in (rzecz.get(pole) or [])}
+    bledy = rzecz.get("telegram_bledy") or {}
+    return [a for a in adresaci if str(a["chat_id"]) not in juz and int(bledy.get(str(a["chat_id"]), 0) or 0) < MAX_PROB_WYSYLKI]
+
+
+def _wyslij_do(tg, adresaci, wyslij, sukces, rzecz, zapisz_bledy, opis, slug, log):
+    """Jedna rolka/zdjecie do kazdego adresata OSOBNO. Sukces = sukces(cid) od razu (przerwa nie wysle drugi raz temu samemu).
+    Blad jednego konta (np. zablokowal bota) = wpis w dzienniku + licznik `telegram_bledy`, reszta dostaje dalej (po
+    MAX_PROB_WYSYLKI probach to konto pomijamy). Blad sieci = telegram.BladSieci w gore (cicha pauza, nic nie liczymy).
+    Zwraca liczbe udanych wysylek."""
+    ile = 0
+    for a in adresaci:
+        cid = str(a["chat_id"])
+        try:
+            wyslij(a["chat_id"])
+        except tg.BladSieci:
+            raise
+        except Exception as e:
+            bledy = dict(rzecz.get("telegram_bledy") or {})
+            bledy[cid] = int(bledy.get(cid, 0) or 0) + 1
+            rzecz["telegram_bledy"] = bledy
+            zapisz_bledy(bledy)
+            log(f"telegram: nie wyslalem {opis} do {_konto_opis(a)}: {e}")
+            baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem {opis} do {_konto_opis(a)} ({e})"
+                                 + (" - wiecej nie probuje" if bledy[cid] >= MAX_PROB_WYSYLKI else ""), modelka=slug)
+            continue
+        sukces(cid)
+        ile += 1
+    return ile
+
+
+def _ma_lipsync(p):
+    return bool(p.get("lipsync_plik")) and os.path.isfile(p["lipsync_plik"])
+
+
+def _wersja_rolki(p):
+    """(plik, pole z lista chat_id, z_lipsynciem): wersja z dopasowanymi ustami, gdy jest, inaczej gotowa rolka."""
+    if _ma_lipsync(p):
+        return p["lipsync_plik"], "telegram_do_lipsync", True
+    return p.get("plik_wynikowy"), "telegram_do", False
+
+
+def _rolka_do_wyslania(p, w_tle=False):
+    """Gotowa (albo wygenerowana bez prania) rolka z ostatnich 24 h, ktorej ktos jeszcze nie dostal. Rolki wyslane przed 3.6.1
+    (telegram_wyslano bez listy telegram_do) sa zalatwione - nie wysylamy historii od nowa. Watek w tle (w_tle) nie bierze rolki
+    "wygenerowany" zmienionej w ciagu ODCZEKAJ_SUROWY_S - to moze byc surowy plik tuz przed Media Tool."""
+    if p.get("status") not in ("gotowe", "wygenerowany"):
+        return False
+    plik, pole, lip = _wersja_rolki(p)
+    if not plik or not os.path.isfile(plik):
+        return False
+    if not (_swiezy(p) or (lip and _swiezy(p, pole="zaktualizowano"))):
+        return False
+    if p.get("telegram_wyslano_lipsync" if lip else "telegram_wyslano") and pole not in p:
+        return False
+    if w_tle and p.get("status") == "wygenerowany" and _swiezy(p, godzin=ODCZEKAJ_SUROWY_S / 3600, pole="zaktualizowano"):
+        return False
+    return True
+
+
+def wyslij_gotowe(slug, log=None, w_tle=False):
+    """Nowe gotowe rolki -> telefon z podpisem: czat glowny + konta dodatkowe + konto persony (kazde raz, kazde osobno; blad
+    jednego nie blokuje reszty). Zwraca liczbe rolek, ktore poszly choc na jedno konto."""
     log = log or _log
     tg = _telegram()
     ust = baza.ustawienia_modelki(slug)
-    if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
+    if not tg or not ust.get("telegram_wysylaj"):
         return 0
-    def _ma_lipsync(p):
-        return bool(p.get("lipsync_plik")) and os.path.isfile(p["lipsync_plik"])
+    kandydaci = [p for p in baza.lista_pomyslow(slug) if _rolka_do_wyslania(p, w_tle)]
+    if not kandydaci:
+        return 0
+    with tg.blokada(0 if w_tle else CZEKAJ_NA_TELEFON_S) as moge:
+        if not moge:
+            return 0                 # telefon obsluguje teraz watek panelu - wysle sam
+        adresaci = adresaci_persony(tg, slug, ust, log)
+        if not adresaci:
+            return 0
+        ile = 0
+        for p0 in kandydaci:
+            p = baza.pomysl(slug, p0["id"])          # swieza kopia (pod blokada telefonu nikt inny nie wysyla)
+            if not _rolka_do_wyslania(p, w_tle):
+                continue
+            plik, pole, z_lipsynciem = _wersja_rolki(p)
+            do = _do_kogo(p, adresaci, pole)
+            if not do:
+                continue
+            podpis = (p.get("podpis") or "").strip()
+            tekst = f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "") \
+                + f" · {os.path.basename(plik)}" + (f"\n\n{podpis}" if podpis else "")
 
-    # nowa gotowa rolka albo rolka, ktora dostala wersje z dopasowanymi ustami (lipsync robiony recznie, pozniej)
-    do_wyslania = [p for p in baza.lista_pomyslow(slug)
-                   if p["status"] in ("gotowe", "wygenerowany")
-                   and ((not p.get("telegram_wyslano") and _swiezy(p))
-                        or (_ma_lipsync(p) and not p.get("telegram_wyslano_lipsync") and _swiezy(p, pole="zaktualizowano")))]
-    if not do_wyslania:
-        return 0
-    cid = czat_persony(tg, slug, ust, log)
-    if not cid:
-        return 0
-    ile = 0
-    for p in do_wyslania:
-        z_lipsynciem = _ma_lipsync(p)
-        plik = p["lipsync_plik"] if z_lipsynciem else p.get("plik_wynikowy")
-        if not plik or not os.path.isfile(plik):
-            continue
-        podpis = (p.get("podpis") or "").strip()
-        tekst = f"{slug} · rolka #{p['id']}" + (" · z dopasowanymi ustami" if z_lipsynciem else "") + f" · {os.path.basename(plik)}" \
-            + (f"\n\n{podpis}" if podpis else "")
-        try:
-            tg.wyslij_wideo(plik, tekst, chat_id=cid)
-            baza.aktualizuj_pomysl(slug, p["id"], telegram_wyslano=True, **({"telegram_wyslano_lipsync": True} if z_lipsynciem else {}))
-            ile += 1
-            log(f"telegram: wyslalem #{p['id']} ({os.path.basename(plik)})")
-        except Exception as e:
-            log(f"telegram: nie wyslalem #{p['id']}: {e}")
-            baza.dziennik_zapisz("uwaga", f"telegram: nie wyslalem rolki #{p['id']} ({e})", modelka=slug)
-            break
-    return ile
+            def sukces(cid, p=p, z_lipsynciem=z_lipsynciem):
+                pola = {"telegram_wyslano": True, "telegram_do": _dopisz(p.get("telegram_do"), cid)}
+                if z_lipsynciem:
+                    pola.update(telegram_wyslano_lipsync=True, telegram_do_lipsync=_dopisz(p.get("telegram_do_lipsync"), cid))
+                p.update(pola)
+                baza.aktualizuj_pomysl(slug, p["id"], **pola)
+
+            n = _wyslij_do(tg, do, lambda cid, plik=plik, tekst=tekst: tg.wyslij_wideo(plik, tekst, chat_id=cid), sukces, p,
+                           lambda bledy, p=p: baza.aktualizuj_pomysl(slug, p["id"], telegram_bledy=bledy),
+                           f"rolki #{p['id']}", slug, log)
+            if n:
+                ile += 1
+                log(f"telegram: wyslalem #{p['id']} ({os.path.basename(plik)}) na {n} " + ("konto" if n == 1 else "konta"))
+        return ile
 
 
 def porzadki(log=None):
@@ -434,33 +651,54 @@ def porzadki(log=None):
     return wynik
 
 
-def wyslij_zdjecia(slug, log=None):
-    """Nowe gotowe zdjecia (dzisiejsze, nie wyslane) -> telefon. Zwraca liczbe wyslanych."""
+def wyslij_zdjecia(slug, log=None, w_tle=False):
+    """Nowe gotowe zdjecia (dzisiejsze) -> telefon: czat glowny + konta dodatkowe + konto persony (kazde raz, kazde osobno).
+    Zwraca liczbe zdjec, ktore poszly choc na jedno konto."""
     log = log or _log
     tg = _telegram()
     ust = baza.ustawienia_modelki(slug)
-    if not tg or not tg.sparowany() or not ust.get("telegram_wysylaj"):
+    if not tg or not ust.get("telegram_wysylaj"):
         return 0
-    do_wyslania = [z for z in baza.zdjecia_z_dnia(slug) if not z.get("telegram_wyslano") and z.get("plik") and os.path.isfile(z["plik"])]
-    if not do_wyslania:
+
+    def do_wyslania(z):
+        # wyslane przed 3.6.1 (telegram_wyslano bez listy telegram_do) - zalatwione
+        return bool(z.get("plik")) and os.path.isfile(z["plik"]) and not (z.get("telegram_wyslano") and "telegram_do" not in z)
+    kandydaci = [z for z in baza.zdjecia_z_dnia(slug) if do_wyslania(z)]
+    if not kandydaci:
         return 0
-    cid = czat_persony(tg, slug, ust, log)
-    if not cid:
-        return 0
-    ile = 0
-    for z in do_wyslania:
-        try:
+    with tg.blokada(0 if w_tle else CZEKAJ_NA_TELEFON_S) as moge:
+        if not moge:
+            return 0
+        adresaci = adresaci_persony(tg, slug, ust, log)
+        if not adresaci:
+            return 0
+        import zdjecia as _zdj
+        ile = 0
+        for z0 in kandydaci:
+            try:
+                z = baza.zdjecie(slug, z0["id"])
+            except ValueError:
+                continue
+            if not do_wyslania(z):
+                continue
+            do = _do_kogo(z, adresaci, "telegram_do")
+            if not do:
+                continue
             # podmiana postaci (swap): krotki opis zamiast dlugiego angielskiego promptu
             opis = z.get("opis") if z.get("typ") == "swap" else z.get("prompt")
-            tg.wyslij_zdjecie(z["plik"], f"{slug} · zdjecie #{z['id']}" + (" · strój" if z.get("stroj") else "") + f"\n{opis or ''}".rstrip(),
-                              chat_id=cid)
-            import zdjecia as _zdj
-            _zdj._ustaw(slug, z["id"], telegram_wyslano=True)
-            ile += 1
-        except Exception as e:
-            log(f"telegram: nie wyslalem zdjecia #{z['id']}: {e}")
-            break
-    return ile
+            tekst = f"{slug} · zdjecie #{z['id']}" + (" · strój" if z.get("stroj") else "") + f"\n{opis or ''}".rstrip()
+
+            def sukces(cid, z=z):
+                pola = {"telegram_wyslano": True, "telegram_do": _dopisz(z.get("telegram_do"), cid)}
+                z.update(pola)
+                _zdj._ustaw(slug, z["id"], **pola)
+
+            n = _wyslij_do(tg, do, lambda cid, z=z, tekst=tekst: tg.wyslij_zdjecie(z["plik"], tekst, chat_id=cid), sukces, z,
+                           lambda bledy, z=z: _zdj._ustaw(slug, z["id"], telegram_bledy=bledy),
+                           f"zdjecia #{z['id']}", slug, log)
+            if n:
+                ile += 1
+        return ile
 
 
 # ---------------- rolki z promptu (3.3): autopilot sam robi rolki bez filmikow ----------------
@@ -1137,7 +1375,8 @@ def przebieg_wszystkich(tylko=None, log=None, stop=None):
     STAN["trwa"] = True
     try:
         STAN["etap"] = "telefon"
-        z_telefonu = obsluz_telegram(log)
+        # + filmiki, ktore w miedzyczasie odebral watek telefonu panelu (3.6.1) - tez "zrob to"
+        z_telefonu = obsluz_telegram(log) + _wez_odebrane_w_tle()
         if not (stop is not None and stop.is_set()):
             # 3.5: rolki i zdjecia w toku WSZYSTKICH person (takze bez autopilota) - ten sam job, 0 kr
             dokoncz_w_toku_wszystkich(log=log or _log, stop=stop, tylko=tylko)
@@ -1205,6 +1444,16 @@ def petla(tylko=None, log=None, stop=None, co_minut=None, przebieg_fn=None):
     log = log or _log
     stop = stop or threading.Event()
     przebieg_fn = przebieg_fn or (lambda log, stop: przebieg_wszystkich(tylko, log=log, stop=stop))
+    STAN["petla"] = True
+    try:
+        _petla(tylko, log, stop, co_minut, przebieg_fn)
+    finally:
+        STAN["petla"] = False
+        with _odebrane_lock:
+            _ODEBRANE_W_TLE.clear()
+
+
+def _petla(tylko, log, stop, co_minut, przebieg_fn):
     while not stop.is_set():
         modelki = modelki_z_autopilotem(tylko)
         z_promptu = not tylko and ustawienia_z_promptu()["dziennie"] > 0      # rolki z promptu nie potrzebuja filmikow ani person z autopilot
