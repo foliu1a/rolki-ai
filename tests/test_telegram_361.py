@@ -13,6 +13,13 @@ from dostawcy import http, telegram
 from test_telegram_autopilot import bez_ffmpeg, tg  # noqa: F401 - fixtury (udawany Telegram, bez ffmpeg)
 
 
+@pytest.fixture(autouse=True)
+def bez_raportu_dnia(monkeypatch):
+    """Raport dnia idzie po 20:00 lokalnie - w testach watku nie moze dorzucac wiadomosci zaleznie od godziny
+    (testy padaly wieczorem: o jedna wiadomosc wiecej). Raport ma wlasne testy."""
+    monkeypatch.setattr(autopilot, "RAPORT_GODZINA", 99)
+
+
 def _wiad(tg, chat_id, username, **msg):
     uid = len(tg.updates) + 1
     tg.updates.append({"update_id": uid, "message": dict({"chat": {"id": chat_id, "username": username},
