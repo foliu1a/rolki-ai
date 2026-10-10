@@ -20,4 +20,6 @@ ROLKI AI – PRZENIESIENIE NA INNY KOMPUTER (ok. 15 minut)
 WAŻNE
 - AUTOPILOT na nowym komputerze startuje WYŁĄCZONY. Włączaj go tylko na JEDNYM komputerze naraz
   (te same konta = podwójne rolki i podwójne wydatki).
+- TELEGRAM (bot @rolkipilot_bot): token wklejaj tylko na JEDNYM komputerze naraz – dwa komputery z tym samym
+  botem kłócą się o wiadomości (podwójne rolki na telefonie). Na drugim komputerze zostaw pole Telegram puste.
 - Panel ma startować razem z Windowsem? Kliknij autostart.bat (opcjonalnie).
